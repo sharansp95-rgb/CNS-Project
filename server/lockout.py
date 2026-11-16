@@ -41,7 +41,13 @@ Two independent mechanisms:
 
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+from sqlalchemy import delete, insert, select, update
+try:
+    from .db import get_database, login_lockouts
+except ImportError:
+    from db import get_database, login_lockouts
 
 DEFAULT_THRESHOLD = 5
 DEFAULT_WINDOW_SECONDS = 300          # failures must fall within this window to count
@@ -58,18 +64,8 @@ class LockStatus:
     lock_level: int = 0            # which backoff tier was used (0-indexed)
 
 
-@dataclass
-class _UserState:
-    failures: list = field(default_factory=list)   # [(timestamp, addr), ...]
-    lock_level: int = 0
-    locked_until: float = 0.0
-
-
 class LockoutGuard:
-    """Thread-safe, in-memory (per server process) lockout + rate limiter.
-    Deliberately not persisted to disk: a server restart clearing lockouts
-    is an acceptable, documented trade-off for a course project's single
-    relay server (see README's "Known limitations")."""
+    """Persistent per-account lockout; source-address limits remain per process."""
 
     def __init__(self, threshold=DEFAULT_THRESHOLD, window=DEFAULT_WINDOW_SECONDS,
                  backoff_schedule=DEFAULT_BACKOFF_SCHEDULE,
@@ -80,7 +76,7 @@ class LockoutGuard:
         self.addr_limit = addr_limit
         self.addr_window = addr_window
         self._lock = threading.Lock()
-        self._by_user = {}       # username -> _UserState
+        self.database = get_database()
         self._by_addr = {}       # addr -> [timestamp, ...]
 
     # --- per-account lockout -------------------------------------------------
@@ -90,50 +86,62 @@ class LockoutGuard:
         The caller checks this BEFORE verifying a password, so a locked
         account's PBKDF2 is never run."""
         now = time.time() if now is None else now
-        with self._lock:
-            st = self._by_user.get(username)
-            if st is None or st.locked_until <= now:
-                return LockStatus(locked=False)
-            return LockStatus(locked=True, retry_after=st.locked_until - now,
-                              lock_level=max(st.lock_level - 1, 0))
+        with self.database.engine.connect() as conn:
+            st = conn.execute(select(login_lockouts).where(
+                login_lockouts.c.username == username)).mappings().first()
+        if st is None or st["locked_until"] <= now:
+            return LockStatus(locked=False)
+        return LockStatus(locked=True, retry_after=st["locked_until"] - now,
+                          lock_level=max(st["lock_level"] - 1, 0))
 
     def record_failure(self, username, addr=None, now=None):
-        """Record one failed login for `username` (only called for an
-        account that `status()` just confirmed is NOT currently locked).
-        Returns the resulting LockStatus; `newly_locked` is True exactly on
-        the call that pushed the account over the threshold."""
+        """Persist the exact sliding-window streak and escalating backoff tier."""
         now = time.time() if now is None else now
-        with self._lock:
-            st = self._by_user.setdefault(username, _UserState())
-            st.failures = [(t, a) for t, a in st.failures if now - t <= self.window]
-            st.failures.append((now, addr))
-            if len(st.failures) < self.threshold:
-                return LockStatus(locked=False)
-            tier = min(st.lock_level, len(self.backoff_schedule) - 1)
-            duration = self.backoff_schedule[tier]
-            st.locked_until = now + duration
-            st.lock_level += 1
-            st.failures = []  # this lockout "spends" the streak that triggered it
-            return LockStatus(locked=True, retry_after=duration, newly_locked=True,
-                              lock_level=tier)
+        with self.database.transaction() as conn:
+            st = conn.execute(select(login_lockouts).where(
+                login_lockouts.c.username == username)).mappings().first()
+            # A concurrent failure may already have locked this account.
+            if st and st["locked_until"] > now:
+                return LockStatus(locked=True, retry_after=st["locked_until"] - now,
+                                  lock_level=max(st["lock_level"] - 1, 0))
+            failures = [t for t in (st["failure_timestamps"] if st else [])
+                        if now - t <= self.window]
+            failures.append(now)
+            level = st["lock_level"] if st else 0
+            until = st["locked_until"] if st else 0.0
+            result = LockStatus(locked=False)
+            if len(failures) >= self.threshold:
+                tier = min(level, len(self.backoff_schedule) - 1)
+                duration = self.backoff_schedule[tier]
+                until = now + duration
+                level += 1
+                failures = []
+                result = LockStatus(locked=True, retry_after=duration,
+                                    newly_locked=True, lock_level=tier)
+            values = dict(failure_count=len(failures), locked_until=until,
+                          last_failure_at=now, lock_level=level,
+                          failure_timestamps=failures)
+            if st:
+                conn.execute(update(login_lockouts).where(
+                    login_lockouts.c.username == username).values(**values))
+            else:
+                conn.execute(insert(login_lockouts).values(username=username, **values))
+        return result
 
     def record_success(self, username):
-        """A successful login resets this username's failures and lock
-        level entirely (but does not touch other usernames or addresses)."""
-        with self._lock:
-            self._by_user.pop(username, None)
+        """Reset failures and backoff tier on successful login."""
+        with self.database.transaction() as conn:
+            conn.execute(delete(login_lockouts).where(login_lockouts.c.username == username))
 
     def locked_accounts(self, now=None):
-        """[{"username", "locked_until", "remaining", "lock_level"}, ...]
-        for every currently-locked account -- used by the security
-        dashboard. Read-only; does not mutate state."""
+        """Read currently locked accounts, including locks from earlier processes."""
         now = time.time() if now is None else now
-        with self._lock:
-            return [
-                {"username": u, "locked_until": st.locked_until,
-                 "remaining": max(0.0, st.locked_until - now), "lock_level": st.lock_level}
-                for u, st in self._by_user.items() if st.locked_until > now
-            ]
+        with self.database.engine.connect() as conn:
+            rows = conn.execute(select(login_lockouts).where(
+                login_lockouts.c.locked_until > now)).mappings().all()
+        return [{"username": st["username"], "locked_until": st["locked_until"],
+                 "remaining": st["locked_until"] - now, "lock_level": st["lock_level"]}
+                for st in rows]
 
     # --- per-source-address rate limit ---------------------------------------
 

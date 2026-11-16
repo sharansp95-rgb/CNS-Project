@@ -1,4 +1,4 @@
-"""Append-only structured security event log.
+"""Database security events with an append-only JSONL dashboard mirror.
 
 Events are JSON lines in logs/security_events.jsonl (gitignored -- see
 .gitignore): one compact JSON object per line, each carrying at least `ts`
@@ -14,10 +14,33 @@ reasons). gui/security_dashboard.py reads this file read-only and never
 connects to the server.
 """
 
+import hashlib
 import json
 import os
 import threading
 import time
+
+from sqlalchemy import func, insert, select
+try:
+    from .db import get_database, security_events
+except ImportError:
+    from db import get_database, security_events
+
+
+def event_digest(record):
+    return hashlib.sha256(json.dumps(record, sort_keys=True, default=str,
+                                     separators=(",", ":")).encode()).hexdigest()
+
+
+def store_event(conn, record, import_key=None):
+    """Write the same structured metadata as JSONL, never a raw envelope."""
+    record = json.loads(json.dumps(record, default=str))
+    details = {k: v for k, v in record.items() if k not in ("ts", "event")}
+    conn.execute(insert(security_events).values(
+        ts=record["ts"], event_type=record["event"],
+        username=record.get("username") or record.get("from_user") or record.get("reported_by"),
+        peer_addr=record.get("from_addr"), details=details, import_key=import_key))
+
 
 DEFAULT_LOG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "security_events.jsonl")
@@ -35,6 +58,11 @@ def log_event(event: str, path: str = DEFAULT_LOG_PATH, **fields) -> dict:
     record.update(fields)
     line = json.dumps(record, sort_keys=True, default=str)
     with _lock:
+        with get_database().transaction() as conn:
+            digest = event_digest(record)
+            ordinal = conn.execute(select(func.count()).select_from(security_events).where(
+                security_events.c.import_key.like(digest + ":%"))).scalar_one()
+            store_event(conn, record, f"{digest}:{ordinal + 1}")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")

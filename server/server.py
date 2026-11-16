@@ -78,9 +78,11 @@ from crypto_engine.signatures import sign  # noqa: E402
 # so the sibling modules must be imported top-level there; imported as part
 # of the `server` package (tests, demos) they come from the package.
 try:
+    from db import get_database, record_relay
     from lockout import LockoutGuard
     from security_log import log_event
 except ImportError:
+    from server.db import get_database, record_relay
     from server.lockout import LockoutGuard  # noqa: E402
     from server.security_log import log_event  # noqa: E402
 from transport import LockedTLSSocket  # noqa: E402
@@ -193,6 +195,7 @@ class ChatServer:
         # restarting it) is diagnosable by comparing fingerprints, instead of
         # a bare CERTIFICATE_VERIFY_FAILED that gives no hint why.
         self.cert_fingerprint = cert_fingerprint_from_file(certfile)
+        self.database = get_database()  # create/check schema before accepting clients
         # username -> conn (the TLS-wrapped socket). Guarded by _lock: every
         # client thread mutates it on join/leave and reads it on every
         # route/broadcast.
@@ -299,6 +302,7 @@ class ChatServer:
                     f"[!] {to_name} is not online -- message not delivered.",
                 )
             return
+        record_relay(envelope, sender_name, self.database)
         self._send(target, envelope)
 
     def _handle_lab_control(self, conn, addr, name, envelope):

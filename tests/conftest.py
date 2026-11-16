@@ -96,12 +96,12 @@ def _test_certs():
 
 @pytest.fixture(autouse=True)
 def isolated_state(tmp_path, monkeypatch):
-    """Per-test private user store, key directory and security log."""
-    store = str(tmp_path / "users.json")
+    """Per-test SQLite database, key directory and JSONL security mirror.
+
+    DATABASE_URL is inherited by script-mode subprocesses as well.
+    """
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///" + str(tmp_path / "securechat.db"))
     keys_dir = str(tmp_path / "keys")
-    for name in ("register_user", "verify_user", "get_public_key"):
-        monkeypatch.setattr(server_module, name,
-                            functools.partial(getattr(server_module, name), path=store))
     for module in (client_module, dc):
         monkeypatch.setattr(module, "save_private_key",
                             functools.partial(module.save_private_key, keys_dir=keys_dir))
@@ -112,7 +112,9 @@ def isolated_state(tmp_path, monkeypatch):
     real_log_event = security_log.log_event
     monkeypatch.setattr(server_module, "log_event",
                         lambda event, **fields: real_log_event(event, path=log_path, **fields))
-    return log_path
+    yield log_path
+    from server.db import dispose_databases
+    dispose_databases()
 
 
 @pytest.fixture()

@@ -6,7 +6,7 @@
 >
 > | Measured (see [Evaluation results](#evaluation-results)) | |
 > |---|---|
-> | Automated tests | **348 passing** |
+> | Automated tests | **361 passed, 6 pre-existing GUI failures** |
 > | Attacks detected (tamper, replay, drop, MITM, edited evidence, password burst; 20 each) | **120 / 120**, 0 false rejections in 200 normal messages |
 > | End-to-end message latency (real TLS server, loopback) | **~1.2 ms** median (requirement: < 1 s) |
 >
@@ -31,7 +31,7 @@ to broker keys), derives a fresh AES-256-GCM session key, signs and encrypts eve
 message with it, wraps the whole client↔server connection in TLS, gates every
 connection behind a PBKDF2-hashed login, rejects replayed or tampered messages, detects
 a relay dropping or reordering messages via a hash-chained conversation log, and locks
-out repeated failed logins — all properties backed by 348 automated tests and five
+out repeated failed logins — all properties covered by the automated suite (367 tests) and five
 live attack-and-defense demo scripts, plus a Tkinter GUI whose "Wire Log" panel makes
 the cryptography visible during a demo instead of invisible, an opt-in **Attack Lab**
 that triggers those same attacks for real with one click, and a live **Security
@@ -106,6 +106,80 @@ who's never run it before should do, live in front of the professor), see
 to open its **security receipt**, and use **Export Evidence** (top bar) to write a
 signed evidence file you can check with `python tools/verify_transcript.py`.
 
+## Database
+
+Install the pinned dependencies with `.venv/bin/python -m pip install -r requirements.txt`
+(or `uv pip install --python .venv/bin/python -r requirements.txt` when using a uv-created
+virtualenv). SQLAlchemy 2.x uses SQLite locally and psycopg 3 for PostgreSQL.
+Starting `python server/server.py` (also via `demo/start_demo.sh`) creates the tables
+automatically; no database service is required for SQLite.
+
+The default URL is `sqlite:///<absolute-project-path>/data/securechat.db`, independent
+of the working directory. Override it before starting the server or migration tool:
+
+```sh
+export DATABASE_URL='sqlite:////absolute/path/to/securechat.db'
+# Deployment alternative (provision the PostgreSQL database/user separately):
+export DATABASE_URL='postgresql+psycopg://user:password@localhost:5432/securechat'
+```
+
+For an existing installation, stop the old relay and import the legacy files **before
+logging in** (new installations need no import):
+
+```sh
+.venv/bin/python tools/migrate_json_to_db.py
+# Optional source/target overrides:
+.venv/bin/python tools/migrate_json_to_db.py --users /path/users.json \
+  --events /path/security_events.jsonl --database-url sqlite:////path/securechat.db
+```
+
+The tool prints imported/skipped counts, preserves encoded PBKDF2 hashes exactly,
+never replaces an existing database account, leaves source files untouched, and is
+safe to rerun. Identical repeated event lines are preserved, while reruns and events
+already written to both SQL and JSONL are not duplicated. Missing source files are
+allowed; malformed input aborts the import. Previous in-memory lockout state cannot
+be recovered from the old process.
+
+Schema v1 uses these tables (timestamps are UTC Unix seconds):
+
+| Table | Columns |
+|---|---|
+| `users` | `username` TEXT PK, `password_hash` TEXT, `public_key_pem` TEXT nullable, `created_at` FLOAT |
+| `login_lockouts` | `username` TEXT PK, `failure_count` INTEGER, `locked_until` FLOAT, `last_failure_at` FLOAT nullable, `lock_level` INTEGER, `failure_timestamps` JSON |
+| `security_events` | `id` INTEGER auto PK, `ts` FLOAT indexed, `event_type` TEXT, `username` TEXT nullable, `peer_addr` TEXT nullable, `details` JSON, `import_key` VARCHAR(100) nullable UNIQUE |
+| `relayed_envelopes` | `id` INTEGER auto PK, `ts` FLOAT indexed, `sender` TEXT, `recipient` TEXT nullable, `envelope_type` TEXT, `size_bytes` INTEGER, `ciphertext_b64` TEXT nullable |
+| `schema_version` | `version` INTEGER PK (currently `1`) |
+
+All columns are required unless marked nullable. Lockouts also cover unknown usernames,
+so they deliberately have no user foreign key; routing/event history likewise has no
+account-deletion dependency. Failure timestamps preserve the exact sliding window,
+and `lock_level` preserves exponential backoff across restarts.
+
+A version table plus SQLAlchemy `create_all` keeps this initial schema simple without
+Alembic scaffolding. An unsupported version stops startup; `create_all` does not alter
+existing tables. Future phases must supply explicit versioned migrations for schema
+changes. Short write transactions are serialized with SQLite `BEGIN IMMEDIATE` or a
+PostgreSQL transaction advisory lock, including concurrent registrations, lockout
+updates and retention pruning. This prioritizes correctness for a single relay;
+write throughput should be revisited before scaling.
+
+`SECURECHAT_STORE_ENVELOPES=0` disables new relay-history rows (default `1`, enabled).
+`SECURECHAT_ENVELOPE_MAX_ROWS` sets the positive row cap (default `10000`); each insert
+prunes the oldest IDs in the same transaction. Lowering the cap takes effect on the
+next enabled insert; disabling capture does not erase existing rows. Only online
+chat/handshake forwarding is recorded: sender, recipient, type, time and serialized
+byte size, plus validated base64 ciphertext for chat. Handshake ciphertext is NULL;
+public handshake keys/signatures and arbitrary extra envelope fields are not archived.
+This is an audit history, not offline delivery or a plaintext transcript.
+
+Security events also continue to append to `logs/security_events.jsonl` because the
+read-only Security Dashboard tails that file. Keep the mirror for the dashboard;
+SQL is the durable event store, and JSONL is a separate write, not an atomic part of
+the SQL transaction. Deleting the mirror hides its history from the dashboard.
+No plaintext chats, passwords, private keys or session keys enter the database.
+`data/`, `logs/`, local keys and exports remain gitignored. Demo scripts and the
+security evaluation harness use temporary databases.
+
 ## Architecture
 
 Two clients, one relay server, TLS wrapping every connection, and an inner
@@ -148,9 +222,9 @@ Said out loud, not buried — these are the honest edges of this project's scope
   the GUI does not expose a button that fires repeated login attempts at a named
   account, even against one's own test account. See it live instead by running a
   handful of deliberate wrong-password **Login** attempts in a GUI window.
-- **Login lockout state is in memory only**, per `server/lockout.py`'s docstring: a
-  server restart clears every lock and failure count. Acceptable for a single
-  course-project relay server; a production system would persist it.
+- **Per-address request limits remain in memory.** Account lockouts, failure windows
+  and backoff tiers persist in the database across server restarts; the separate
+  per-source-address limiter resets on restart.
 - **The register/login password is not protected beyond TLS.** The AES-GCM/RSA layer
   only exists between two chat *peers*, after a handshake; it doesn't cover the
   client↔server login exchange, which relies entirely on TLS. If the server itself
@@ -185,10 +259,9 @@ Said out loud, not buried — these are the honest edges of this project's scope
 - **Non-repudiation is the opposite of deniability.** By design, a participant cannot
   later deny having sent a signed message. That is the point for audit use cases, and
   a drawback for anything needing deniability.
-- **Single relay server, no redundancy, no persistence beyond a local JSON file** —
-  this is a course project demonstrating the cryptography, not a deployable service
-  (no horizontal scaling, no database, no rate limiting, no replay-window
-  synchronization across multiple server instances).
+- **Single relay server, no redundancy.** Accounts, lockouts, security events and
+  bounded ciphertext history persist in SQL, but online rosters, source-address limits
+  and client replay windows are not synchronized for horizontal deployment.
 - **Wireshark capture is a single short session** (`demo/capture_normal_session.pcapng`),
   not a comprehensive traffic sample — see `demo/capture_instructions.md` if you want
   to record a longer one.
@@ -266,7 +339,7 @@ Measured, not claimed: `tools/evaluate_security.py` drives the real code against
 
 | Measure | Result |
 |---|---|
-| Test suite | 348 / 348 pass |
+| Test suite (historical pre-DB evaluation) | 348 / 348 pass; current run below |
 | Attacks detected (tamper, replay, drop, MITM key swap, edited evidence, wrong-password burst; 20 each) | 120 / 120 (100%) |
 | False rejections on 200 normal messages | 0 (0.0%) |
 | End-to-end message latency through the real TLS server | median 1.2 ms, p95 1.4 ms |
@@ -312,7 +385,19 @@ pytest tests/ -v
 
 Keyboard-focus GUI tests on Linux require a running window manager.
 
-348 tests across 27 files (the first seven one per project phase): `test_aes_gcm.py`
+Database-phase validation on this machine (2026-11-16), using
+`.venv/bin/python -m pytest tests/ -q`: **before: 346 passed, 6 failed (352 total)**;
+**after: 361 passed, 6 failed (367 total)**. All 15 new database tests pass, including
+real TLS server restart lockout persistence, database uniqueness, a full encrypted
+chat round trip scanning every table/column for plaintext, idempotent migration,
+URL overrides, retention and concurrent writes. The same six pre-existing GUI tests
+fail before and after: Attack Lab size, network legend width, dashboard tile width,
+dashboard header width, login progress timing, and receipt size. No existing test
+assertions were changed. Docker is not installed, so PostgreSQL DDL compilation and
+psycopg loading were checked, but a live PostgreSQL test run was not possible.
+The historical evaluation tables/screenshots below are not DB-phase benchmarks.
+
+367 tests across 29 test files, including 15 database tests (the first seven one per project phase): `test_aes_gcm.py`
 (encryption), `test_dh_exchange.py` (key exchange), `test_password_hash.py` (login),
 `test_signatures.py` (non-repudiation), `test_handshake_auth.py` (signed-handshake
 MITM fix), `test_replay_protection.py` (replay defenses), `test_tls_setup.py`
@@ -382,8 +467,8 @@ every message is signed, AES-256-GCM encrypted before it leaves the client, and
 decrypted + signature-verified on arrival.
 
 Registered accounts (PBKDF2 password hashes and RSA public keys only) persist in
-`data/users.json`; each account's RSA private key is saved separately as
-`data/keys/<username>_private.pem`. Both `data/users.json` and `data/keys/` are
+`data/securechat.db` by default; each account's RSA private key is saved separately as
+`data/keys/<username>_private.pem`. The entire `data/` directory is
 gitignored since they hold real credentials and private key material from local
 testing.
 
@@ -414,7 +499,7 @@ This detects a leftover process on the server's port (asking before killing anyt
 it never kills silently), regenerates `certs/server.crt`/`server.key`, and prints the
 new fingerprint. Restart the server (`python server/server.py`) and confirm its
 startup line shows that *same* fingerprint before launching any clients. It does not
-touch `data/users.json` or `data/keys/` — registered accounts and identity keys are
+touch `data/securechat.db` or `data/keys/` — registered accounts and identity keys are
 unaffected by a cert reset.
 
 Or manually: stop the server (Ctrl+C its terminal), regenerate certs
@@ -676,7 +761,7 @@ assert not verify_password("wrong guess", stored)
 ```
 
 `server/user_store.py` persists only that encoded hash string per username, in
-`data/users.json` — the plaintext password is never written to disk.
+the `users` database table — the plaintext password is never written to disk.
 
 `crypto_engine/signatures.py` — RSA-2048 signatures, RSA-PSS padding + SHA-256, with
 PEM (de)serialization helpers and the `fingerprint()` helper:

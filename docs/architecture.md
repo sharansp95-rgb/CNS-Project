@@ -39,7 +39,7 @@ flowchart LR
 
     subgraph Server["server/server.py (relay)"]
         S_Route["Envelope router\n(register/login/handshake/chat by 'to' field)"]
-        S_Store["server/user_store.py\ndata/users.json:\n- PBKDF2 password hash\n- RSA PUBLIC key only"]
+        S_Store["server/db.py (SQLAlchemy)\nSQLite / PostgreSQL:\n- PBKDF2 hashes + RSA PUBLIC keys\n- durable lockouts + security events\n- bounded ciphertext + routing history"]
         S_Route --- S_Store
     end
 
@@ -57,6 +57,9 @@ flowchart LR
 
 ## What the server CAN see
 
+These values now also feed the SQL persistence described under
+[What the server stores](#what-the-server-stores); no end-to-end decryption is added.
+
 - Usernames and the routing metadata of every envelope (who is talking to whom, and
   when — it decides delivery by the `to` field).
 - Each user's PBKDF2 password *hash* (never the plaintext password — see
@@ -72,6 +75,38 @@ flowchart LR
   not from the server itself. A password is the one piece of data that has no
   additional application-layer protection beyond TLS — see "Known limitations" in the
   main [README.md](../README.md).
+
+## What the server stores
+
+`server/db.py` creates schema v1 on startup, selected by `DATABASE_URL` (default:
+`data/securechat.db`; PostgreSQL uses `postgresql+psycopg://...`). The shared SQLAlchemy
+Core schema and transaction adapter can be reused by later transports without changing
+client cryptography. See [Database](../README.md#database) for the full column schema,
+configuration, migration commands and versioning policy.
+
+- `users`: the existing PBKDF2 encoded hashes, RSA public PEM keys, usernames and
+  account creation timestamps. Legacy JSON imports preserve hashes exactly.
+- `login_lockouts`: failure counts, exact sliding-window failure timestamps, most
+  recent failure time, lock expiry and backoff tier. Restarting preserves locks, and
+  the relay still checks lock status **before PBKDF2**. Source-address limits remain
+  in memory.
+- `security_events`: timestamps, event types, usernames, peer addresses and structured
+  metadata in JSON, plus an import identity for idempotent legacy migration. The JSONL
+  mirror remains the read-only dashboard's source; SQL and file writes are separate.
+- `relayed_envelopes`: a bounded audit history of online chat/handshake forwarding,
+  containing time, sender, recipient, type and byte size, plus only the chat's opaque
+  base64 ciphertext. Handshake rows contain no ciphertext; their public key/signature
+  payloads are not archived. Unknown extra fields are never serialized into SQL.
+  Capture defaults on, can be disabled with `SECURECHAT_STORE_ENVELOPES=0`, and has a
+  `SECURECHAT_ENVELOPE_MAX_ROWS` cap (default 10000), pruned on each insert.
+- `schema_version`: schema version `1`. Startup rejects unsupported versions;
+  future table alterations require an explicit versioned migration.
+
+These stored fields are part of **what the server CAN see**: a database reader can
+learn account and traffic metadata and retain ciphertext, but has no chat decryption
+keys. `tests/test_database.py` sends a unique message through two real TLS clients,
+confirms the recipient receives it, and scans every table/column for its plaintext.
+The database does not provide message delivery, encrypted media or another transport.
 
 ## What the server CANNOT see (by design, verified in `tests/`)
 

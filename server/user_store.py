@@ -1,110 +1,72 @@
-"""Simple persistent user store, backed by a local JSON file.
+"""Database-backed accounts; PBKDF2 encoding and public API are unchanged.
 
-Only the encoded PBKDF2 hash string from auth/password_hash.py is ever
-written to disk for a password -- plaintext passwords are never stored,
-logged, or printed.
-
-Phase 5 adds each user's long-term RSA *public* key (PEM text) alongside
-their password hash. Unlike the password hash, a public key is not sensitive
--- by design, it is meant to be handed out to anyone who needs to verify
-that user's signatures (see crypto_engine/signatures.py, server.py's
-"get_pubkey" envelope). The matching private key never reaches the server;
-it stays on the owning client (see auth/keystore.py).
-
-The store file lives under data/ (gitignored -- see .gitignore), since it
-holds real hashed credentials from local testing and has no business in
-shared repo history.
+The legacy `path` argument selects a sibling .db file for isolated callers.
+JSON files are imported explicitly with tools/migrate_json_to_db.py.
 """
-
-import json
 import os
-import threading
+from pathlib import Path
+import time
+
+from sqlalchemy import insert, select
+from sqlalchemy.engine import URL
+from sqlalchemy.exc import IntegrityError
 
 from auth.password_hash import hash_password, verify_password
+try:
+    from .db import get_database, users
+except ImportError:  # python server/server.py
+    from db import get_database, users
 
 DEFAULT_STORE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "users.json"
-)
-
-# Guards read-modify-write of the store file against concurrent client
-# threads racing to register/login at the same time.
-_lock = threading.Lock()
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "users.json")
 
 
-def _load(path):
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError:
-            return {}
+def _database(path):
+    if os.fspath(path) == DEFAULT_STORE_PATH:
+        return get_database()
+    target = Path(path).resolve()
+    if target.suffix == ".json":
+        target = target.with_suffix(".db")
+    return get_database(URL.create("sqlite", database=str(target)))
 
 
-def _save(path, users):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp_path = path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(users, f, indent=2)
-    os.replace(tmp_path, path)  # atomic on POSIX and Windows
-
-
-def register_user(
-    username: str,
-    password: str,
-    public_key_pem: str = None,
-    path: str = DEFAULT_STORE_PATH,
-) -> bool:
-    """Register a new user. Returns False if the username is already taken.
-
-    `public_key_pem` is the user's RSA public key (PEM text, from
-    crypto_engine.signatures.serialize_public_key(...).decode()) -- optional
-    at the storage layer so existing tests/callers that only care about
-    passwords keep working, but client.py always supplies one in practice.
-    """
+def register_user(username: str, password: str, public_key_pem: str = None,
+                  path: str = DEFAULT_STORE_PATH) -> bool:
+    """Register an account, returning False for empty credentials/duplicates."""
     if not username or not password:
         return False
-    with _lock:
-        users = _load(path)
-        if username in users:
-            return False
-        record = {"password_hash": hash_password(password)}
-        if public_key_pem:
-            record["public_key"] = public_key_pem
-        users[username] = record
-        _save(path, users)
+    database = _database(path)
+    if user_exists(username, path):
+        return False
+    encoded = hash_password(password)
+    try:
+        with database.transaction() as conn:
+            conn.execute(insert(users).values(username=username, password_hash=encoded,
+                public_key_pem=public_key_pem, created_at=time.time()))
+    except IntegrityError:
+        return False
     return True
 
 
 def verify_user(username: str, password: str, path: str = DEFAULT_STORE_PATH) -> bool:
-    """Check a username/password pair against the store. Returns False for an
-    unknown username or a wrong password -- never raises for bad credentials."""
-    with _lock:
-        users = _load(path)
-    record = users.get(username)
-    if record is None:
+    with _database(path).engine.connect() as conn:
+        encoded = conn.execute(select(users.c.password_hash).where(
+            users.c.username == username)).scalar_one_or_none()
+    if encoded is None:
         return False
     try:
-        return verify_password(password, record["password_hash"])
+        return verify_password(password, encoded)
     except Exception:
-        # Malformed stored hash or similar data problem: treat as auth
-        # failure rather than crashing the server.
         return False
 
 
 def user_exists(username: str, path: str = DEFAULT_STORE_PATH) -> bool:
-    with _lock:
-        users = _load(path)
-    return username in users
+    with _database(path).engine.connect() as conn:
+        return conn.execute(select(users.c.username).where(
+            users.c.username == username)).first() is not None
 
 
 def get_public_key(username: str, path: str = DEFAULT_STORE_PATH):
-    """Return the stored RSA public key PEM (str) for `username`, or None if
-    the user doesn't exist or never registered one (e.g. an account created
-    before Phase 5)."""
-    with _lock:
-        users = _load(path)
-    record = users.get(username)
-    if record is None:
-        return None
-    return record.get("public_key")
+    with _database(path).engine.connect() as conn:
+        return conn.execute(select(users.c.public_key_pem).where(
+            users.c.username == username)).scalar_one_or_none()

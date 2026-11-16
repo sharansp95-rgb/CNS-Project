@@ -304,6 +304,8 @@ class Harness:
         self.keys = {}
         self.exports_dir = os.path.join(tmp, "exports")
         self.log_path = os.path.join(tmp, "security_events.jsonl")
+        self._previous_database_url = os.environ.get("DATABASE_URL")
+        os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(tmp, "users.db")
         store = os.path.join(tmp, "users.json")
         self._saved = {n: getattr(server_module, n)
                        for n in ("register_user", "verify_user", "get_public_key", "log_event")}
@@ -328,6 +330,10 @@ class Harness:
         self.thread.join(timeout=10)
         for name, fn in self._saved.items():
             setattr(server_module, name, fn)
+        if self._previous_database_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = self._previous_database_url
 
     def register(self, name):
         priv, pub = generate_rsa_keypair()

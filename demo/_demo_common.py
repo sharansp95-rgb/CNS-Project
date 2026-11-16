@@ -59,6 +59,7 @@ def isolate_demo_state():
     import server.server as server_module
 
     root = tempfile.mkdtemp(prefix="securechat_demo_")
+    os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(root, "users.db")
     store = os.path.join(root, "users.json")
     keys_dir = os.path.join(root, "keys")
     log_path = os.path.join(root, "security_events.jsonl")
