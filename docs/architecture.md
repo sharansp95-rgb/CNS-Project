@@ -39,7 +39,7 @@ flowchart LR
         TCP["TLS / TCP adapter<br/>server/server.py"]
         WS["HTTP / WebSocket adapter<br/>web/app.py<br/>Origin + frame/rate/idle policies"]
         CORE["RelayCore<br/>one roster + auth + routing<br/>lockout checked before PBKDF2"]
-        DB["SQLAlchemy: SQLite / PostgreSQL<br/>users + durable lockouts<br/>events + bounded ciphertext history"]
+        DB["SQLAlchemy: SQLite / PostgreSQL<br/>users + durable lockouts<br/>events + bounded ciphertext history<br/>encrypted evidence + file hashes"]
         LOG["JSONL security mirror<br/>read-only Tk dashboard"]
         TCP --> CORE
         WS --> CORE
@@ -49,6 +49,7 @@ flowchart LR
     P <-->|"TLS with pinned certificate"| TCP
     C <-->|"WSS behind HTTPS proxy<br/>WS on localhost only"| WS
     P -. "end-to-end signed handshake and encrypted chat" .-> C
+    C <-->|"Bearer HTTP API: encrypted evidence only"| WS
     classDef local fill:#182c35,color:#f2f5f0,stroke:#668eaa;
     classDef relay fill:#203521,color:#f2f5f0,stroke:#8fba7a;
     class P,PK,UI,C,BK local;
@@ -72,11 +73,35 @@ without inline scripts. The web path rejects lab controls even in shared local d
 mode. The standalone web entry point never imports lab code. The roster remains
 process-local; multiple deployment workers are not supported.
 
+## Evidence, receipts and vault boundary
+
+The browser exports v2 evidence including an exporter-signed canonical ciphertext
+hash per verified message; Python preserves v1 default exports and supports v2.
+The browser encrypts exact JSON file bytes before authenticated upload. An in-memory
+bearer token issued by WebSocket login authorizes owner-filtered HTTP vault operations;
+it is never written to the DB or Wire Log and is revoked at disconnect.
+
+The server sees a plaintext-file digest, encrypted package, owner/title/size/time and
+submitted envelope hash manifest. It signs UTC clock receipts with a **separate
+Ed25519 key**, exposed publicly at `/api/timestamp-key`. It counts retained matching
+chat-envelope hashes for that owner without decrypting evidence. It cannot verify
+that the encrypted file contains the claimed manifest or bind ciphertext to claimed
+plaintext. Receipts attest server observations and clock, not legal identity or truth.
+
+`/verify` performs local v1/v2 and optional receipt verification with no file upload.
+The browser PDF is a local unsigned companion; the signed JSON remains authoritative.
+See [evidence.md](evidence.md) for cryptographic formats, limitations and India Section
+63 certificate requirements. The database now also stores `evidence_bundles` and
+schema v2 preserves old data transactionally.
+
 ## What the server CAN see
 
 These values now also feed the SQL persistence described under
 [What the server stores](#what-the-server-stores); no end-to-end decryption is added.
 
+- Evidence file SHA-256 values, encrypted vault containers, titles, sizes, owners,
+  UTC receipt metadata and submitted ciphertext hash manifests. No evidence plaintext
+  or vault decryption keys reach it.
 - Usernames and the routing metadata of every envelope (who is talking to whom, and
   when — it decides delivery by the `to` field).
 - Each user's PBKDF2 password *hash* (never the plaintext password — see
@@ -94,7 +119,7 @@ These values now also feed the SQL persistence described under
 
 ## What the server stores
 
-`server/db.py` creates schema v1 on startup, selected by `DATABASE_URL` (default:
+`server/db.py` creates or upgrades to schema v2 on startup, selected by `DATABASE_URL` (default:
 `data/securechat.db`; PostgreSQL uses `postgresql+psycopg://...`). The shared SQLAlchemy
 Core schema and transaction adapter can be reused by later transports without changing
 client cryptography. See [Database](../README.md#database) for the full column schema,
@@ -109,13 +134,17 @@ configuration, migration commands and versioning policy.
 - `security_events`: timestamps, event types, usernames, peer addresses and structured
   metadata in JSON, plus an import identity for idempotent legacy migration. The JSONL
   mirror remains the read-only dashboard's source; SQL and file writes are separate.
-- `relayed_envelopes`: a bounded audit history of online chat/handshake forwarding,
+- `relayed_envelopes`: indexed canonical envelope SHA-256 plus a bounded audit history of online chat/handshake forwarding,
   containing time, sender, recipient, type and byte size, plus only the chat's opaque
   base64 ciphertext. Handshake rows contain no ciphertext; their public key/signature
   payloads are not archived. Unknown extra fields are never serialized into SQL.
   Capture defaults on, can be disabled with `SECURECHAT_STORE_ENVELOPES=0`, and has a
   `SECURECHAT_ENVELOPE_MAX_ROWS` cap (default 10000), pruned on each insert.
-- `schema_version`: schema version `1`. Startup rejects unsupported versions;
+- `evidence_bundles`: owner-only password-encrypted evidence containers, title, creation
+  time, encrypted size, plaintext-file SHA-256 and signed timestamp receipt JSON.
+- `schema_version`: schema version `2`, with an explicit additive 1→2 migration.
+  Historical relay hashes are NULL; missing nonce/tag fields cannot be backfilled.
+  Startup rejects unsupported versions;
   future table alterations require an explicit versioned migration.
 
 These stored fields are part of **what the server CAN see**: a database reader can

@@ -6,7 +6,7 @@
 >
 > | Measured (see [Evaluation results](#evaluation-results)) | |
 > |---|---|
-> | Automated tests | **382 passing Python tests + 15 Vitest + 3 Playwright** |
+> | Automated tests | **394 passing Python tests + 27 Vitest + 5 Playwright** |
 > | Attacks detected (tamper, replay, drop, MITM, edited evidence, password burst; 20 each) | **120 / 120**, 0 false rejections in 200 normal messages |
 > | End-to-end message latency (real TLS server, loopback) | **~1.2 ms** median (requirement: < 1 s) |
 >
@@ -31,7 +31,7 @@ to broker keys), derives a fresh AES-256-GCM session key, signs and encrypts eve
 message with it, wraps the whole client↔server connection in TLS, gates every
 connection behind a PBKDF2-hashed login, rejects replayed or tampered messages, detects
 a relay dropping or reordering messages via a hash-chained conversation log, and locks
-out repeated failed logins — all properties covered by the automated suite (382 Python tests, plus browser tests) and five
+out repeated failed logins — all properties covered by the automated suite (394 Python tests, plus browser tests) and five
 live attack-and-defense demo scripts, plus a Tkinter GUI whose "Wire Log" panel makes
 the cryptography visible during a demo instead of invisible, an opt-in **Attack Lab**
 that triggers those same attacks for real with one click, and a live **Security
@@ -224,6 +224,46 @@ wrapped-key restoration and mobile fit. Avoid running GUI pytest concurrently wi
 browser launches because native keyboard focus is shared on macOS. Chromium was tested;
 Firefox and Safari were not exercised in this phase.
 
+## Evidence
+
+Signed evidence is now available as v1 or v2 JSON, with optional server-clock receipts,
+a password-encrypted owner-only vault, a local public verifier at `/verify`, and a
+browser-generated companion PDF. The relay still cannot read chat or evidence content.
+The **signed JSON is authoritative; the PDF is an unsigned companion**.
+
+In chat, select **Save evidence**, enter your password and a non-sensitive title, then
+**Encrypt and save**. Open **Evidence** to list, unlock/download, verify or delete your
+bundles. Keep the exact downloaded JSON, receipt, and a trusted TSA public key together.
+`/verify` accepts dropped/local files without login and verifies entirely in the browser;
+no evidence files are uploaded there. It names the failing message for edited records.
+
+V2 adds an exporter-signed SHA-256 of each canonical ciphertext envelope. Timestamp
+receipts sign the exact file SHA-256, server UTC time, key ID and retained-traffic match
+count. V1 remains verifiable; its corroboration is “not available.” A server cannot
+inspect the encrypted file to validate the submitted manifest, so corroboration is
+supporting metadata, not proof that a ciphertext encodes a claimed plaintext.
+
+```sh
+# Persist this separate key outside a deployment's disposable filesystem:
+export TSA_KEY_PATH=/persistent/private/securechat-tsa.key
+.venv/bin/python tools/generate_tsa_key.py
+# Default if unset: data/tsa_signing.key; generated lazily if missing.
+.venv/bin/python tools/verify_transcript.py evidence.json \
+  --receipt receipt.json --tsa-pubkey tsa-public.pem
+```
+
+`GET /api/timestamp-key` serves the Ed25519 public key. Trust it and participant
+fingerprints independently. Receipts use the server clock, not an accredited timestamp
+authority. Browser vault encryption uses purpose-separated PBKDF2-SHA256 (600,000
+iterations) and AES-256-GCM, before upload. No vault password/decryption key reaches the
+server. Titles, hashes, sizes, owner and receipt metadata remain visible.
+
+Legal admissibility in India may additionally need a certificate under **Section 63
+of the Bharatiya Sakshya Adhiniyam, 2023**. This app provides technical integrity, not
+legal certification. See the [official Act](https://www.indiacode.nic.in/indiacode/bitstream/123456789/20063/1/aa202347.pdf)
+and [docs/evidence.md](docs/evidence.md) for formats, exact crypto/canonicalization,
+API/auth limits, migration, proof limitations, key rotation, and verification commands.
+
 ## Database
 
 Install the pinned dependencies with `.venv/bin/python -m pip install -r requirements.txt`
@@ -258,23 +298,25 @@ already written to both SQL and JSONL are not duplicated. Missing source files a
 allowed; malformed input aborts the import. Previous in-memory lockout state cannot
 be recovered from the old process.
 
-Schema v1 uses these tables (timestamps are UTC Unix seconds):
+Schema v2 uses these tables (timestamps are UTC Unix seconds):
 
 | Table | Columns |
 |---|---|
 | `users` | `username` TEXT PK, `password_hash` TEXT, `public_key_pem` TEXT nullable, `created_at` FLOAT |
 | `login_lockouts` | `username` TEXT PK, `failure_count` INTEGER, `locked_until` FLOAT, `last_failure_at` FLOAT nullable, `lock_level` INTEGER, `failure_timestamps` JSON |
 | `security_events` | `id` INTEGER auto PK, `ts` FLOAT indexed, `event_type` TEXT, `username` TEXT nullable, `peer_addr` TEXT nullable, `details` JSON, `import_key` VARCHAR(100) nullable UNIQUE |
-| `relayed_envelopes` | `id` INTEGER auto PK, `ts` FLOAT indexed, `sender` TEXT, `recipient` TEXT nullable, `envelope_type` TEXT, `size_bytes` INTEGER, `ciphertext_b64` TEXT nullable |
-| `schema_version` | `version` INTEGER PK (currently `1`) |
+| `relayed_envelopes` | `id` INTEGER auto PK, `ts` FLOAT indexed, `sender` TEXT, `recipient` TEXT nullable, `envelope_type` TEXT, `size_bytes` INTEGER, `ciphertext_b64` TEXT nullable, `envelope_sha256` VARCHAR(64) nullable indexed |
+| `evidence_bundles` | `id` VARCHAR(36) PK, `owner` TEXT indexed, `created_at` FLOAT, `title` TEXT, `size_bytes` INTEGER, `file_sha256` VARCHAR(64), `ciphertext_b64` TEXT, `timestamp_receipt` JSON |
+| `schema_version` | `version` INTEGER PK (currently `2`) |
 
 All columns are required unless marked nullable. Lockouts also cover unknown usernames,
 so they deliberately have no user foreign key; routing/event history likewise has no
 account-deletion dependency. Failure timestamps preserve the exact sliding window,
 and `lock_level` preserves exponential backoff across restarts.
 
-A version table plus SQLAlchemy `create_all` keeps this initial schema simple without
-Alembic scaffolding. An unsupported version stops startup; `create_all` does not alter
+A version table plus SQLAlchemy `create_all` keeps the schema simple without
+Alembic scaffolding. An explicit transactional upgrade from v1 to v2 preserves existing
+rows, adds the vault and nullable relay hashes, and leaves historical hashes NULL. An unsupported version stops startup; `create_all` does not alter
 existing tables. Future phases must supply explicit versioned migrations for schema
 changes. Short write transactions are serialized with SQLite `BEGIN IMMEDIATE` or a
 PostgreSQL transaction advisory lock, including concurrent registrations, lockout
@@ -504,8 +546,8 @@ pytest tests/ -v
 Keyboard-focus GUI tests on Linux require a running window manager.
 
 Browser-phase validation (2026-11-16): initial baseline **361 passed, 6 failed**;
-after the GUI fixes **367 passed, 0 failed**; final Python suite **382 passed, 0 failed**.
-Vitest: **15 passed**. Playwright/Chromium: **3 passed**. The six original GUI failures
+after the GUI fixes **367 passed, 0 failed**; final Python suite **382 passed, 0 failed** at the end of Phase 2.
+Evidence phase: **394 pytest passed**, **27 Vitest passed**, **5 Playwright/Chromium passed**. The six original GUI failures
 were caused by double font scaling at 96 DPI, a presentation test racing a real socket
 failure, and missing focus preconditions for synthetic keyboard events. Font scaling
 now accounts for Tk's reported DPI; presentation tests control their worker/events and
@@ -518,7 +560,7 @@ and real combined CLI startup. Browser vectors run both directions against Pytho
 Playwright exchanges messages between isolated browser contexts and with a real
 Python TCP/TLS client. Browser evidence is checked by the unmodified offline verifier.
 
-382 tests across 30 test files, including 15 database tests and 15 gateway tests (the first seven one per project phase): `test_aes_gcm.py`
+394 tests across 31 test files, including 15 database tests, 15 gateway tests and 12 evidence/vault tests (the first seven one per project phase): `test_aes_gcm.py`
 (encryption), `test_dh_exchange.py` (key exchange), `test_password_hash.py` (login),
 `test_signatures.py` (non-repudiation), `test_handshake_auth.py` (signed-handshake
 MITM fix), `test_replay_protection.py` (replay defenses), `test_tls_setup.py`

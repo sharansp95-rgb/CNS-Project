@@ -1,0 +1,3 @@
+# Bundles include significant whitespace in vendor PDF/font string literals.
+# Review source under web/frontend/src; never strip spaces from generated data.
+web/static/assets/* -whitespace linguist-generated=true
