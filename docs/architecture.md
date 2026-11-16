@@ -10,7 +10,10 @@ continues to relay opaque chat ciphertext and public handshake values.
 
 `python server/server.py --web-port 8080` runs both adapters in one process.
 `python -m web` runs only HTTP/WS and imports no TCP adapter or lab implementation.
-HTTPS/WSS must be supplied by a trusted reverse proxy in deployment; localhost HTTP
+Production mode requires HTTPS/WSS behind an explicitly trusted reverse proxy,
+stable environment TSA material, main Postgres and explicit origins. `/healthz`
+checks DB connectivity. Proxy headers are accepted only from configured ingress
+addresses/networks, and direct insecure requests are denied. Localhost HTTP
 is for development. Browser keys/crypto run in the frontend, never in the gateway.
 
 ![Python TLS and browser WebSocket clients share the transport-independent relay and SQL store; end-to-end keys and plaintext remain in clients.](architecture_diagram.png)
@@ -192,7 +195,8 @@ The database does not provide message delivery, encrypted media or another trans
   (`crypto_engine/dh_exchange.py`; the private key is deleted from memory immediately
   after use, never serialized, never sent).
 - Either side's RSA private key — the browser keeps a password-wrapped PKCS8 identity
-  in IndexedDB/backups and uses a non-extractable runtime signing key; only the public
+  in IndexedDB/backups and uses a native non-extractable runtime signing key (WebKit uses a client-local forge RSA-PSS
+  fallback when native 222-byte salt signing is unavailable); only the public
   key is submitted at registration
   (`auth/keystore.py`, `crypto_engine/signatures.py`).
 - A user's plaintext password — only its PBKDF2 hash is ever persisted
@@ -210,3 +214,24 @@ The database does not provide message delivery, encrypted media or another trans
 See the main [README.md](../README.md) for the full wire protocol, the live demo
 scripts that exercise each of these rows against the real code, and the honest list of
 what's *not* covered by this threat model.
+
+## Render/Neon deployment boundary
+
+See [DEPLOY.md](DEPLOY.md). Two independent free Python services run one process
+each. Main uses Neon through normalized psycopg URLs with TLS and a small recyclable
+pool. Its Ed25519 signing key comes only from `TSA_PRIVATE_KEY` in production;
+ephemeral local files cannot rotate it. The lab has its own ephemeral SQLite DB and
+access-code gate before assets, controls and WebSocket admission. Only opaque
+HttpOnly sandbox sessions are stored in memory. Both have DB-backed health checks.
+
+On a dropped browser connection, tokens/session keys/pending ECDH state are discarded.
+Bounded reconnect retries restore transport only; a password login and new signed
+handshake are required. A generation check prevents late asynchronous crypto work
+from restoring an old key. Explicit disconnect stops retries. There are no heartbeat
+or keep-alive requests to keep free services awake. A live lab console's existing
+state polling operates only while visitors use that page.
+
+The single roster cannot span workers/instances. Free-service restart/spin-down
+loses live sessions and lab data; main account/vault/audit data remains in Neon.
+The desktop TLS adapter is a local demo, not a Render TCP endpoint. Actual ingress
+addresses, live HTTPS/WSS and Neon integration await Phase 5B after owner deployment.

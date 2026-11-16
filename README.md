@@ -6,7 +6,7 @@
 >
 > | Measured (see [Evaluation results](#evaluation-results)) | |
 > |---|---|
-> | Automated tests | **396 passing Python tests + 27 Vitest + 12 Playwright (5 product + 7 lab)** |
+> | Automated tests | **416 passing Python tests + 32 Vitest + 26 Chromium/WebKit Playwright** |
 > | Attacks detected (tamper, replay, drop, MITM, edited evidence, password burst; 20 each) | **120 / 120**, 0 false rejections in 200 normal messages |
 > | End-to-end message latency (real TLS server, loopback) | **~1.9 ms** median (requirement: < 1 s) |
 >
@@ -31,7 +31,7 @@ to broker keys), derives a fresh AES-256-GCM session key, signs and encrypts eve
 message with it, wraps the whole client↔server connection in TLS, gates every
 connection behind a PBKDF2-hashed login, rejects replayed or tampered messages, detects
 a relay dropping or reordering messages via a hash-chained conversation log, and locks
-out repeated failed logins — all properties covered by the automated suite (396 Python tests, plus browser tests) and five
+out repeated failed logins — all properties covered by the automated suite (416 Python tests, plus browser tests) and five
 live attack-and-defense demo scripts, plus a Tkinter GUI whose "Wire Log" panel makes
 the cryptography visible during a demo instead of invisible, a separate **Attack Lab**
 that triggers those same attacks for real with one click, and a live **Security
@@ -145,8 +145,9 @@ PORT=8080 .venv/bin/python -m web
 
 It binds `0.0.0.0` by default (`WEB_HOST` overrides). Run a **single process/worker**:
 rosters and per-address rate limits are process-local. For deployment, provision
-HTTPS at a trusted reverse proxy, set `DATABASE_URL` as described below, and set
-`SECURECHAT_ALLOWED_ORIGINS=https://your-chat-host.example`. Browsers then automatically
+HTTPS at a trusted reverse proxy, set `DATABASE_URL` as described below, and set production
+`ALLOWED_ORIGINS=https://your-chat-host.example` and the remaining required values in
+[DEPLOY.md](docs/DEPLOY.md). Browsers then automatically
 use WSS. Local loopback HTTP uses WS: **chat stays end-to-end encrypted, but login
 passwords require HTTPS/WSS for network transport protection**. WebCrypto requires a
 secure browser context (HTTPS, or trusted localhost). Do not expose local HTTP mode
@@ -176,7 +177,10 @@ start the gateway with `SECURECHAT_ALLOWED_ORIGINS=http://127.0.0.1:5173`; Vite 
 Browser identities are generated locally. The private PKCS8 bytes are wrapped with
 AES-256-GCM under PBKDF2-HMAC-SHA256 (600,000 iterations, random 16-byte salt, random
 12-byte nonce); the wrapped object is stored in IndexedDB. Username and public PEM
-are authenticated as wrapping AAD. Runtime signing keys are non-extractable. Use
+are authenticated as wrapping AAD. Native runtime signing keys are non-extractable. WebKit RSA-PSS compatibility uses
+a client-local forge key in a private WeakMap when native MAX_LENGTH signing fails;
+that fallback has JavaScript private-key material in memory and cannot provide the
+same native non-extractability property. It never sends or persists an unwrapped key. Use
 **Download key backup** before clearing browser data; on another browser enter the
 same username/password, import that wrapped JSON backup, then log in. Import verifies
 that the private key matches the backup's public key; login also checks the account's
@@ -196,7 +200,7 @@ Exact compatibility parameters:
 
 | Primitive | Browser and Python wire contract |
 |---|---|
-| Identity signatures | RSA-2048, exponent 65537, PSS SHA-256 / MGF1-SHA256, **222-byte salt** (`PSS.MAX_LENGTH`, not digest length) |
+| Identity signatures | RSA-2048, exponent 65537, PSS SHA-256 / MGF1-SHA256, **222-byte salt** (`PSS.MAX_LENGTH`, not digest length); native WebCrypto with pinned forge fallback for WebKit |
 | Handshake | Fresh X25519, RSA signature over raw 32-byte public key; native WebCrypto with `@noble/curves` fallback; verify before derivation |
 | Derivation | HKDF-SHA256, 32-byte output, zero/absent salt, info `CNSProject secure-chat ECDH session key v1` |
 | Chat encryption | AES-256-GCM, random 12-byte nonce, 16-byte tag, no AAD; ciphertext and tag split into the existing base64 fields |
@@ -218,8 +222,40 @@ npm run test:e2e
 Playwright starts a throwaway shared relay, temporary DB/certificates/logs, two isolated
 browser contexts and a real Python TLS peer. It checks receipts, valid evidence,
 wrapped-key restoration and mobile fit. Avoid running GUI pytest concurrently with
-browser launches because native keyboard focus is shared on macOS. Chromium was tested;
-Firefox and Safari were not exercised in this phase.
+browser launches because native keyboard focus is shared on macOS. Chromium and WebKit are now tested. Firefox is configured but its Playwright build
+fails to launch a profile on the development Mac; see the deployment report.
+
+## Live deployment
+
+Phase 5A prepares deployment; no account, remote repository, push or live deployment
+has been created. Follow [docs/DEPLOY.md](docs/DEPLOY.md) to create your private GitHub
+repository, Neon main/test branch and two separate Render Free Python services.
+
+- Main site: **https://<your-main-service>.onrender.com**
+- Attack Lab: **https://<your-lab-service>.onrender.com** (separate origin and access code)
+
+`render.yaml` uses the committed frontend builds and one Python process/instance per
+service. Main data lives in Neon; the lab uses ephemeral SQLite. Production requires
+`APP_ENV=production`, explicit HTTPS `ALLOWED_ORIGINS` and trusted
+`FORWARDED_ALLOW_IPS`. Main additionally requires PostgreSQL `DATABASE_URL` and a
+persistent `TSA_PRIVATE_KEY`; the lab requires `LAB_ACCESS_CODE` and
+`MAIN_SITE_ORIGIN` and refuses a main `DATABASE_URL`. Both expose DB-backed `/healthz`.
+Generate the TSA value locally with `tools/generate_tsa_key.py --print-env`; keep it
+unchanged across redeploys. Secrets belong in Render, never Git.
+
+Free services sleep after 15 minutes idle, lose local files on restart and share a
+750-hour/month workspace budget. Open both URLs about two minutes before a demo and
+close them afterward. No keep-alive pinger was added. The in-memory roster permits
+**one instance/worker only**. Tkinter remains a local TCP/TLS demo; Render exposes
+only the browser HTTP/WS gateway. Live smoke testing is Phase 5B, after you deploy.
+
+Browser reconnect discards old session keys and bearer tokens, retries the transport,
+and asks for login plus a fresh signed handshake. It retains no password for silent
+re-authentication. Explicit Disconnect cancels retries.
+
+Neon verification uses a separate disposable `TEST_DATABASE_URL`, with per-test
+schemas and a guard against the main database; see the exact command in DEPLOY.md.
+Those external tests are prepared and have not been run without your Neon account.
 
 ## Evidence
 
@@ -447,6 +483,12 @@ and Security Dashboard, with talking points and timing).
 
 ## Running the Attack Lab
 
+For the deployed lab, enter `LAB_ACCESS_CODE` before UI/assets/controls/WebSocket
+admission. Production requires a strong code; sessions use Secure HttpOnly cookies.
+Both meta robots and X-Robots-Tag discourage indexing. Locally the gate is optional:
+set `LAB_ACCESS_CODE` to exercise it. Existing sandbox account passwords are not the
+access code. [Production setup](docs/DEPLOY.md).
+
 Run the **separate sandbox site**, never the production server with an attack flag:
 
 ```sh
@@ -494,7 +536,7 @@ Measured, not claimed: `tools/evaluate_security.py` drives the real code against
 
 | Measure | Result |
 |---|---|
-| Current Python test suite | 396 / 396 pass |
+| Python suite in the last full attack evaluation | 396 / 396 pass; deployment suite below |
 | Attacks detected (tamper, replay, drop, MITM key swap, edited evidence, wrong-password burst; 20 each) | 120 / 120 (100%) |
 | False rejections on 200 normal messages | 0 (0.0%) |
 | End-to-end message latency through the real TLS server | median 1.859 ms, p95 1.985 ms |
@@ -563,13 +605,19 @@ Full evaluator: **120/120**, **0/200 false rejections**, **real data unchanged**
 See [the phase report](docs/attack_lab_phase_report.md) for files, verification limits
 and the estimate-versus-elapsed-time record.
 
+Deployment preparation: **416 pytest passed**, **1 opt-in Postgres test skipped**
+(no external TEST_DATABASE_URL supplied), **32 Vitest passed**; **6 product + 7 lab
+Playwright passed per engine on Chromium and WebKit**. Firefox's test browser
+could not launch its profile on this Mac, so Firefox is unverified. See
+[deployment report](docs/deployment_phase_report.md) and [DEPLOY.md](docs/DEPLOY.md).
+
 The WebSocket suite covers admission, persistent lockout before PBKDF2, origin/frame/
 rate/idle/type policies, security headers, a DB plaintext scan after encrypted chat,
 and real combined CLI startup. Browser vectors run both directions against Python;
 Playwright exchanges messages between isolated browser contexts and with a real
 Python TCP/TLS client. Browser evidence is checked by the unmodified offline verifier.
 
-396 tests across 31 test files, including 15 database tests, 15 gateway tests and 12 evidence/vault tests (the first seven one per project phase): `test_aes_gcm.py`
+416 passing tests plus an opt-in Postgres test across 33 test files, including 15 database tests, 15 gateway tests and 12 evidence/vault tests (the first seven one per project phase): `test_aes_gcm.py`
 (encryption), `test_dh_exchange.py` (key exchange), `test_password_hash.py` (login),
 `test_signatures.py` (non-repudiation), `test_handshake_auth.py` (signed-handshake
 MITM fix), `test_replay_protection.py` (replay defenses), `test_tls_setup.py`

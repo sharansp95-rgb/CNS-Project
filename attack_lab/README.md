@@ -1,5 +1,13 @@
 # Separate Attack Lab
 
+This is a hostile relay sandbox. Production deployment is documented in
+[DEPLOY.md](../docs/DEPLOY.md): use `APP_ENV=production`, your HTTPS `ALLOWED_ORIGINS`,
+verified `FORWARDED_ALLOW_IPS`, `MAIN_SITE_ORIGIN`, and a strong `LAB_ACCESS_CODE`.
+Production binds 0.0.0.0:$PORT, refuses main DATABASE_URL credentials and exposes no
+TCP listener. An HttpOnly Secure access session is required before UI, assets,
+controls or WebSocket admission. Both meta robots and X-Robots-Tag specify noindex.
+`/healthz` checks the isolated DB. Locally set LAB_ACCESS_CODE to enable the gate.
+
 This is a hostile relay sandbox. Run it separately from the real chat service:
 
 ```sh
