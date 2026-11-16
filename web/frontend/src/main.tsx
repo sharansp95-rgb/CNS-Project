@@ -4,6 +4,7 @@ import { identity, privateKey } from "./crypto";
 import { Session, type Envelope, type Message } from "./session";
 import { wrap, unwrap, loadBackup, saveBackup, type Backup } from "./keystore";
 import "./style.css";
+import { PublicVerify, EvidencePanel } from "./ProofUI";
 
 function download(name: string, body: unknown) {
   const url = URL.createObjectURL(
@@ -18,6 +19,9 @@ function download(name: string, body: unknown) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function App() {
+  const [evidenceMode, setEvidenceMode] = useState<"save" | "list" | null>(
+    location.pathname === "/evidence" ? "list" : null,
+  );
   const sessionRef = useRef<Session | undefined>(undefined);
   const [username, setUsername] = useState(""),
     [peer, setPeer] = useState(""),
@@ -37,7 +41,7 @@ function App() {
   async function authenticate(mode: "register" | "login") {
     if (
       !username.trim() ||
-      !peer.trim() ||
+      (!peer.trim() && location.pathname !== "/evidence") ||
       username.trim() === peer.trim() ||
       !password
     ) {
@@ -76,7 +80,7 @@ function App() {
       let conn: Session;
       conn = new Session(
         name,
-        peer.trim(),
+        peer.trim() || "__vault_only__",
         stored.public_key_pem,
         key,
         url,
@@ -119,6 +123,12 @@ function App() {
     }
   }
   const active = !!session?.isAuthenticated;
+  if (location.pathname === "/verify")
+    return (
+      <div className={"app " + theme}>
+        <PublicVerify />
+      </div>
+    );
   return (
     <div className={"app " + theme}>
       <nav>
@@ -131,6 +141,17 @@ function App() {
           </span>
         </a>
         <div className="nav-right">
+          <a href="/verify">Verify a file</a>
+          {active && (
+            <button
+              onClick={() => {
+                setEvidenceMode("list");
+                history.pushState(null, "", "/evidence");
+              }}
+            >
+              Evidence
+            </button>
+          )}
           <span className="pill">● END-TO-END ENCRYPTED</span>
           {active && (
             <button
@@ -260,6 +281,15 @@ function App() {
             </p>
           </section>
         </main>
+      ) : evidenceMode ? (
+        <EvidencePanel
+          session={session!}
+          mode={evidenceMode}
+          close={() => {
+            setEvidenceMode(null);
+            history.pushState(null, "", "/");
+          }}
+        />
       ) : (
         <main className={"workspace " + (wire ? "with-wire" : "")}>
           <aside className="sidebar">
@@ -297,6 +327,12 @@ function App() {
                   disabled={!session.key}
                 >
                   Export Evidence ↗
+                </button>
+                <button
+                  disabled={!session.key}
+                  onClick={() => setEvidenceMode("save")}
+                >
+                  Save evidence
                 </button>
               </div>
             </header>

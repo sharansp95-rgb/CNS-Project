@@ -657,3 +657,105 @@ dd {
     grid-template-columns: 95px minmax(0, 1fr);
   }
 }
+
+/* Evidence views share the app palette; no inline styling under CSP. */
+.nav-right a,
+.proof-page a {
+  color: var(--accent);
+  font-size: 12px;
+}
+.proof-page {
+  max-width: 1000px;
+  margin: auto;
+  padding: 36px 24px 70px;
+  line-height: 1.7;
+}
+.proof-page h1 {
+  font:
+    42px Georgia,
+    serif;
+}
+.proof-page > p {
+  color: var(--muted);
+  max-width: 780px;
+}
+.proof-card {
+  padding: 24px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 12px;
+  margin: 20px 0;
+}
+.proof-card label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 15px 0;
+}
+.proof-card input,
+.proof-card textarea {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+}
+.proof-card textarea {
+  min-height: 110px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 12px;
+  font: 11px monospace;
+}
+.proof-card button {
+  margin: 6px 8px 6px 0;
+}
+.proof-card code,
+.file-hash {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.proof-verdict {
+  padding: 22px;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  margin: 22px 0;
+  background: var(--panel);
+}
+.proof-verdict.invalid {
+  border-color: #e98d82;
+}
+.proof-verdict li {
+  overflow-wrap: anywhere;
+}
+.vault-list h2 {
+  font-size: 20px;
+}
+.proof-page input[type="file"] {
+  max-width: 100%;
+}
+@media (max-width: 650px) {
+  .nav-right {
+    gap: 8px;
+  }
+  .nav-right > a {
+    font-size: 10px;
+  }
+  .nav-right button {
+    padding: 7px;
+    font-size: 10px;
+  }
+  .brand {
+    font-size: 16px;
+    gap: 8px;
+  }
+  .chat-actions {
+    max-width: 130px;
+  }
+  .proof-page {
+    padding: 24px 14px;
+  }
+  .proof-card {
+    padding: 17px;
+  }
+}

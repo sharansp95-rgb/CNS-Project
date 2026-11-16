@@ -8,6 +8,7 @@ export interface Message {
 export class Session {
   socket: WebSocket;
   isAuthenticated = false;
+  apiToken = "";
   secureTransport = false;
   key?: CryptoKey;
   peerKey?: CryptoKey;
@@ -48,6 +49,7 @@ export class Session {
       this.enqueue(async () => this.receive(JSON.parse(e.data)));
     this.socket.onclose = () => {
       this.closed = true;
+      this.apiToken = "";
       this.key = undefined;
       this.pending = undefined;
       if (this.isAuthenticated)
@@ -100,7 +102,11 @@ export class Session {
     this.changed();
   }
   async receive(e: Envelope) {
-    this.wire.push({ direction: "in", ...e });
+    this.wire.push({
+      direction: "in",
+      ...e,
+      ...(e.api_token ? { api_token: "[redacted]" } : {}),
+    });
     this.wire = this.wire.slice(-200);
     if (e.type === "register_result" || e.type === "login_result") {
       if (!e.success) {
@@ -108,6 +114,7 @@ export class Session {
         this.socket.close();
         throw Error(e.reason);
       }
+      this.apiToken = e.api_token || "";
       await this.authenticated();
       this.isAuthenticated = true;
       this.status = "Authenticated — waiting for peer";
@@ -343,6 +350,7 @@ export class Session {
       ...rec,
       record_hash: this.inHead,
       signature: inner.signature,
+      envelope_sha256: await c.hash(e),
     });
     this.messages.push({
       sender: this.peer,
@@ -383,10 +391,21 @@ export class Session {
         prev_hash: rec.prev_hash,
         signature,
       });
-      this.send({ type: "chat", from: this.username, to: this.peer, ...box });
+      const envelope = {
+        type: "chat",
+        from: this.username,
+        to: this.peer,
+        ...box,
+      };
+      this.send(envelope);
       this.outHead = await c.hash(rec);
       this.outSeq++;
-      this.transcript.push({ ...rec, record_hash: this.outHead, signature });
+      this.transcript.push({
+        ...rec,
+        record_hash: this.outHead,
+        signature,
+        envelope_sha256: await c.hash(envelope),
+      });
       this.messages.push({
         sender: this.username,
         message,
@@ -404,13 +423,16 @@ export class Session {
       this.changed();
     });
   }
-  async evidence() {
+  async evidence(formatVersion = 2) {
     await this.chain;
     if (!this.handshake || !this.key)
       throw Error("Complete the handshake first");
     const now = Math.floor(Date.now() / 1000);
     const body: Envelope = {
-      format: "securechat-evidence/v1",
+      format:
+        formatVersion === 2
+          ? "securechat-evidence/v2"
+          : "securechat-evidence/v1",
       exported_by: this.username,
       exported_at: now,
       session: { ...this.handshake, started_at: this.startedAt, ended_at: now },
@@ -424,10 +446,15 @@ export class Session {
           fingerprint: this.fingerprint,
         },
       },
-      records: [...this.transcript],
+      records: this.transcript.map((row) => {
+        const record = { ...row };
+        if (formatVersion === 1) delete record.envelope_sha256;
+        return record;
+      }),
       chain_heads: { [this.username]: this.outHead, [this.peer]: this.inHead },
       rejected_events: [...this.rejected],
     };
+    if (formatVersion === 2) body.format_version = 2;
     body.exporter_signature = c.b64(
       await c.sign(this.privateKey, c.utf8(c.canonical(body))),
     );
