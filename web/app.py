@@ -23,7 +23,10 @@ class WebSocketPeer:
     call_soon_threadsafe only schedules work, so the relay never waits for its
     own event loop while holding a roster lock. Slow peers are disconnected.
     """
-    def __init__(self, websocket):
+    def __init__(self, websocket, vault=None):
+        self.vault = vault
+        self.token = None
+        self.attempted_username = None
         self.websocket = websocket
         self.loop = asyncio.get_running_loop()
         self.outbox = asyncio.Queue(maxsize=128)
@@ -32,6 +35,9 @@ class WebSocketPeer:
     def send_envelope(self, envelope):
         if self.closed.is_set():
             return
+        if self.vault and envelope.get("type") in ("register_result", "login_result") and envelope.get("success"):
+            self.token = self.vault.issue(self.attempted_username)
+            envelope = dict(envelope, api_token=self.token)
         def put():
             if self.closed.is_set():
                 return
@@ -76,6 +82,9 @@ def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.relay = core
     app.state.peers = set()
+    from web.vault_api import VaultAPI
+    vault = VaultAPI(app, core.database)
+    app.state.vault = vault
 
     @app.middleware("http")
     async def security_headers(request, call_next):
@@ -94,7 +103,7 @@ def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None
             await ws.close(code=1008)
             return
         await ws.accept()
-        peer = WebSocketPeer(ws)
+        peer = WebSocketPeer(ws, vault)
         app.state.peers.add(peer)
         writer = asyncio.create_task(peer.write_loop())
         addr = (ws.client.host if ws.client else "unknown", 0)
@@ -132,6 +141,7 @@ def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None
                     await ws.close(code=1008)
                     break
                 if name is None:
+                    peer.attempted_username = envelope.get("username")
                     name = await asyncio.to_thread(core.authenticate, peer, addr, envelope)
                 else:
                     await asyncio.to_thread(core.handle_authenticated, peer, addr, name, envelope)
@@ -140,6 +150,7 @@ def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
+            vault.revoke(peer.token)
             peer.closed.set()
             writer.cancel()
             with suppress(asyncio.CancelledError, RuntimeError, WebSocketDisconnect):
@@ -150,6 +161,8 @@ def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None
                 await asyncio.to_thread(core.broadcast_system, f"*** {removed} left the chat ***")
                 await asyncio.to_thread(core.broadcast_event, {"type": "user_left", "username": removed})
 
+    @app.get("/verify")
+    @app.get("/evidence")
     @app.get("/")
     async def index():
         if not (STATIC / "index.html").exists():
