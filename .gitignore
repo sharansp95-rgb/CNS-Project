@@ -42,3 +42,9 @@ dist/
 
 # Local presentation review files.
 *.pptx
+
+# Browser dependencies and generated test/build caches.
+web/frontend/node_modules/
+web/frontend/.vite/
+web/frontend/test-results/
+web/frontend/playwright-report/
