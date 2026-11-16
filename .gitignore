@@ -48,3 +48,9 @@ web/frontend/node_modules/
 web/frontend/.vite/
 web/frontend/test-results/
 web/frontend/playwright-report/
+
+# Timestamp authority private keys (default lives under ignored data/).
+*.key
+*tsa*.pem
+# Synthetic public fixture key is intentionally shared; no private fixture keys.
+!tests/fixtures/evidence_corpus/tsa_public.pem

@@ -104,6 +104,7 @@ from certs.generate_certs import cert_fingerprint  # noqa: E402
 from crypto_engine.aes_gcm import DecryptionError, decrypt, encrypt  # noqa: E402
 from crypto_engine.dh_exchange import compute_shared_key  # noqa: E402
 from crypto_engine.dh_exchange import generate_keypair as generate_ecdh_keypair  # noqa: E402
+from crypto_engine.evidence_tools import envelope_sha256
 from crypto_engine.hash_chain import (  # noqa: E402
     BROKEN,
     GAP,
@@ -743,14 +744,15 @@ class SecureChatClient:
             }).encode("utf-8")
 
             box = encrypt(key, inner_payload)
-            self.send_envelope({
+            envelope = {
                 "type": "chat",
                 "from": self.username,
                 "to": self.peer,
                 "nonce": b64(box["nonce"]),
                 "ciphertext": b64(box["ciphertext"]),
                 "tag": b64(box["tag"]),
-            })
+            }
+            self.send_envelope(envelope)
 
         receipt = {
             "direction": "sent",
@@ -766,6 +768,7 @@ class SecureChatClient:
             "seq": seq, "sender": self.username, "recipient": self.peer,
             "timestamp": timestamp, "message": text, "prev_hash": prev_hash,
             "record_hash": chain_hash, "signature": b64(signature),
+            "envelope_sha256": envelope_sha256(envelope),
         })
         # The terminal client doesn't need an echo of what the user just
         # typed (it's already visible in their own terminal); a GUI's chat
@@ -773,11 +776,11 @@ class SecureChatClient:
         self._emit("message_sent", peer=self.peer, message=text, timestamp=timestamp,
                    receipt=receipt)
 
-    def export_evidence(self, directory=None):
+    def export_evidence(self, directory=None, format_version=1):
         """Write a signed evidence file for this session (Stage B) and return
         its path. See client/evidence.py for the structure."""
         from client.evidence import DEFAULT_EXPORT_DIR, export_evidence
-        return export_evidence(self, directory or DEFAULT_EXPORT_DIR)
+        return export_evidence(self, directory or DEFAULT_EXPORT_DIR, format_version=format_version)
 
     def send_lab_control(self, action, target=None):
         """Stage C: arm (or, for replay_last, immediately perform) a one-shot
@@ -963,6 +966,7 @@ class SecureChatClient:
             "seq": seq, "sender": sender, "recipient": self.username,
             "timestamp": timestamp, "message": message_text, "prev_hash": prev_hash,
             "record_hash": rec_hash, "signature": b64(signature),
+            "envelope_sha256": envelope_sha256(envelope),
         })
         print(f"\r{sender}: {message_text}\n> ", end="", flush=True)
         self._emit("message_received", sender=sender, message=message_text,

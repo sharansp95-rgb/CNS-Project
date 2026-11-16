@@ -12,6 +12,8 @@ from pathlib import Path
 import threading
 import time
 
+from crypto_engine.evidence_tools import envelope_sha256
+
 from sqlalchemy import (JSON, Column, Float, Integer, MetaData, String, Table, Text,
                         create_engine, delete, event, insert, select, text)
 from sqlalchemy.engine import URL, make_url
@@ -19,7 +21,7 @@ from sqlalchemy.pool import StaticPool
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATABASE_URL = URL.create("sqlite", database=str(PROJECT_ROOT / "data" / "securechat.db"))
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 metadata = MetaData()
 users = Table("users", metadata,
     Column("username", Text, primary_key=True),
@@ -47,7 +49,13 @@ relayed_envelopes = Table("relayed_envelopes", metadata,
     Column("ts", Float, nullable=False, index=True),
     Column("sender", Text, nullable=False), Column("recipient", Text),
     Column("envelope_type", Text, nullable=False),
-    Column("size_bytes", Integer, nullable=False), Column("ciphertext_b64", Text))
+    Column("size_bytes", Integer, nullable=False), Column("ciphertext_b64", Text),
+    Column("envelope_sha256", String(64), index=True))
+evidence_bundles = Table("evidence_bundles", metadata,
+    Column("id", String(36), primary_key=True), Column("owner", Text, nullable=False, index=True),
+    Column("created_at", Float, nullable=False), Column("title", Text, nullable=False),
+    Column("size_bytes", Integer, nullable=False), Column("file_sha256", String(64), nullable=False),
+    Column("ciphertext_b64", Text, nullable=False), Column("timestamp_receipt", JSON, nullable=False))
 schema_version = Table("schema_version", metadata,
     Column("version", Integer, primary_key=True))
 
@@ -74,6 +82,16 @@ class Database:
             versions = conn.execute(select(schema_version.c.version)).scalars().all()
             if not versions:
                 conn.execute(insert(schema_version).values(version=SCHEMA_VERSION))
+            elif versions == [1]:
+                # Explicit additive v1 → v2 migration. Historical rows cannot be
+                # backfilled: v1 did not retain nonce/tag/full envelopes.
+                from sqlalchemy import inspect
+                if 'envelope_sha256' not in {c['name'] for c in inspect(conn).get_columns('relayed_envelopes')}:
+                    conn.exec_driver_sql('ALTER TABLE relayed_envelopes ADD COLUMN envelope_sha256 VARCHAR(64)')
+                metadata.create_all(conn)
+                for index in relayed_envelopes.indexes:
+                    index.create(conn, checkfirst=True)
+                conn.execute(schema_version.update().values(version=SCHEMA_VERSION))
             elif versions != [SCHEMA_VERSION]:
                 raise RuntimeError(f"Unsupported database schema version: {versions}")
             metadata.create_all(conn)
@@ -144,7 +162,7 @@ def record_relay(envelope, sender, database=None):
             ts=time.time(), sender=sender, recipient=envelope.get("to"),
             envelope_type=envelope["type"],
             size_bytes=len((json.dumps(envelope) + "\n").encode("utf-8")),
-            ciphertext_b64=ciphertext))
+            ciphertext_b64=ciphertext, envelope_sha256=envelope_sha256(envelope)))
         cutoff = conn.execute(select(relayed_envelopes.c.id).order_by(
             relayed_envelopes.c.id.desc()).offset(cap).limit(1)).scalar_one_or_none()
         if cutoff is not None:

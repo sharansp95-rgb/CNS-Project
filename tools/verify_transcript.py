@@ -45,7 +45,9 @@ from crypto_engine.hash_chain import (  # noqa: E402
 )
 from crypto_engine.signatures import deserialize_public_key, fingerprint, verify  # noqa: E402
 
-FORMAT = "securechat-evidence/v1"
+from crypto_engine.evidence_tools import V1, V2, valid_hash, verify_receipt
+
+FORMAT = V1
 OK_MARK, BAD_MARK = "✔", "✘"
 
 
@@ -90,9 +92,11 @@ def verify_evidence(data, expect_fingerprints=()):
     """Verify an already-parsed evidence dict. Returns a Report."""
     r = Report()
     r.heading("Structure")
-    if not isinstance(data, dict) or data.get("format") != FORMAT:
+    if not isinstance(data, dict) or data.get("format") not in (V1, V2):
         r.bad(f"not a {FORMAT} file", check="format")
         return r
+    if data["format"] == V2 and data.get("format_version") != 2:
+        r.bad("v2 requires format_version=2", check="format version")
     try:
         session = data["session"]
         participants = data["participants"]
@@ -182,6 +186,8 @@ def verify_evidence(data, expect_fingerprints=()):
             signable = canonical_record(sender, recipient, seq, rec["timestamp"],
                                         rec["message"], prev)
             problems = []
+            if data["format"] == V2 and not valid_hash(rec.get("envelope_sha256")):
+                problems.append(("envelope hash", "missing or malformed envelope_sha256"))
             if sender not in keys or recipient not in participants or sender == recipient:
                 problems.append(("participants", "sender/recipient are not the two participants"))
             elif not verify(keys[sender], signable, _unb64(rec["signature"])):
@@ -257,6 +263,8 @@ def main(argv=None):
     parser.add_argument("--expect-fingerprint", action="append", default=[], metavar="FP",
                         help="a participant fingerprint you trust (repeatable); the file "
                              "is INVALID if no participant has it")
+    parser.add_argument("--receipt", help="optional timestamp receipt JSON")
+    parser.add_argument("--tsa-pubkey", help="trusted TSA Ed25519 public PEM (required with --receipt)")
     args = parser.parse_args(argv)
     try:
         with open(args.file, "r", encoding="utf-8") as f:
@@ -266,6 +274,24 @@ def main(argv=None):
         return 2
     print(f"Verifying {args.file}")
     report = verify_evidence(data, args.expect_fingerprint)
+    if args.receipt:
+        if not args.tsa_pubkey:
+            print("--receipt requires --tsa-pubkey", file=sys.stderr)
+            return 2
+        try:
+            with open(args.receipt, encoding='utf-8') as stream:
+                receipt = json.load(stream)
+            with open(args.tsa_pubkey, 'rb') as stream:
+                public_pem = stream.read()
+            with open(args.file, 'rb') as stream:
+                file_bytes = stream.read()
+            if verify_receipt(receipt, file_bytes, public_pem):
+                report.ok("timestamp receipt signature and exact file SHA-256 match (trust the pinned TSA key/clock)")
+            else:
+                report.bad("timestamp receipt is INVALID", check="timestamp receipt")
+        except (OSError, ValueError) as exc:
+            print(f"Cannot read receipt/key: {exc}", file=sys.stderr)
+            return 2
     print(report.render())
     return 0 if report.valid else 1
 

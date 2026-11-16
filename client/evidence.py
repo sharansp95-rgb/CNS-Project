@@ -43,13 +43,20 @@ class EvidenceError(Exception):
     """The client is not in a state that can produce evidence."""
 
 
-def build_evidence(client, now=None):
+def build_evidence(client, now=None, format_version=1):
     """Return the signed evidence dict for `client`'s current session."""
+    if format_version not in (1, 2):
+        raise EvidenceError("Unsupported evidence version")
     from client.client import b64  # local import: avoids a circular import
 
     with client._lock:
         record = client.handshake_record
-        transcript = list(client.transcript)
+        transcript = [dict(row) for row in client.transcript]
+        if format_version == 1:
+            for row in transcript:
+                row.pop("envelope_sha256", None)
+        elif any("envelope_sha256" not in row for row in transcript):
+            raise EvidenceError("This session lacks captured envelope hashes; export v1 instead")
         rejected = list(client.rejected_events)
         started = client.session_started_at
         out_head = client._out_chain.head if client._out_chain else None
@@ -93,15 +100,18 @@ def build_evidence(client, now=None):
         "chain_heads": {client.username: out_head, client.peer: in_head},
         "rejected_events": rejected,
     }
+    if format_version == 2:
+        body["format"] = "securechat-evidence/v2"
+        body["format_version"] = 2
     body["exporter_signature"] = b64(sign(client.rsa_private_key, canonical_json(
         {k: v for k, v in body.items() if k != "exporter_signature"})))
     return body
 
 
-def export_evidence(client, directory=DEFAULT_EXPORT_DIR, now=None):
+def export_evidence(client, directory=DEFAULT_EXPORT_DIR, now=None, format_version=1):
     """Write the evidence file into `directory` (created if needed) and
     return its path."""
-    evidence = build_evidence(client, now=now)
+    evidence = build_evidence(client, now=now, format_version=format_version)
     os.makedirs(directory, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(evidence["exported_at"]))
     path = os.path.join(directory,
