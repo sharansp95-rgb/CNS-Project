@@ -1,0 +1,44 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.pcap
+*.pcapng
+# ...except demo capture evidence, which is meant to be committed (see demo/README.md).
+!demo/*.pcap
+!demo/*.pcapng
+.env
+
+# Local user store: holds real hashed credentials from testing, never
+# committed. See server/user_store.py.
+data/
+
+# TLS cert + key, generated locally per teammate by certs/generate_certs.py
+# (see README.md). A committed private key would let anyone with repo
+# access impersonate the server, which defeats the point of TLS.
+certs/*.key
+certs/*.crt
+certs/*.pem
+
+# Signed evidence exports (Stage B) -- contain real conversation content.
+exports/
+
+# Course-submission files kept locally, never committed.
+CnsProj/
+CNS_Review1_*.pptx
+
+# Structured security event log (server/security_log.py) -- real activity data.
+logs/
+
+# macOS Finder metadata.
+.DS_Store
+
+# files moved aside for later deletion (never committed)
+_to_delete/
+
+# built by tools/make_submission_zip.sh
+dist/
+
+# Local presentation review files.
+*.pptx
