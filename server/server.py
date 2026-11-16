@@ -85,6 +85,7 @@ except ImportError:
     from server.db import get_database, record_relay
     from server.lockout import LockoutGuard  # noqa: E402
     from server.security_log import log_event  # noqa: E402
+from server.relay_core import RelayCore
 from transport import LockedTLSSocket  # noqa: E402
 
 DEFAULT_HOST = "127.0.0.1"
@@ -171,10 +172,15 @@ _RELAYED_TYPES = {"handshake_init", "handshake_response", "chat"}
 _LAB_ACTIONS = {"tamper_next", "replay_last", "drop_next"}
 
 
-class ChatServer:
+class ChatServer(RelayCore):
     def __init__(self, host=DEFAULT_HOST, port=DEFAULT_PORT,
                  certfile=None, keyfile=None,
                  lab_mode=False, lockout=None):
+        super().__init__(lockout=lockout,
+            register=lambda *a, **kw: register_user(*a, **kw),
+            verify=lambda *a, **kw: verify_user(*a, **kw),
+            public_key=lambda *a, **kw: get_public_key(*a, **kw),
+            logger=lambda *a, **kw: log_event(*a, **kw))
         self.host = host
         self.port = port
         self.lab_mode = lab_mode
@@ -184,7 +190,6 @@ class ChatServer:
         # Stage D: login lockout + per-address rate limiting (server/lockout.py).
         # `lockout` is injectable so tests can use tiny thresholds/windows
         # instead of the real 5-failures/5-minute defaults.
-        self.lockout = lockout if lockout is not None else LockoutGuard()
         # Built eagerly (not lazily in serve_forever) so a missing-certs
         # error surfaces immediately when the server is constructed, not
         # buried inside the accept loop.
@@ -199,8 +204,6 @@ class ChatServer:
         # username -> conn (the TLS-wrapped socket). Guarded by _lock: every
         # client thread mutates it on join/leave and reads it on every
         # route/broadcast.
-        self.clients = {}
-        self._lock = threading.Lock()
 
         # Listening socket + lifecycle (see listen()/shutdown()). `_open_conns`
         # tracks EVERY accepted TLS connection (not just authenticated ones in
@@ -226,6 +229,9 @@ class ChatServer:
 
     def _send(self, conn, envelope):
         try:
+            if hasattr(conn, "send_envelope"):
+                conn.send_envelope(envelope)
+                return
             conn.sendall((json.dumps(envelope) + "\n").encode("utf-8"))
         except OSError:
             pass  # peer vanished; its own thread will clean it up
@@ -290,20 +296,7 @@ class ChatServer:
             if envelope is None:
                 return  # drop_next: never relayed
 
-        to_name = envelope.get("to")
-        with self._lock:
-            target = self.clients.get(to_name)
-        if target is None:
-            with self._lock:
-                sender_conn = self.clients.get(sender_name)
-            if sender_conn is not None:
-                self._send_system(
-                    sender_conn,
-                    f"[!] {to_name} is not online -- message not delivered.",
-                )
-            return
-        record_relay(envelope, sender_name, self.database)
-        self._send(target, envelope)
+        super().route(envelope, sender_name)
 
     def _handle_lab_control(self, conn, addr, name, envelope):
         """Arm (or, for replay_last, immediately perform) a one-shot lab
@@ -353,146 +346,17 @@ class ChatServer:
         self._send(conn, {"type": "lab_control_result", "action": action, "target": target,
                           "armed": True, "detail": detail})
 
-    def _handle_get_pubkey(self, conn, envelope):
-        """Answer a "get_pubkey" request directly from user_store -- this is
-        a lookup of already-public information, not a route to another
-        client, so it doesn't matter whether that user is currently online.
-        """
-        target_username = envelope.get("username")
-        public_key_pem = get_public_key(target_username) if target_username else None
-        self._send(conn, {
-            "type": "pubkey_result",
-            "username": target_username,
-            "public_key": public_key_pem,
-            "success": public_key_pem is not None,
-        })
-
-    def remove_client(self, conn):
-        with self._lock:
-            name = None
-            for uname, c in list(self.clients.items()):
-                if c is conn:
-                    name = uname
-                    del self.clients[uname]
-                    break
-        try:
-            conn.close()
-        except OSError:
-            pass
-        return name
-
     def _authenticate(self, conn, stream, addr):
-        """Consume "register"/"login" envelopes until one succeeds, and
-        return the authenticated username -- or None if the client
-        disconnects before authenticating. Any other envelope type sent
-        before authentication is rejected with a system message; the client
-        is not admitted to the roster and cannot route chat/handshake
-        envelopes until this returns a name.
-        """
         for line in stream:
-            line = line.strip()
-            if not line:
-                continue
             try:
                 envelope = json.loads(line)
             except json.JSONDecodeError:
                 continue
-
-            etype = envelope.get("type")
-            if etype not in ("register", "login"):
-                self._send_system(conn, "[!] Please register or login first.")
+            if not isinstance(envelope, dict):
                 continue
-
-            # Stage D: a per-source-address rate limit covers BOTH register
-            # and login attempts, independent of any one username -- this is
-            # what catches an attacker spreading guesses across many
-            # usernames, which the per-account lockout below alone would not.
-            if not self.lockout.check_address_rate(addr[0]):
-                self._send(conn, {
-                    "type": f"{etype}_result", "success": False,
-                    "reason": "too many requests from this address -- slow down and retry shortly",
-                })
-                log_event("address_rate_limited", from_addr=addr[0], attempted_type=etype)
-                continue
-
-            username = envelope.get("username")
-            password = envelope.get("password")
-            public_key_pem = envelope.get("public_key")
-            result_type = f"{etype}_result"
-            if not username or not password:
-                self._send(conn, {
-                    "type": result_type, "success": False,
-                    "reason": "username and password are required",
-                })
-                continue
-
-            if etype == "login":
-                # Checked BEFORE verify_user() -- and therefore before any
-                # PBKDF2 work -- so repeatedly hammering an already-locked
-                # account cannot be used to burn CPU. See server/lockout.py's
-                # module docstring for the enumeration-safety trade-off this
-                # implies (the generic "invalid username or password" is
-                # used right up through the failure that triggers the lock;
-                # only an attempt against an ALREADY-locked account gets
-                # this more specific message).
-                lock_status = self.lockout.status(username)
-                if lock_status.locked:
-                    retry_after = int(lock_status.retry_after) + 1
-                    self._send(conn, {
-                        "type": "login_result", "success": False,
-                        "reason": f"account temporarily locked, retry in {retry_after}s",
-                    })
-                    log_event("lockout_rejected", username=username, from_addr=addr[0],
-                             retry_after=retry_after)
-                    continue
-
-            with self._lock:
-                already_online = username in self.clients
-            if already_online:
-                self._send(conn, {
-                    "type": result_type, "success": False,
-                    "reason": f"'{username}' is already logged in elsewhere",
-                })
-                continue
-
-            if etype == "register":
-                if not register_user(username, password, public_key_pem=public_key_pem):
-                    self._send(conn, {
-                        "type": "register_result", "success": False,
-                        "reason": f"username '{username}' is already taken",
-                    })
-                    continue
-                self._send(conn, {
-                    "type": "register_result", "success": True,
-                    "reason": "registered and logged in",
-                    "lab_mode": self.lab_mode,
-                })
-                print(f"[+] {username} registered from {addr[0]}:{addr[1]}")
-                log_event("user_registered", username=username, from_addr=addr[0])
-                return username
-            else:  # login
-                if not verify_user(username, password):
-                    status = self.lockout.record_failure(username, addr=addr[0])
-                    log_event("failed_login", username=username, from_addr=addr[0])
-                    if status.newly_locked:
-                        print(f"[!] {username} locked out after repeated failed logins "
-                              f"(retry in {int(status.retry_after)}s)")
-                        log_event("account_locked", username=username, from_addr=addr[0],
-                                 retry_after=status.retry_after, lock_level=status.lock_level)
-                    self._send(conn, {
-                        "type": "login_result", "success": False,
-                        "reason": "invalid username or password",
-                    })
-                    continue
-                self.lockout.record_success(username)
-                self._send(conn, {
-                    "type": "login_result", "success": True,
-                    "reason": "login successful",
-                    "lab_mode": self.lab_mode,
-                })
-                print(f"[+] {username} logged in from {addr[0]}:{addr[1]}")
-                log_event("user_login", username=username, from_addr=addr[0])
-                return username
+            name = self.authenticate(conn, addr, envelope)
+            if name is not None:
+                return name
         return None
 
     def handle_client(self, conn, addr):
@@ -502,20 +366,6 @@ class ChatServer:
                 name = self._authenticate(conn, stream, addr)
                 if name is None:
                     return  # disconnected before authenticating
-
-                with self._lock:
-                    if name in self.clients:
-                        # Raced with another connection for the same user
-                        # between the authenticate check and here.
-                        self._send_system(conn, f"[!] '{name}' is already logged in elsewhere.")
-                        return
-                    self.clients[name] = conn
-                    roster = [u for u in self.clients if u != name]
-
-                print(f"[+] {name} joined the roster from {addr[0]}:{addr[1]}")
-                self._send(conn, {"type": "roster", "users": roster})
-                self.broadcast_system(f"*** {name} joined the chat ***", exclude=conn)
-                self.broadcast_event({"type": "user_joined", "username": name}, exclude=conn)
 
                 for line in stream:
                     line = line.strip()
@@ -528,31 +378,12 @@ class ChatServer:
                                  length=len(line))
                         continue
 
-                    etype = envelope.get("type")
-                    if etype in _RELAYED_TYPES:
-                        self.route(envelope, name)
-                    elif etype == "get_pubkey":
-                        self._handle_get_pubkey(conn, envelope)
-                    elif etype == "lab_control":
-                        # Always intercepted (never silently ignored like a
-                        # genuinely unknown type) so a rejected attempt is
-                        # always logged -- see _handle_lab_control.
+                    if not isinstance(envelope, dict):
+                        continue
+                    if envelope.get("type") == "lab_control":
                         self._handle_lab_control(conn, addr, name, envelope)
-                    elif etype == "security_alert":
-                        # Stage D: a client reporting that IT caught an
-                        # attack (GCM/signature/replay/chain/handshake). We
-                        # only log the metadata already in the envelope --
-                        # never re-derive or store anything sensitive -- and
-                        # never relay it anywhere; it's purely for the
-                        # security dashboard. See client.py's
-                        # _send_security_alert for exactly what it contains
-                        # and the "a malicious relay could drop this too"
-                        # limitation that's documented there.
-                        log_event("security_alert", reported_by=name, from_addr=addr[0],
-                                 alert=envelope.get("alert"), reason=envelope.get("reason"),
-                                 peer=envelope.get("peer"), seq=envelope.get("seq"))
-                    # Unknown/unsupported types are ignored -- the server
-                    # only understands routing, never message content.
+                    else:
+                        self.handle_authenticated(conn, addr, name, envelope)
         except (ConnectionResetError, ConnectionAbortedError, OSError):
             pass
         finally:
@@ -664,6 +495,7 @@ def main():
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--certfile", default=None)
     parser.add_argument("--keyfile", default=None)
+    parser.add_argument("--web-port", type=int, help="also serve HTTP/WebSocket clients on this port")
     parser.add_argument("--lab", action="store_true",
                          help="enable the opt-in Attack Lab (lab_control envelopes from "
                               "authenticated localhost clients only); OFF by default")
@@ -674,7 +506,21 @@ def main():
     except CertsMissingError as exc:
         print(f"[!] {exc}")
         sys.exit(1)
-    server.serve_forever()
+    if args.web_port is not None:
+        import uvicorn
+        from web.app import create_app
+        tcp_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        # Bind before starting HTTP so a TCP failure cannot silently split the demo.
+        server.listen()
+        tcp_thread.start()
+        try:
+            uvicorn.run(create_app(server), host=args.host, port=args.web_port,
+                        ws_max_size=int(os.environ.get("SECURECHAT_WS_MAX_BYTES", "65536")))
+        finally:
+            server.shutdown()
+            tcp_thread.join(timeout=5)
+    else:
+        server.serve_forever()
 
 
 if __name__ == "__main__":
