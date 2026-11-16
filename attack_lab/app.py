@@ -240,10 +240,16 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
         limited((token, write), 120 if not write else 30)
         return token
 
+    async def bounded_body(request, limit):
+        raw = bytearray()
+        async for chunk in request.stream():
+            if len(raw) + len(chunk) > limit:
+                raise HTTPException(413, "Lab request too large")
+            raw.extend(chunk)
+        return bytes(raw)
+
     async def body(request):
-        raw = await request.body()
-        if len(raw) > 16384:
-            raise HTTPException(413, "Lab control request too large")
+        raw = await bounded_body(request, 16384)
         try:
             result = json.loads(raw)
             if not isinstance(result, dict):
@@ -280,7 +286,9 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
         existing = request.cookies.get("lab_session")
         if authorized(existing):
             limited((existing, True), 30)
-            return JSONResponse(dict(generation=generation, accounts=list(ACCOUNTS), password=PASSWORD))
+            return JSONResponse(
+                dict(generation=generation, accounts=list(ACCOUNTS), password=PASSWORD)
+            )
         limited(("start", request.client.host), 10)
         form = request.headers.get("content-type", "").startswith(
             "application/x-www-form-urlencoded"
@@ -289,9 +297,7 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
             if form:
                 from urllib.parse import parse_qs
 
-                raw = await request.body()
-                if len(raw) > 2048:
-                    raise HTTPException(413, "Access request too large")
+                raw = await bounded_body(request, 2048)
                 provided = parse_qs(raw.decode("utf-8")).get("access_code", [""])[0]
             else:
                 provided = (await body(request)).get("access_code", "")

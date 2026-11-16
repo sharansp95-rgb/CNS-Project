@@ -228,6 +228,17 @@ def test_lab_access_gate_protects_assets_controls_and_websocket(monkeypatch, tmp
         assert "Lab access code" in gate.text and "noindex" in gate.text
         assert gate.headers["x-robots-tag"] == "noindex, nofollow"
         assert client.get("/victim").status_code == 401
+        assert (
+            client.post(
+                "/lab/session",
+                content="access_code=" + "x" * 3000,
+                headers={
+                    "origin": "https://lab.example",
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+            ).status_code
+            == 413
+        )
         assert client.get("/healthz").status_code == 200
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(
