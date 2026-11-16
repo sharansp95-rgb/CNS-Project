@@ -63,28 +63,16 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-try:
-    from user_store import get_public_key, register_user, verify_user
-except ImportError:  # running as part of the `server` package (e.g. tests)
-    from server.user_store import get_public_key, register_user, verify_user
+from server.user_store import get_public_key, register_user, verify_user
 
 from certs.generate_certs import cert_fingerprint_from_file  # noqa: E402
 from crypto_engine.dh_exchange import generate_keypair as generate_ecdh_keypair  # noqa: E402
 from crypto_engine.signatures import generate_keypair as generate_rsa_keypair  # noqa: E402
 from crypto_engine.signatures import sign  # noqa: E402
-# Same dual-mode import as user_store above: run as a script
-# (`python server/server.py`, the documented way) the server/ directory is on
-# sys.path and `import server` would find THIS FILE rather than the package,
-# so the sibling modules must be imported top-level there; imported as part
-# of the `server` package (tests, demos) they come from the package.
-try:
-    from db import get_database, record_relay
-    from lockout import LockoutGuard
-    from security_log import log_event
-except ImportError:
-    from server.db import get_database, record_relay
-    from server.lockout import LockoutGuard  # noqa: E402
-    from server.security_log import log_event  # noqa: E402
+# Package imports are identical in script and module mode (server/__init__.py).
+from server.db import get_database, record_relay
+from server.lockout import LockoutGuard
+from server.security_log import log_event
 from server.relay_core import RelayCore
 from transport import LockedTLSSocket  # noqa: E402
 

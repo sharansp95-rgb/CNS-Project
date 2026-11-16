@@ -69,7 +69,7 @@ def test_enter_submits_when_all_fields_are_filled_otherwise_moves_on(app):
     app._start_auth = lambda mode: calls.append(mode)
     entries = [app._fields[k].entry for k in ("username", "peer", "password")]
     app.username_var.set("alice")
-    entries[0].focus_set(); app.update()
+    entries[0].focus_force(); app.update()
     entries[0].event_generate("<Return>"); app.update()
     assert calls == [] and app.focus_get() is entries[1], "Enter should move to the next empty field"
     app.peer_var.set("bob"); app.password_var.set("pw")
