@@ -2,6 +2,7 @@
 """Create a separate Ed25519 receipt-signing key, without overwriting an identity."""
 
 import argparse
+import base64
 import os
 from pathlib import Path
 import tempfile
@@ -40,5 +41,21 @@ def generate(path=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--path")
+    parser.add_argument(
+        "--print-env",
+        action="store_true",
+        help="Print base64 PEM for Render; no file is written unless --path is supplied",
+    )
     args = parser.parse_args()
-    print(generate(args.path))
+    if args.print_env:
+        if args.path:
+            data = generate(args.path).read_bytes()
+        else:
+            data = Ed25519PrivateKey.generate().private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+        print(base64.b64encode(data).decode("ascii"))
+    else:
+        print(generate(args.path))

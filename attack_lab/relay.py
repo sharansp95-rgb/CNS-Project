@@ -7,7 +7,7 @@ from pathlib import Path
 import threading
 
 from sqlalchemy.engine import make_url
-from server.db import DEFAULT_DATABASE_URL, PROJECT_ROOT, get_database
+from server.db import DEFAULT_DATABASE_URL, PROJECT_ROOT, get_database, normalize_url
 from server.server import ChatServer
 from server.user_store import DatabaseUserStore
 from server.lockout import LockoutGuard
@@ -27,7 +27,7 @@ ACTIONS = frozenset(
 
 
 def _identity(url):
-    url = make_url(url)
+    url = normalize_url(url)
     if url.get_backend_name() == "sqlite":
         if url.query.get("uri") or str(url.database).startswith("file:"):
             raise ValueError("SQLite URI aliases are not allowed for lab databases")

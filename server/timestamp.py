@@ -1,6 +1,7 @@
 """Server-clock receipts, not an accredited timestamping authority."""
 
 import base64
+import os
 from collections import Counter
 from datetime import datetime, timezone
 from cryptography.hazmat.primitives import serialization
@@ -14,9 +15,25 @@ from server.db import relayed_envelopes
 
 class TimestampSigner:
     def __init__(self):
-        self.private = serialization.load_pem_private_key(
-            generate().read_bytes(), password=None
-        )
+        from web.settings import production
+
+        supplied = os.environ.get("TSA_PRIVATE_KEY")
+        if production() and not supplied:
+            raise ValueError(
+                "TSA_PRIVATE_KEY is required in production; disk generation is disabled"
+            )
+        if supplied:
+            try:
+                data = (
+                    supplied.encode("ascii")
+                    if "-----BEGIN" in supplied
+                    else base64.b64decode(supplied, validate=True)
+                )
+            except (ValueError, UnicodeError) as exc:
+                raise ValueError("TSA_PRIVATE_KEY must be PEM or base64 PEM") from exc
+        else:
+            data = generate().read_bytes()
+        self.private = serialization.load_pem_private_key(data, password=None)
         if not isinstance(self.private, Ed25519PrivateKey):
             raise ValueError("TSA key must be a dedicated Ed25519 private key")
         self.public = self.private.public_key()

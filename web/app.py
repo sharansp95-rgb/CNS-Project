@@ -1,4 +1,5 @@
 """Hardened WebSocket transport; crypto remains exclusively in the clients."""
+
 import asyncio
 from collections import deque
 from contextlib import asynccontextmanager, suppress
@@ -12,6 +13,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from server.relay_core import RelayCore, RELAYED_TYPES
+from web.settings import Settings, install_transport
 
 STATIC = Path(__file__).with_name("static")
 ALLOWED_TYPES = RELAYED_TYPES | {"register", "login", "get_pubkey", "security_alert"}
@@ -23,6 +25,7 @@ class WebSocketPeer:
     call_soon_threadsafe only schedules work, so the relay never waits for its
     own event loop while holding a roster lock. Slow peers are disconnected.
     """
+
     def __init__(self, websocket, vault=None):
         self.vault = vault
         self.token = None
@@ -35,9 +38,14 @@ class WebSocketPeer:
     def send_envelope(self, envelope):
         if self.closed.is_set():
             return
-        if self.vault and envelope.get("type") in ("register_result", "login_result") and envelope.get("success"):
+        if (
+            self.vault
+            and envelope.get("type") in ("register_result", "login_result")
+            and envelope.get("success")
+        ):
             self.token = self.vault.issue(self.attempted_username)
             envelope = dict(envelope, api_token=self.token)
+
         def put():
             if self.closed.is_set():
                 return
@@ -45,14 +53,17 @@ class WebSocketPeer:
                 self.outbox.put_nowait(envelope)
             except asyncio.QueueFull:
                 self.close(1013)
+
         self.loop.call_soon_threadsafe(put)
 
     def close(self, code=1000):
         if not self.closed.is_set():
             self.closed.set()
+
             async def close_socket():
                 with suppress(RuntimeError, WebSocketDisconnect):
                     await self.websocket.close(code=code)
+
             self.loop.call_soon_threadsafe(lambda: asyncio.create_task(close_socket()))
 
     async def write_loop(self):
@@ -60,10 +71,36 @@ class WebSocketPeer:
             await self.websocket.send_json(await self.outbox.get())
 
 
-def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None, idle_timeout=None, include_vault=True):
-    allowed_origins = set(origins if origins is not None else filter(None,
-        (x.strip() for x in os.environ.get("SECURECHAT_ALLOWED_ORIGINS",
-            "http://localhost:8080,http://127.0.0.1:8080").split(","))))
+def create_app(
+    relay=None,
+    *,
+    origins=None,
+    max_frame_size=None,
+    rate_limit=None,
+    idle_timeout=None,
+    include_vault=True,
+):
+    settings = Settings.load(
+        origins,
+        os.environ.get(
+            "SECURECHAT_ALLOWED_ORIGINS", "http://localhost:8080,http://127.0.0.1:8080"
+        ),
+    )
+    allowed_origins = settings.origins
+    signer = None
+    if settings.production and include_vault:
+        from server.db import normalize_url
+        from server.timestamp import TimestampSigner
+
+        if (
+            not os.environ.get("DATABASE_URL")
+            or normalize_url(os.environ["DATABASE_URL"]).get_backend_name()
+            != "postgresql"
+        ):
+            raise ValueError(
+                "Production main service requires a PostgreSQL DATABASE_URL"
+            )
+        signer = TimestampSigner()  # validate before opening the database
     max_size = int(max_frame_size or os.environ.get("SECURECHAT_WS_MAX_BYTES", "65536"))
     rate = int(rate_limit or os.environ.get("SECURECHAT_WS_RATE_LIMIT", "60"))
     idle = float(idle_timeout or os.environ.get("SECURECHAT_WS_IDLE_SECONDS", "120"))
@@ -83,18 +120,40 @@ def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None
     app.state.relay = core
     app.state.peers = set()
     from web.vault_api import VaultAPI
+
     vault = VaultAPI(app, core.database) if include_vault else None
+    if vault and signer:
+        vault.signer = signer
     app.state.vault = vault
+
+    @app.get("/healthz")
+    async def health():
+        from sqlalchemy import text
+        from fastapi.responses import JSONResponse
+
+        def check():
+            with core.database.engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+
+        try:
+            await asyncio.to_thread(check)
+            return {"status": "ok"}
+        except Exception:
+            return JSONResponse({"status": "unavailable"}, status_code=503)
 
     @app.middleware("http")
     async def security_headers(request, call_next):
         response = await call_next(request)
-        response.headers.update({
-            "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
-            "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
-            "X-Frame-Options": "DENY", "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-            "Cache-Control": "no-store",
-        })
+        response.headers.update(
+            {
+                "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+                "X-Frame-Options": "DENY",
+                "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+                "Cache-Control": "no-store",
+            }
+        )
         return response
 
     @app.websocket("/ws")
@@ -133,19 +192,35 @@ def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None
                 except (ValueError, RecursionError):
                     await ws.close(code=1008)
                     break
-                if not isinstance(envelope, dict) or not isinstance(envelope.get("type"), str) or envelope["type"] not in ALLOWED_TYPES:
-                    await asyncio.to_thread(core.log_event, "unsupported_envelope", username=name, from_addr=addr[0], envelope_type="unknown type")
+                if (
+                    not isinstance(envelope, dict)
+                    or not isinstance(envelope.get("type"), str)
+                    or envelope["type"] not in ALLOWED_TYPES
+                ):
+                    await asyncio.to_thread(
+                        core.log_event,
+                        "unsupported_envelope",
+                        username=name,
+                        from_addr=addr[0],
+                        envelope_type="unknown type",
+                    )
                     await ws.close(code=1008)
                     break
-                if any(field in envelope and not isinstance(envelope[field], str)
-                       for field in ("to", "from", "username", "password", "public_key")):
+                if any(
+                    field in envelope and not isinstance(envelope[field], str)
+                    for field in ("to", "from", "username", "password", "public_key")
+                ):
                     await ws.close(code=1008)
                     break
                 if name is None:
                     peer.attempted_username = envelope.get("username")
-                    name = await asyncio.to_thread(core.authenticate, peer, addr, envelope)
+                    name = await asyncio.to_thread(
+                        core.authenticate, peer, addr, envelope
+                    )
                 else:
-                    await asyncio.to_thread(core.handle_authenticated, peer, addr, name, envelope)
+                    await asyncio.to_thread(
+                        core.handle_authenticated, peer, addr, name, envelope
+                    )
         except asyncio.TimeoutError:
             await ws.close(code=1001)
         except (WebSocketDisconnect, RuntimeError):
@@ -160,8 +235,12 @@ def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None
             app.state.peers.discard(peer)
             removed = await asyncio.to_thread(core.remove_client, peer)
             if removed:
-                await asyncio.to_thread(core.broadcast_system, f"*** {removed} left the chat ***")
-                await asyncio.to_thread(core.broadcast_event, {"type": "user_left", "username": removed})
+                await asyncio.to_thread(
+                    core.broadcast_system, f"*** {removed} left the chat ***"
+                )
+                await asyncio.to_thread(
+                    core.broadcast_event, {"type": "user_left", "username": removed}
+                )
 
     @app.get("/verify")
     @app.get("/evidence")
@@ -169,9 +248,14 @@ def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None
     async def index():
         if not (STATIC / "index.html").exists():
             from fastapi.responses import PlainTextResponse
-            return PlainTextResponse("Build the frontend: cd web/frontend && npm ci && npm run build", status_code=503)
+
+            return PlainTextResponse(
+                "Build the frontend: cd web/frontend && npm ci && npm run build",
+                status_code=503,
+            )
         return FileResponse(STATIC / "index.html")
 
     if (STATIC / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=STATIC / "assets"), name="assets")
+    install_transport(app, settings)
     return app

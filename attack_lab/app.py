@@ -4,6 +4,7 @@ import asyncio
 from collections import deque
 from contextlib import asynccontextmanager
 import json
+import hmac
 import os
 from pathlib import Path
 import secrets
@@ -11,13 +12,15 @@ import threading
 import time
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, insert, select, update
 from auth.password_hash import hash_password
 from server.db import metadata, users, PROJECT_ROOT
 from web.app import create_app as product_gateway, STATIC as PRODUCT_STATIC
 from attack_lab.relay import RogueRelay, lab_database
+from attack_lab.access import LabAccessGate
+from web.settings import Settings, install_transport
 
 ROOT = Path(__file__).resolve().parent
 ACCOUNTS = ("lab_alice", "lab_bob")
@@ -72,21 +75,43 @@ def certificates(root):
 
 
 def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None):
-    database = lab_database(database_url)
     port = int(os.environ.get("PORT", "8090"))
-    origins = set(
-        origins
-        or filter(
-            None,
-            (
-                x.strip()
-                for x in os.environ.get(
-                    "LAB_ALLOWED_ORIGINS",
-                    f"http://localhost:{port},http://127.0.0.1:{port}",
-                ).split(",")
-            ),
-        )
+    settings = Settings.load(
+        origins,
+        os.environ.get(
+            "LAB_ALLOWED_ORIGINS", f"http://localhost:{port},http://127.0.0.1:{port}"
+        ),
     )
+    origins = set(settings.origins)
+    access_code = os.environ.get("LAB_ACCESS_CODE", "")
+    if settings.production:
+        if len(access_code.encode()) < 24:
+            raise ValueError(
+                "A strong LAB_ACCESS_CODE (at least 24 bytes) is required in production"
+            )
+        if not os.environ.get("MAIN_SITE_ORIGIN"):
+            raise ValueError(
+                "MAIN_SITE_ORIGIN is required to enforce separate lab origins"
+            )
+        Settings.load([os.environ["MAIN_SITE_ORIGIN"]])
+        if os.environ.get("DATABASE_URL"):
+            raise ValueError("Do not give the sandbox the main DATABASE_URL")
+        from sqlalchemy.engine import make_url
+
+        if (
+            make_url(
+                database_url
+                or os.environ.get("LAB_DATABASE_URL", "sqlite:///data/attack_lab.db")
+            ).get_backend_name()
+            != "sqlite"
+        ):
+            raise ValueError(
+                "Production sandbox must use its own ephemeral SQLite database"
+            )
+        if tcp_port is not None:
+            raise ValueError(
+                "Production sandbox exposes HTTP/WS only; TCP is a local demo"
+            )
     real_origins = {
         x.strip()
         for x in os.environ.get(
@@ -94,19 +119,30 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
         ).split(",")
         if x.strip()
     }
+    if os.environ.get("MAIN_SITE_ORIGIN"):
+        real_origins.add(os.environ["MAIN_SITE_ORIGIN"])
     if not origins or "*" in origins or origins & real_origins:
         raise ValueError(
             "Lab origins must be explicit and different from the real service"
         )
+    database = lab_database(database_url)
     state = Path(
         state_dir or os.environ.get("LAB_STATE_DIR") or PROJECT_ROOT / "data/attack_lab"
     )
-    cert, key = certificates(state / "certs")
+    cert, key = (
+        certificates(state / "certs")
+        if tcp_port is not None or not settings.production
+        else (None, None)
+    )
     from server.security_log import log_event
 
     logger = lambda event, **fields: log_event(
         event, path=str(state / "security_events.jsonl"), database=database, **fields
     )
+    # The rogue TLS adapter needs a context even with no listener; local sandbox
+    # certificates are separate from identity/TSA keys and may be ephemeral.
+    if cert is None:
+        cert, key = certificates(state / "certs")
     relay = RogueRelay(certfile=cert, keyfile=key, database=database, logger=logger)
     sessions = {}
     rates = {}
@@ -174,6 +210,12 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
     app.state.database = database
     app.state.seed = seed
 
+    def authorized(token):
+        with guard:
+            return bool(token and sessions.get(token, 0) > time.monotonic())
+
+    app.add_middleware(LabAccessGate, enabled=bool(access_code), authorized=authorized)
+
     def limited(key, limit=30):
         now = time.monotonic()
         with guard:
@@ -219,8 +261,9 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
         )
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Referrer-Policy"] = "same-origin"
         response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
         return response
 
     @app.get("/")
@@ -234,7 +277,28 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
     @app.post("/lab/session")
     async def start(request: Request):
         allowed(request)
+        existing = request.cookies.get("lab_session")
+        if authorized(existing):
+            limited((existing, True), 30)
+            return JSONResponse(dict(generation=generation, accounts=list(ACCOUNTS), password=PASSWORD))
         limited(("start", request.client.host), 10)
+        form = request.headers.get("content-type", "").startswith(
+            "application/x-www-form-urlencoded"
+        )
+        if access_code and not authorized(request.cookies.get("lab_session")):
+            if form:
+                from urllib.parse import parse_qs
+
+                raw = await request.body()
+                if len(raw) > 2048:
+                    raise HTTPException(413, "Access request too large")
+                provided = parse_qs(raw.decode("utf-8")).get("access_code", [""])[0]
+            else:
+                provided = (await body(request)).get("access_code", "")
+            if not isinstance(provided, str) or not hmac.compare_digest(
+                provided.encode(), access_code.encode()
+            ):
+                raise HTTPException(403, "Invalid lab access code")
         token = secrets.token_urlsafe(32)
         with guard:
             now = time.monotonic()
@@ -242,16 +306,20 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
             for k in expired:
                 sessions.pop(k)
             sessions[token] = now + 3600
-        response = JSONResponse(
-            dict(generation=generation, accounts=list(ACCOUNTS), password=PASSWORD)
+        response = (
+            RedirectResponse("/", status_code=303)
+            if form
+            else JSONResponse(
+                dict(generation=generation, accounts=list(ACCOUNTS), password=PASSWORD)
+            )
         )
         response.set_cookie(
             "lab_session",
             token,
             httponly=True,
             samesite="strict",
-            secure=request.url.scheme == "https",
-            path="/lab",
+            secure=settings.production or request.url.scheme == "https",
+            path="/",
             max_age=3600,
         )
         return response
@@ -361,4 +429,5 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
     # Reuse the real gateway unchanged, scoped to this relay and origin. The lab
     # disables the unrelated evidence vault; no real receipt keys are touched.
     app.mount("/", product_gateway(relay, origins=origins, include_vault=False))
+    install_transport(app, settings)
     return app

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Attack Lab access</title>
+  </head>
+  <body>
+    <header><strong>ATTACK LAB — sandbox, not the real service</strong></header>
+    <main>
+      <h1>Enter the lab access code</h1>
+      <p>
+        This separate sandbox uses demo accounts. Your host provides the access
+        code.
+      </p>
+      <form method="post" action="/lab/session">
+        <label
+          >Lab access code
+          <input
+            type="password"
+            name="access_code"
+            required
+            autocomplete="off"
+            maxlength="256" /></label
+        ><button type="submit">Enter sandbox</button>
+      </form>
+    </main>
+  </body>
+</html>

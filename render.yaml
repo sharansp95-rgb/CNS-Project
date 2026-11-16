@@ -1,0 +1,47 @@
+# Uses committed, locally rebuilt web/static and attack_lab/static artifacts.
+# No Docker, paid disk, scheduler, pinger or additional worker.
+services:
+  - type: web
+    name: team15-securechat
+    runtime: python
+    plan: free
+    numInstances: 1
+    buildCommand: pip install -r requirements.txt && python tools/check_static_assets.py
+    startCommand: python -m web
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: APP_ENV
+        value: production
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: FORWARDED_ALLOW_IPS
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: TSA_PRIVATE_KEY
+        sync: false
+  - type: web
+    name: team15-attack-lab
+    runtime: python
+    plan: free
+    numInstances: 1
+    buildCommand: pip install -r requirements.txt && python tools/check_static_assets.py
+    startCommand: python -m attack_lab
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: APP_ENV
+        value: production
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: MAIN_SITE_ORIGIN
+        sync: false
+      - key: FORWARDED_ALLOW_IPS
+        sync: false
+      - key: LAB_ACCESS_CODE
+        sync: false
+      - key: LAB_DATABASE_URL
+        value: sqlite:///data/attack_lab.db

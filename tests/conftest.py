@@ -95,13 +95,23 @@ def _test_certs():
 
 
 @pytest.fixture(autouse=True)
-def isolated_state(tmp_path, monkeypatch):
+def isolated_state(tmp_path, monkeypatch, request):
     """Per-test SQLite database, key directory and JSONL security mirror.
 
     DATABASE_URL is inherited by script-mode subprocesses as well.
     """
+    from contextlib import ExitStack
+    stack = ExitStack()
+    database_url = "sqlite:///" + str(tmp_path / "securechat.db")
+    if os.environ.get("TEST_DATABASE_URL") and request.node.path.name in {
+        "test_database.py", "test_lockout.py", "test_security_events.py",
+        "test_web_gateway.py", "test_evidence_vault.py", "test_postgres_upgrade.py",
+    }:
+        from tools.postgres_test_support import postgres_schema
+        database_url = stack.enter_context(postgres_schema(
+            os.environ["TEST_DATABASE_URL"], os.environ.get("DATABASE_URL")))
     monkeypatch.setenv("TSA_KEY_PATH", str(tmp_path / "tsa.key"))
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///" + str(tmp_path / "securechat.db"))
+    monkeypatch.setenv("DATABASE_URL", database_url)
     keys_dir = str(tmp_path / "keys")
     for module in (client_module, dc):
         monkeypatch.setattr(module, "save_private_key",
@@ -116,6 +126,7 @@ def isolated_state(tmp_path, monkeypatch):
     yield log_path
     from server.db import dispose_databases
     dispose_databases()
+    stack.close()
 
 
 @pytest.fixture()

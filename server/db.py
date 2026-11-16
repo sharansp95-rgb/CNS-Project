@@ -60,10 +60,24 @@ schema_version = Table("schema_version", metadata,
     Column("version", Integer, primary_key=True))
 
 
+def normalize_url(url):
+    """Neon/libpq URLs use psycopg 3 and cannot fall back to unencrypted TCP."""
+    url = make_url(url)
+    if url.drivername in ("postgres", "postgresql", "postgresql+psycopg"):
+        mode = url.query.get("sslmode")
+        if mode and mode not in ("require", "verify-ca", "verify-full"):
+            raise ValueError("PostgreSQL requires sslmode=require or stronger")
+        url = url.set(drivername="postgresql+psycopg").update_query_dict({"sslmode": mode or "require"})
+    return url
+
+
 class Database:
     def __init__(self, url):
-        url = make_url(url)
+        url = normalize_url(url)
         kwargs = {"pool_pre_ping": True}
+        if url.get_backend_name() == "postgresql":
+            kwargs.update(pool_size=2, max_overflow=1, pool_recycle=240, pool_timeout=30,
+                          connect_args={"connect_timeout": 15})
         if url.get_backend_name() == "sqlite":
             if url.database and url.database != ":memory:":
                 Path(url.database).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
@@ -122,7 +136,7 @@ _cache_lock = threading.Lock()
 
 
 def get_database(url=None):
-    url = make_url(url or os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL)
+    url = normalize_url(url or os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL)
     with _cache_lock:
         if url not in _databases:
             _databases[url] = Database(url)
