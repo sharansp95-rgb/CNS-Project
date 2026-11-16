@@ -5,6 +5,8 @@
 # and the three GUI windows, arranged so none fully covers another.
 #
 #   demo/start_demo.sh               server on port 5000, Attack Lab ON
+#   demo/start_demo.sh --web       also serve the browser client on localhost:8080
+#   demo/start_demo.sh --web-port N  choose the browser port
 #   demo/start_demo.sh --no-lab      normal mode (no Attack Lab)
 #   demo/start_demo.sh --port 5055   use another port (e.g. if you prefer
 #                                    to stay clear of macOS AirPlay on 5000)
@@ -31,19 +33,29 @@ LAB=1
 SIMPLE=0
 WIRESHARK=0
 PRESENTATION=0
+WEB_PORT=""
 while [ $# -gt 0 ]; do
     case "$1" in
+        --web) WEB_PORT=8080; shift ;;
+        --web-port) [ $# -ge 2 ] || { echo "--web-port needs a number" >&2; exit 2; }; WEB_PORT="$2"; shift 2 ;;
         --no-lab) LAB=0; shift ;;
         --simple) SIMPLE=1; shift ;;
         --wireshark) WIRESHARK=1; shift ;;
         --presentation) PRESENTATION=1; shift ;;
         --port)   PORT="${2:-}"; shift 2 ;;
-        -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
     esac
 done
 case "$PORT" in ''|*[!0-9]*) echo "--port needs a number, got '$PORT'" >&2; exit 2 ;; esac
 
+if [ -n "$WEB_PORT" ]; then
+    case "$WEB_PORT" in *[!0-9]*) echo "--web-port needs a number" >&2; exit 2 ;; esac
+    if [ "$WEB_PORT" -lt 1 ] || [ "$WEB_PORT" -gt 65535 ]; then echo "--web-port must be 1..65535" >&2; exit 2; fi
+    if [ ! -f "$ROOT/web/static/index.html" ]; then echo "Build the browser client: cd web/frontend && npm ci && npm run build" >&2; exit 1; fi
+    export SECURECHAT_ALLOWED_ORIGINS="${SECURECHAT_ALLOWED_ORIGINS:-http://localhost:$WEB_PORT,http://127.0.0.1:$WEB_PORT}"
+    echo "Browser client: http://localhost:$WEB_PORT (shares the TCP roster)"
+fi
 cd "$ROOT" || exit 1
 if [ ! -x "$PY" ]; then
     echo "No virtualenv at $ROOT/.venv. Create it first:" >&2
@@ -103,19 +115,25 @@ eval "$("$PY" demo/layout.py $SCREEN $LAYOUT_FLAGS)"
 echo "    screen $SCREEN -> windows tiled$( [ "$OVERLAP" = 1 ] && echo " (screen too small to tile without overlap: click a title bar to raise a window)" )"
 
 LABFLAG=""; MODE="normal mode"
+WEBFLAG=""
+[ -n "$WEB_PORT" ] && WEBFLAG="--web-port $WEB_PORT"
 [ "$LAB" = 1 ] && { LABFLAG="--lab"; MODE="Attack Lab ON"; }
 
 wait_for_server() {
-    "$PY" - "$PORT" <<'PYEOF'
-import sys, time
+    "$PY" - "$PORT" "$WEB_PORT" <<'PYEOF'
+import sys, time, urllib.request
 sys.path.insert(0, ".")
 from client.client import TLSSetupError, connect_tls
 port, deadline, last = int(sys.argv[1]), time.time() + 40, None
 while time.time() < deadline:
     try:
         connect_tls("127.0.0.1", port, on_cert_fingerprint=lambda fp: None).close()
+        if sys.argv[2]:
+            with urllib.request.urlopen("http://localhost:" + sys.argv[2] + "/", timeout=1) as response:
+                if response.status != 200:
+                    raise OSError("browser frontend is not ready")
         sys.exit(0)
-    except TLSSetupError as exc:
+    except (TLSSetupError, OSError) as exc:
         last = str(exc).splitlines()[0]
         time.sleep(0.4)
 print(f"    server not ready after 40s: {last}", file=sys.stderr)
@@ -143,7 +161,7 @@ if [ "$SIMPLE" = 1 ]; then
     mkdir -p "$ROOT/logs"
     if [ "$WIRESHARK" = 1 ]; then echo "[3/5] Starting the Wireshark capture"; start_wireshark; fi
     echo "[4/5] Starting the server in the background ($MODE, port $PORT)"
-    nohup "$PY" -u server/server.py $LABFLAG --port "$PORT" > "$ROOT/logs/demo_server.log" 2>&1 &
+    nohup "$PY" -u server/server.py $LABFLAG $WEBFLAG --port "$PORT" > "$ROOT/logs/demo_server.log" 2>&1 &
     if ! wait_for_server; then
         echo "The server did not start; see logs/demo_server.log" >&2; exit 1
     fi
@@ -181,7 +199,7 @@ OSA
 }
 
 echo "[3/5] Opening the server window ($MODE, port $PORT)"
-open_terminal "$TITLE_PREFIX · Server (port $PORT)" "python server/server.py $LABFLAG --port $PORT" $SERVER_BOUNDS
+open_terminal "$TITLE_PREFIX · Server (port $PORT)" "SECURECHAT_ALLOWED_ORIGINS='http://localhost:${WEB_PORT:-8080},http://127.0.0.1:${WEB_PORT:-8080}' python server/server.py $LABFLAG $WEBFLAG --port $PORT" $SERVER_BOUNDS
 
 echo "[4/5] Waiting for the server to accept TLS connections"
 if ! wait_for_server

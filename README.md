@@ -6,7 +6,7 @@
 >
 > | Measured (see [Evaluation results](#evaluation-results)) | |
 > |---|---|
-> | Automated tests | **361 passed, 6 pre-existing GUI failures** |
+> | Automated tests | **382 passing Python tests + 15 Vitest + 3 Playwright** |
 > | Attacks detected (tamper, replay, drop, MITM, edited evidence, password burst; 20 each) | **120 / 120**, 0 false rejections in 200 normal messages |
 > | End-to-end message latency (real TLS server, loopback) | **~1.2 ms** median (requirement: < 1 s) |
 >
@@ -31,7 +31,7 @@ to broker keys), derives a fresh AES-256-GCM session key, signs and encrypts eve
 message with it, wraps the whole client↔server connection in TLS, gates every
 connection behind a PBKDF2-hashed login, rejects replayed or tampered messages, detects
 a relay dropping or reordering messages via a hash-chained conversation log, and locks
-out repeated failed logins — all properties covered by the automated suite (367 tests) and five
+out repeated failed logins — all properties covered by the automated suite (382 Python tests, plus browser tests) and five
 live attack-and-defense demo scripts, plus a Tkinter GUI whose "Wire Log" panel makes
 the cryptography visible during a demo instead of invisible, an opt-in **Attack Lab**
 that triggers those same attacks for real with one click, and a live **Security
@@ -105,6 +105,124 @@ who's never run it before should do, live in front of the professor), see
 [`demo/full_walkthrough.md`](demo/full_walkthrough.md). Click any message bubble
 to open its **security receipt**, and use **Export Evidence** (top bar) to write a
 signed evidence file you can check with `python tools/verify_transcript.py`.
+
+## Web client
+
+The browser and Tkinter clients use the same envelope protocol and end-to-end
+cryptography. They can talk to each other through one shared relay roster. The browser
+has registration/login, message bubbles, signed peer fingerprints, a Wire Log,
+clickable security receipts, dark/light themes, wrapped key backups, and offline
+signed evidence exports. Layouts adapt to phone widths.
+
+The compiled frontend in `web/static/` is **committed** so a Python-only installation
+can serve the browser client immediately. Source lives in `web/frontend/`, with exact
+npm versions and a lockfile. Building requires Node.js 20.19+ (20.x) or 22.12+;
+this phase was verified with Node.js 26.10. After editing frontend source, rebuild and commit the
+updated static assets alongside it:
+
+```sh
+.venv/bin/python -m pip install -r requirements.txt
+cd web/frontend
+npm ci
+npm run build
+# Return to the project root:
+cd ../..
+```
+
+Local shared-roster mode (use a free TCP port if macOS AirPlay owns 5000):
+
+```sh
+.venv/bin/python server/server.py --web-port 8080
+# Or: .venv/bin/python server/server.py --port 5055 --web-port 8080
+# Browser: http://localhost:8080; Tkinter: the selected TCP port.
+# Full existing desktop demo plus browser gateway:
+demo/start_demo.sh --web
+# Optional: demo/start_demo.sh --web-port 8081 --port 5055
+```
+
+HTTP/WS-only mode, with no TCP listener and no Attack Lab imports:
+
+```sh
+PORT=8080 .venv/bin/python -m web
+```
+
+It binds `0.0.0.0` by default (`WEB_HOST` overrides). Run a **single process/worker**:
+rosters and per-address rate limits are process-local. For deployment, provision
+HTTPS at a trusted reverse proxy, set `DATABASE_URL` as described below, and set
+`SECURECHAT_ALLOWED_ORIGINS=https://your-chat-host.example`. Browsers then automatically
+use WSS. Local loopback HTTP uses WS: **chat stays end-to-end encrypted, but login
+passwords require HTTPS/WSS for network transport protection**. WebCrypto requires a
+secure browser context (HTTPS, or trusted localhost). Do not expose local HTTP mode
+as a public password-protected service. The relay still sees a login password before
+hashing it, exactly as with the desktop TLS login.
+
+Gateway policy (defaults):
+
+| Environment variable | Default / meaning |
+|---|---|
+| `SECURECHAT_ALLOWED_ORIGINS` | Exact comma-separated origins: `http://localhost:8080,http://127.0.0.1:8080`; missing/unlisted Origin is rejected, wildcards forbidden |
+| `SECURECHAT_WS_MAX_BYTES` | `65536` UTF-8 bytes per text message; binary messages rejected |
+| `SECURECHAT_WS_RATE_LIMIT` | `60` received frames per connection per rolling 10 seconds |
+| `SECURECHAT_WS_IDLE_SECONDS` | `120` seconds without an incoming frame |
+
+PBKDF2 and SQL operations run in worker threads. The synchronous shared core protects
+roster/auth changes with a lock; WebSocket peers use a bounded asyncio outbox scheduled
+with `call_soon_threadsafe`. Slow consumers are disconnected. Unknown envelope types
+(including `lab_control`) are rejected. All normal auth and relay events use the same
+Phase 1 DB adapters. HTTP assets have CSP without inline scripts/styles, `nosniff`,
+`no-referrer`, frame denial and disabled camera/microphone permissions.
+
+To develop with Vite, run `npm exec vite -- --host 127.0.0.1` from `web/frontend/` and
+start the gateway with `SECURECHAT_ALLOWED_ORIGINS=http://127.0.0.1:5173`; Vite proxies
+`/ws` to port 8080. Production headers apply to the built app served by FastAPI.
+
+Browser identities are generated locally. The private PKCS8 bytes are wrapped with
+AES-256-GCM under PBKDF2-HMAC-SHA256 (600,000 iterations, random 16-byte salt, random
+12-byte nonce); the wrapped object is stored in IndexedDB. Username and public PEM
+are authenticated as wrapping AAD. Runtime signing keys are non-extractable. Use
+**Download key backup** before clearing browser data; on another browser enter the
+same username/password, import that wrapped JSON backup, then log in. Import verifies
+that the private key matches the backup's public key; login also checks the account's
+server-stored public key. Passwords, wrapping keys and private keys never appear in
+chat envelopes, Wire Log or SQL. Register/login passwords are the necessary exception:
+they are sent only for authentication and redacted from Wire Log.
+
+Browser storage trade-offs: a lost backup/cleared IndexedDB loses the identity; there
+is no recovery or password-change flow. Backups permit offline password guessing, so
+use a strong password. An unlocked key and plaintext messages exist in browser memory;
+XSS, malicious extensions, or a compromised server serving altered JavaScript can
+access that session. CSP reduces injection risk but cannot eliminate this trust in
+the delivered client code. Desktop identities remain in the existing local PEM store;
+a browser login needs a matching browser backup, not just an account password.
+
+Exact compatibility parameters:
+
+| Primitive | Browser and Python wire contract |
+|---|---|
+| Identity signatures | RSA-2048, exponent 65537, PSS SHA-256 / MGF1-SHA256, **222-byte salt** (`PSS.MAX_LENGTH`, not digest length) |
+| Handshake | Fresh X25519, RSA signature over raw 32-byte public key; native WebCrypto with `@noble/curves` fallback; verify before derivation |
+| Derivation | HKDF-SHA256, 32-byte output, zero/absent salt, info `CNSProject secure-chat ECDH session key v1` |
+| Chat encryption | AES-256-GCM, random 12-byte nonce, 16-byte tag, no AAD; ciphertext and tag split into the existing base64 fields |
+| Canonical records | Python-compatible recursively sorted, compact ASCII JSON, Unicode escaped, integer epoch seconds; SHA-256 chain hashes |
+| Replay / chain | Inclusive 30-second past / 5-second future window; 35-second nonce memory; per-sender genesis and sequence; authenticated gaps warn/resync, broken chains reject |
+
+Evidence exports intentionally contain verified plaintext and remain browser-local.
+`tools/verify_transcript.py` is unchanged. Browser protocol handlers and the UI action
+area can be extended in later phases; this phase adds no media, calls or web Attack Lab.
+
+Run browser tests from `web/frontend/` after installing Python requirements:
+
+```sh
+npm test
+npx playwright install chromium
+npm run test:e2e
+```
+
+Playwright starts a throwaway shared relay, temporary DB/certificates/logs, two isolated
+browser contexts and a real Python TLS peer. It checks receipts, valid evidence,
+wrapped-key restoration and mobile fit. Avoid running GUI pytest concurrently with
+browser launches because native keyboard focus is shared on macOS. Chromium was tested;
+Firefox and Safari were not exercised in this phase.
 
 ## Database
 
@@ -385,19 +503,22 @@ pytest tests/ -v
 
 Keyboard-focus GUI tests on Linux require a running window manager.
 
-Database-phase validation on this machine (2026-11-16), using
-`.venv/bin/python -m pytest tests/ -q`: **before: 346 passed, 6 failed (352 total)**;
-**after: 361 passed, 6 failed (367 total)**. All 15 new database tests pass, including
-real TLS server restart lockout persistence, database uniqueness, a full encrypted
-chat round trip scanning every table/column for plaintext, idempotent migration,
-URL overrides, retention and concurrent writes. The same six pre-existing GUI tests
-fail before and after: Attack Lab size, network legend width, dashboard tile width,
-dashboard header width, login progress timing, and receipt size. No existing test
-assertions were changed. Docker is not installed, so PostgreSQL DDL compilation and
-psycopg loading were checked, but a live PostgreSQL test run was not possible.
-The historical evaluation tables/screenshots below are not DB-phase benchmarks.
+Browser-phase validation (2026-11-16): initial baseline **361 passed, 6 failed**;
+after the GUI fixes **367 passed, 0 failed**; final Python suite **382 passed, 0 failed**.
+Vitest: **15 passed**. Playwright/Chromium: **3 passed**. The six original GUI failures
+were caused by double font scaling at 96 DPI, a presentation test racing a real socket
+failure, and missing focus preconditions for synthetic keyboard events. Font scaling
+now accounts for Tk's reported DPI; presentation tests control their worker/events and
+keyboard focus. Assertions were preserved. Starlette currently emits a deprecation
+warning for its httpx test-client adapter; no tests fail or are skipped.
 
-367 tests across 29 test files, including 15 database tests (the first seven one per project phase): `test_aes_gcm.py`
+The WebSocket suite covers admission, persistent lockout before PBKDF2, origin/frame/
+rate/idle/type policies, security headers, a DB plaintext scan after encrypted chat,
+and real combined CLI startup. Browser vectors run both directions against Python;
+Playwright exchanges messages between isolated browser contexts and with a real
+Python TCP/TLS client. Browser evidence is checked by the unmodified offline verifier.
+
+382 tests across 30 test files, including 15 database tests and 15 gateway tests (the first seven one per project phase): `test_aes_gcm.py`
 (encryption), `test_dh_exchange.py` (key exchange), `test_password_hash.py` (login),
 `test_signatures.py` (non-repudiation), `test_handshake_auth.py` (signed-handshake
 MITM fix), `test_replay_protection.py` (replay defenses), `test_tls_setup.py`

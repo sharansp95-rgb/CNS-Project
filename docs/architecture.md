@@ -2,58 +2,75 @@
 
 ## Overview
 
-Three processes talk over TCP: two `client/client.py` (or `gui/chat_gui.py`) instances
-and one `server/server.py` relay. Every connection is wrapped in TLS (Phase 6) end to
-end between each client and the server — but the server is a **relay, not a trusted
-third party for message content**: it routes envelopes by username and stores
-passwords (hashed) and public keys, but the AES-GCM session key and RSA private keys
-never reach it. The diagram below shows both boundaries at once: the outer TLS tunnels
-(what protects the pipe) and the inner end-to-end layer (what protects the content,
-even from the server itself).
+Python clients use the TLS/TCP adapter in `server/server.py`; browser clients use
+`web/app.py` (FastAPI HTTP/WebSocket). Both enter `server/relay_core.py`, sharing one
+locked roster, authentication policy, lockout guard and SQL database. JSON-line TCP
+messages and one-JSON-object WebSocket frames carry the same envelopes. The server
+continues to relay opaque chat ciphertext and public handshake values.
 
-![Architecture diagram: Client A and Client B each run SecureChatClient with local RSA and per-session ECDH keys, connected to server/server.py's relay over two separately TLS-pinned tunnels; the relay's envelope router and user store (dark green) only ever see routing metadata, password hashes, and RSA public keys, while a direct dotted line shows the end-to-end signed-ECDH-handshake-then-AES-GCM-and-RSA-PSS layer running between the two clients, invisible to the server.](architecture_diagram.png)
+`python server/server.py --web-port 8080` runs both adapters in one process.
+`python -m web` runs only HTTP/WS and imports no TCP adapter or lab implementation.
+HTTPS/WSS must be supplied by a trusted reverse proxy in deployment; localhost HTTP
+is for development. Browser keys/crypto run in the frontend, never in the gateway.
+
+![Python TLS and browser WebSocket clients share the transport-independent relay and SQL store; end-to-end keys and plaintext remain in clients.](architecture_diagram.png)
 
 A high-resolution version is also at [`architecture_diagram.png`](architecture_diagram.png)
-(2352px wide) and as a zoomable vector at [`architecture_diagram.svg`](architecture_diagram.svg).
+and as a zoomable vector at [`architecture_diagram.svg`](architecture_diagram.svg).
 
 <details>
 <summary>Mermaid source (for future edits — re-render with `npx @mermaid-js/mermaid-cli`)</summary>
 
 ```mermaid
 flowchart LR
-    subgraph ClientA["Client A (client.py / chat_gui.py)"]
-        A_UI["Conversation + Wire Log UI"]
-        A_Logic["SecureChatClient\n(register/login, ECDH handshake,\nAES-GCM encrypt/decrypt, RSA sign/verify)"]
-        A_Keys["Local keys:\n- RSA private key (data/keys/*.pem)\n- ECDH private key (per-session, in memory only)"]
-        A_UI --- A_Logic
-        A_Logic --- A_Keys
+    subgraph Desktop["Desktop / terminal client"]
+        P["SecureChatClient<br/>RSA-PSS + X25519 + AES-GCM<br/>hash chains + evidence"]
+        PK["Local RSA private PEM<br/>ephemeral session keys"]
+        P --- PK
     end
-
-    subgraph ClientB["Client B (client.py / chat_gui.py)"]
-        B_UI["Conversation + Wire Log UI"]
-        B_Logic["SecureChatClient\n(register/login, ECDH handshake,\nAES-GCM encrypt/decrypt, RSA sign/verify)"]
-        B_Keys["Local keys:\n- RSA private key (data/keys/*.pem)\n- ECDH private key (per-session, in memory only)"]
-        B_UI --- B_Logic
-        B_Logic --- B_Keys
+    subgraph Browser["Browser client"]
+        UI["React UI + Wire Log<br/>receipts + evidence"]
+        C["WebCrypto / noble X25519<br/>same signed envelope bytes"]
+        BK["IndexedDB<br/>password-wrapped RSA identity<br/>session keys in memory"]
+        UI --- C
+        C --- BK
     end
-
-    subgraph Server["server/server.py (relay)"]
-        S_Route["Envelope router\n(register/login/handshake/chat by 'to' field)"]
-        S_Store["server/db.py (SQLAlchemy)\nSQLite / PostgreSQL:\n- PBKDF2 hashes + RSA PUBLIC keys\n- durable lockouts + security events\n- bounded ciphertext + routing history"]
-        S_Route --- S_Store
+    subgraph Relay["Single relay process"]
+        TCP["TLS / TCP adapter<br/>server/server.py"]
+        WS["HTTP / WebSocket adapter<br/>web/app.py<br/>Origin + frame/rate/idle policies"]
+        CORE["RelayCore<br/>one roster + auth + routing<br/>lockout checked before PBKDF2"]
+        DB["SQLAlchemy: SQLite / PostgreSQL<br/>users + durable lockouts<br/>events + bounded ciphertext history"]
+        LOG["JSONL security mirror<br/>read-only Tk dashboard"]
+        TCP --> CORE
+        WS --> CORE
+        CORE --> DB
+        CORE --> LOG
     end
-
-    A_Logic <-->|"TLS tunnel #1\n(certs/server.crt pinned)"| Server
-    Server <-->|"TLS tunnel #2\n(certs/server.crt pinned)"| B_Logic
-
-    A_Logic -.->|"end-to-end: signed ECDH handshake,\nthen AES-256-GCM + RSA-PSS\nsigned chat envelopes"| B_Logic
-
-    classDef canSee fill:#1a3d1a,color:#e8e8e8,stroke:#2f6b2f;
-    classDef cannotSee fill:#3d1a1a,color:#e8e8e8,stroke:#6b2f2f;
-    class S_Route,S_Store canSee;
+    P <-->|"TLS with pinned certificate"| TCP
+    C <-->|"WSS behind HTTPS proxy<br/>WS on localhost only"| WS
+    P -. "end-to-end signed handshake and encrypted chat" .-> C
+    classDef local fill:#182c35,color:#f2f5f0,stroke:#668eaa;
+    classDef relay fill:#203521,color:#f2f5f0,stroke:#8fba7a;
+    class P,PK,UI,C,BK local;
+    class TCP,WS,CORE,DB,LOG relay;
 ```
 
 </details>
+
+## Transport and threading boundary
+
+The shared core sends structured envelopes through transport adapters. The TCP adapter
+serializes newline-delimited JSON to `LockedTLSSocket`; WebSocket peers schedule a
+bounded outbox on the asyncio event loop with `call_soon_threadsafe`. The gateway
+invokes synchronous core/PBKDF2/SQL operations through `asyncio.to_thread`, so it never
+blocks its event loop or waits for that loop while holding a roster lock. Each browser
+serializes asynchronous crypto operations to preserve handshake/message ordering.
+
+The gateway checks an exact Origin allowlist, UTF-8 frame size, connection rate and
+idle timeout, and rejects binary/unknown types. CSP allows same-origin external assets
+without inline scripts. The web path rejects lab controls even in shared local demo
+mode. The standalone web entry point never imports lab code. The roster remains
+process-local; multiple deployment workers are not supported.
 
 ## What the server CAN see
 
@@ -68,9 +85,8 @@ These values now also feed the SQL persistence described under
 - Opaque ECDH public keys during the handshake, and opaque AES-GCM ciphertext/tag for
   every chat message — bytes it can relay but not read, since it never holds the
   session key.
-- The plaintext of the register/login envelope *as JSON, before TLS encrypts it for
-  transit* — i.e. the server, as the TLS endpoint, necessarily decrypts the connection
-  to read routing envelopes. This is why the AES-GCM/RSA layer for chat *content*
+- The plaintext of the register/login envelope as JSON after TLS/WSS terminates — i.e. the server, as the TLS endpoint, necessarily decrypts the connection
+  to read routing envelopes (or receives them from its trusted HTTPS proxy). This is why the AES-GCM/RSA layer for chat *content*
   matters even though TLS is also present: TLS protects data in transit to the server,
   not from the server itself. A password is the one piece of data that has no
   additional application-layer protection beyond TLS — see "Known limitations" in the
@@ -115,7 +131,9 @@ The database does not provide message delivery, encrypted media or another trans
 - Either side's ECDH private key, or the derived AES-256 session key
   (`crypto_engine/dh_exchange.py`; the private key is deleted from memory immediately
   after use, never serialized, never sent).
-- Either side's RSA private key — only the public key, submitted once at registration
+- Either side's RSA private key — the browser keeps a password-wrapped PKCS8 identity
+  in IndexedDB/backups and uses a non-extractable runtime signing key; only the public
+  key is submitted at registration
   (`auth/keystore.py`, `crypto_engine/signatures.py`).
 - A user's plaintext password — only its PBKDF2 hash is ever persisted
   (`auth/password_hash.py`; `tests/test_password_hash.py::test_hash_does_not_contain_plaintext_password`).
