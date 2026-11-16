@@ -126,13 +126,12 @@ def test_avatar_and_logo_are_resized_with_the_text(chat):
     assert int(chat.avatar.cget("width")) > avatar and int(chat.login_logo.cget("width")) > logo
 
 
-def test_open_attack_lab_is_rebuilt_larger(chat):
-    chat._open_attack_lab()
-    chat.update()
-    before = chat._lab_window.winfo_reqwidth()
+def test_product_has_no_attack_panel_at_any_presentation_scale(chat):
+    assert not hasattr(chat, "_open_attack_lab")
+    assert not hasattr(chat, "lab_button")
     chat.set_presentation(True)
     chat.update()
-    assert chat._lab_window_alive() and chat._lab_window.winfo_reqwidth() > before
+    assert not hasattr(chat, "_lab_window")
 
 
 @pytest.mark.parametrize("fixture", ["chat", "dash"])

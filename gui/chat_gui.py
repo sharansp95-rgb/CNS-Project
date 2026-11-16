@@ -55,13 +55,8 @@ from gui import widgets  # noqa: E402
 from gui.macos import set_app_name  # noqa: E402
 from server.security_log import DEFAULT_LOG_PATH, read_events  # noqa: E402
 from gui.explain import (  # noqa: E402
-    LAB_ATTACKS,
-    LAB_BY_ACTION,
-    LAB_SILENT_AFTER_SECONDS,
     banner_for,
     describe_rejection,
-    find_lab_detection,
-    lab_status,
     receipt_details,
     receipt_rows,
     receipt_summary,
@@ -70,7 +65,6 @@ from gui.explain import (  # noqa: E402
 from gui.theme import THEME_LABELS, Theme, hand_cursor, save_theme_preference  # noqa: E402
 
 POLL_INTERVAL_MS = 50
-LAB_POLL_MS = 600
 BANNER_OK_SECONDS = 20     # "ok" banners fade after this long; warnings/blocks stay
 TAGLINE = "Accountable end-to-end encrypted messaging for hospitals"
 NETWORK_MIN_WIDTH = 700       # narrower windows start with the network view hidden
@@ -106,7 +100,7 @@ def wire_kind(envelope):
         return "CHAT"
     if etype in ("register", "login", "register_result", "login_result"):
         return "AUTH"
-    if etype in ("security_alert", "lab_control", "lab_control_result", "lab_attack_performed"):
+    if etype in ("security_alert",):
         return "ALERT"
     return "INFO"
 
@@ -193,16 +187,6 @@ def format_envelope_line(direction, envelope):
     if etype == "roster":
         return f"{direction} roster: users={e.get('users')}", False
 
-    if etype == "lab_control":
-        return f"{direction} lab_control: action={e.get('action')} target={e.get('target')}", False
-
-    if etype == "lab_control_result":
-        armed = e.get("armed")
-        return (f"{direction} lab_control_result: action={e.get('action')} armed={armed} "
-               f"-- {e.get('detail')}", not armed)
-
-    if etype == "lab_attack_performed":
-        return f"{direction} lab_attack_performed: {e.get('detail')}", True
 
     if etype == "user_joined":
         return f"{direction} user_joined: {e.get('username')}", False
@@ -213,7 +197,7 @@ def format_envelope_line(direction, envelope):
 class ChatGUI(tk.Tk):
     def __init__(self, log_path=None, theme=None):
         super().__init__()
-        self.log_path = log_path or DEFAULT_LOG_PATH   # read-only: Attack Lab results
+        self.log_path = log_path or DEFAULT_LOG_PATH
         self.title("Secure Chat (GUI)")
         self.geometry("1040x660")
         self.minsize(680, 460)
@@ -232,9 +216,6 @@ class ChatGUI(tk.Tk):
         self.sock = None
         self.username = None
         self.peer = None
-        self._lab_state = {a['action']: {'state': 'idle', 'fired_at': 0.0, 'detail': None}
-                           for a in LAB_ATTACKS}
-        self._lab_last_message = 'No action armed yet.'
         self._auth_data = None       # auth_success payload, while the login screen waits
         self._held_events = []       # events that arrived during that wait (replayed in order)
         self._holding = False
@@ -502,16 +483,12 @@ class ChatGUI(tk.Tk):
         row1.pack(side="top", fill="x")
         self.header_var = tk.StringVar(value="")
         # Actions, packed FIRST (right-to-left): Tk gives space in packing order, so a long
-        # name can never squeeze them out of the header. The Attack Lab button is only enabled once the
-        # connected server reports lab_mode (see _apply_auth_success): a server not started
-        # with --lab rejects lab_control anyway, so disabling it is the honest UI.
-        self.lab_button = ttk.Button(row1, text="Attack Lab", style="Lab.TButton",
-                                     command=self._open_attack_lab, state="disabled")
+        # Keep actions reachable even with a long peer name.
         self.export_button = ttk.Button(row1, text="Export evidence", style="Secondary.TButton",
                                         command=self._on_export_evidence)
         self.network_button = ttk.Button(row1, text="Network", style="Ghost.TButton",
                                          command=self._toggle_network)
-        for button in (self.lab_button, self.export_button, self.network_button):
+        for button in (self.export_button, self.network_button):
             button.pack(side="right", padx=(t.sp("sm"), 0))
         self.settings_button = ttk.Button(row1, text="⚙", style="Ghost.TButton", width=2,
                                           command=self._popup_settings)
@@ -714,12 +691,11 @@ class ChatGUI(tk.Tk):
         """Switch every widget in this window to the other colour theme, live, keeping
         everything on screen (conversation, network view, chips, banner state). The choice is
         remembered for windows opened later."""
-        lab_was_open = self._lab_window_alive()
         mapping = self.theme.set_mode(mode)
         self.theme_var.set(self.theme.mode)
         if not mapping:
             return
-        for child in list(self.winfo_children()):        # Attack Lab / receipt: rebuilt on open
+        for child in list(self.winfo_children()):        # Receipts are rebuilt on open
             if isinstance(child, tk.Toplevel):
                 child.destroy()
         widgets.recolor_tree(self, mapping)
@@ -730,8 +706,6 @@ class ChatGUI(tk.Tk):
             self._rerender_items()
         if remember:
             save_theme_preference(self.theme.mode)
-        if lab_was_open:
-            self._open_attack_lab()
 
     def _on_presentation_menu(self):
         self.set_presentation(self.presentation_var.get())
@@ -743,8 +717,7 @@ class ChatGUI(tk.Tk):
         self.presentation_var.set(on)
         if on == self.theme.presentation:
             return
-        lab_was_open = self._lab_window_alive()
-        for child in list(self.winfo_children()):        # Attack Lab / receipt: rebuilt on open
+        for child in list(self.winfo_children()):        # Receipts are rebuilt on open
             if isinstance(child, tk.Toplevel):
                 child.destroy()
         ratio = self.theme.set_presentation(on)
@@ -762,8 +735,6 @@ class ChatGUI(tk.Tk):
             self._fit_header()
             if self._network_visible:
                 self.paned.sashpos(0, int(self.paned.winfo_width() * 0.58))
-        if lab_was_open:
-            self._open_attack_lab()
 
     # --- "What just happened?" banner ------------------------------------------------------
 
@@ -1248,7 +1219,6 @@ class ChatGUI(tk.Tk):
                 pass
             return
 
-        client.lab_mode = bool(result.get("lab_mode"))
 
         if mode == "register":
             save_private_key(username, rsa_private_key)
@@ -1268,7 +1238,7 @@ class ChatGUI(tk.Tk):
         self.username = username
         self.peer = peer
         self.event_queue.put(("auth_success", {
-            "username": username, "peer": peer, "lab_mode": client.lab_mode,
+            "username": username, "peer": peer,
             "own_fingerprint": own_fingerprint, "peer_key_found": peer_key_found,
         }))
 
@@ -1348,8 +1318,6 @@ class ChatGUI(tk.Tk):
             self._add_system_notice(
                 f"{data['peer']} isn't registered or online yet -- the secure "
                 f"session will start automatically when they log in.")
-        if data.get("lab_mode"):
-            self.lab_button.config(state="normal")
 
     # --- per-message security receipt (Stage E) -------------------------------
     #
@@ -1451,193 +1419,6 @@ class ChatGUI(tk.Tk):
         button.config(text="Copied ✓")
         self.after(1200, lambda: button.winfo_exists() and button.config(text="Copy"))
 
-    # --- Attack Lab (Stage C) --------------------------------------------------
-    #
-    # Opt-in, lab-mode-only, and enforced entirely server-side (see
-    # server/server.py's ChatServer._handle_lab_control): this panel only sends a
-    # request; the server decides whether to honor it. Detection is never claimed here.
-    # It comes from the OTHER window's own, unmodified client-side checks (GCM tag, RSA
-    # signature, replay window, hash chain, handshake signature). That client reports
-    # what it caught to the server, which logs it; each card below reads that record
-    # (read-only, like the dashboard) to show "Caught by ..." -- or says plainly that no
-    # report has arrived, so the audience should watch the other window.
-
-    _LAB_ACTIONS = [(a["action"], a["label"], a["desc"]) for a in LAB_ATTACKS]
-
-    def _open_attack_lab(self):
-        if self.client is None or not self.client.lab_mode:
-            return
-        if self._lab_window_alive():
-            self._lab_window.deiconify()
-            widgets.focus_when_mapped(self._lab_window)
-            return
-        t = self.theme
-        win = tk.Toplevel(self)
-        win.title("Attack Lab")
-        win.configure(background=t.bg_app)
-        win.resizable(False, False)
-        win.transient(self)
-        win.bind("<Escape>", lambda _e: win.destroy())
-        self._lab_window = win
-        self._lab_cards = {}
-
-        # -- header: amber "lab mode" identity, so nobody mistakes this for normal use --
-        top = tk.Frame(win, background=t.bg_warning_soft, padx=t.sp("xl"), pady=t.sp("lg"))
-        top.pack(fill="x")
-        tk.Frame(win, background=t.bg_lab, height=2).pack(fill="x")
-        size = t.sp(40)
-        mark = tk.Canvas(top, width=size, height=size, background=t.bg_warning_soft,
-                         highlightthickness=0)
-        mark.create_image(0, 0, image=t.images.get(size, size, round(size * 0.3), t.bg_lab),
-                          anchor="nw")
-        mark.create_text(size / 2, size / 2, text="!", fill=t.fg_on_accent, font=t.font("title"))
-        mark.pack(side="left", padx=(0, t.sp("md")))
-        titles = tk.Frame(top, background=t.bg_warning_soft)
-        titles.pack(side="left", fill="x", expand=True)
-        tk.Label(titles, text="Attack Lab", background=t.bg_warning_soft,
-                 foreground=t.fg_primary, font=t.font("title")).pack(anchor="w")
-        tk.Label(titles, text="LAB MODE: relay is acting maliciously on request",
-                 background=t.bg_warning_soft, foreground=t.warning,
-                 font=t.font("caption_bold")).pack(anchor="w")
-
-        body = tk.Frame(win, background=t.bg_app, padx=t.sp("xl"), pady=t.sp("lg"))
-        body.pack(fill="both", expand=True)
-        tk.Label(body, text=f"Each action targets YOUR OWN next message ({self.client.username}, "
-                            f"relayed to {self.client.peer}) and is one-shot: it fires once, then "
-                            f"disarms. Esc closes this panel.",
-                 background=t.bg_app, foreground=t.fg_secondary, font=t.font("caption"),
-                 wraplength=t.sp(640), justify="left").pack(anchor="w", pady=(0, t.sp("md")))
-
-        grid = tk.Frame(body, background=t.bg_app)
-        grid.pack(fill="both", expand=True)
-        grid.columnconfigure(0, weight=1)
-        for index, attack in enumerate(LAB_ATTACKS):
-            self._build_lab_card(grid, attack, index, 0)
-
-        status = widgets.RoundedFrame(body, t, fill=t.bg_panel_alt, outline=t.border, radius="md",
-                                      padx=t.sp("md"), pady=t.sp("sm"))
-        status.pack(fill="x", pady=(t.sp("sm"), 0))
-        tk.Label(status, text="LAST RELAY RESPONSE", background=t.bg_panel_alt,
-                 foreground=t.fg_hint, font=t.font("overline")).pack(anchor="w")
-        self._lab_result_var = tk.StringVar(value=self._lab_last_message)
-        tk.Label(status, textvariable=self._lab_result_var, background=t.bg_panel_alt,
-                 foreground=t.fg_primary, font=t.font("mono_small"), wraplength=t.sp(580),
-                 justify="left", anchor="w").pack(anchor="w", fill="x", pady=(2, 0))
-
-        for attack in LAB_ATTACKS:
-            self._render_lab_card(attack["action"])
-        win.update_idletasks()
-        x = self.winfo_rootx() + max((self.winfo_width() - win.winfo_width()) // 2, 0)
-        y = self.winfo_rooty() + 60
-        win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
-        widgets.focus_when_mapped(win)
-
-    def _build_lab_card(self, parent, attack, row, column):
-        """One attack as a horizontal card: glyph | what it does + the defence that should
-        catch it | live status + the amber arm button."""
-        t = self.theme
-        card = widgets.RoundedFrame(parent, t, fill=t.bg_panel, outline=t.border,
-                                    padx=t.sp("lg"), pady=t.sp("md"))
-        card.grid(row=row, column=column, sticky="nsew", pady=(0, t.sp("sm")))
-        bg = card.fill
-        size = t.sp(40)
-        glyph = tk.Canvas(card, width=size, height=size, background=bg, highlightthickness=0)
-        glyph.create_image(0, 0, image=t.images.get(size, size, round(size * 0.3),
-                                                     t.bg_warning_soft, t.lab_outline), anchor="nw")
-        glyph.create_text(size / 2, size / 2, text=attack["glyph"], fill=t.warning,
-                          font=t.font("heading"))
-        glyph.pack(side="left", anchor="n", padx=(0, t.sp("md")))
-
-        side = tk.Frame(card, background=bg)                   # packed before the text
-        side.pack(side="right", anchor="n", padx=(t.sp("md"), 0))
-        button = ttk.Button(side, text=attack["label"], style="Lab.TButton", width=20,
-                            command=lambda a=attack["action"]: self._arm_lab_action(a))
-        button.pack(fill="x")
-        chip = widgets.Chip(side, t, "Not armed", "off")
-        chip.configure(wraplength=t.sp(200), justify="left")
-        chip.pack(anchor="e", pady=(t.sp("sm"), 0))
-
-        text = tk.Frame(card, background=bg)
-        text.pack(side="left", fill="x", expand=True)
-        tk.Label(text, text=attack["title"], background=bg, foreground=t.fg_primary,
-                 font=t.font("heading")).pack(anchor="w")
-        tk.Label(text, text=attack["desc"], background=bg, foreground=t.fg_secondary,
-                 font=t.font("caption"), wraplength=t.sp(300), justify="left",
-                 anchor="w").pack(anchor="w", fill="x", pady=(2, t.sp("sm")))
-        defence = tk.Frame(text, background=bg)
-        defence.pack(anchor="w")
-        tk.Label(defence, text="Expected defence", background=bg,
-                 foreground=t.fg_hint, font=t.font("caption")).pack(side="left",
-                                                                  padx=(0, t.sp("sm")))
-        tk.Label(defence, text=attack["check"], background=bg, foreground=t.accent,
-                 font=t.font("caption_bold"), wraplength=t.sp(240), justify="left",
-                 anchor="w").pack(side="left")
-        self._lab_cards[attack["action"]] = {"card": card, "chip": chip, "button": button}
-
-    def _set_lab_state(self, action, state, detail=None):
-        entry = self._lab_state[action]
-        entry["state"], entry["detail"] = state, detail
-        if state == "fired":
-            entry["fired_at"] = time.time()
-        self._render_lab_card(action)
-
-    def _render_lab_card(self, action):
-        if not self._lab_window_alive():
-            return
-        entry = self._lab_state[action]
-        kind, text = lab_status(entry["state"], action, self.peer or "your peer", entry.get("detail"))
-        self._lab_cards[action]["chip"].set(kind, text)
-
-    def _arm_lab_action(self, action):
-        if self.client is None:
-            return
-        self._set_lab_state(action, "arming")
-        self._lab_last_message = f"Arming: {LAB_BY_ACTION[action]['label']}..."
-        if self._lab_window_alive():
-            self._lab_result_var.set(self._lab_last_message)
-        threading.Thread(target=self.client.send_lab_control, args=(action,),
-                         daemon=True).start()
-
-    def _lab_window_alive(self):
-        win = getattr(self, "_lab_window", None)
-        return win is not None and bool(win.winfo_exists())
-
-    def _on_lab_control_result(self, data):
-        action = data.get("action")
-        if action in self._lab_state:
-            self._set_lab_state(action, "armed" if data.get("armed") else "rejected",
-                                data.get("detail"))
-        self._lab_last_message = f"{'Armed' if data.get('armed') else 'Rejected'}: {data.get('detail')}"
-        if self._lab_window_alive():
-            self._lab_result_var.set(self._lab_last_message)
-
-    def _on_lab_attack_performed(self, data):
-        action = data.get("action")
-        self._lab_last_message = (f"Performed by relay: {data.get('detail')}\n"
-                                  f"(watch {self.peer}'s window for the result)")
-        if self._lab_window_alive():
-            self._lab_result_var.set(self._lab_last_message)
-        if action in self._lab_state:
-            self._set_lab_state(action, "fired")
-            self.after(LAB_POLL_MS, self._poll_lab_detection)
-
-    def _poll_lab_detection(self):
-        """While an attack is waiting for its result, look in the security log for the
-        victim's own report of catching it."""
-        pending = [a for a, e in self._lab_state.items() if e["state"] in ("fired", "silent")]
-        if not pending:
-            return
-        events = read_events(self.log_path)
-        now = time.time()
-        for action in pending:
-            entry = self._lab_state[action]
-            if find_lab_detection(action, events, self.peer, entry["fired_at"] - 1.0):
-                self._set_lab_state(action, "caught")
-            elif entry["state"] == "fired" and now - entry["fired_at"] > LAB_SILENT_AFTER_SECONDS:
-                self._set_lab_state(action, "silent")
-        if any(e["state"] in ("fired", "silent") for e in self._lab_state.values()):
-            self.after(LAB_POLL_MS, self._poll_lab_detection)
-
     # --- evidence export -----------------------------------------------------
 
     def _on_export_evidence(self):
@@ -1696,8 +1477,7 @@ class ChatGUI(tk.Tk):
     def _handle_event(self, kind, data):
         self._handle_event_inner(kind, data)
         if self._chat_ready and kind in ("handshake_established", "message_rejected",
-                                         "chain_warning", "handshake_aborted",
-                                         "lab_attack_performed"):
+                                         "chain_warning", "handshake_aborted"):
             self._maybe_banner(kind, data)
 
     def _handle_event_inner(self, kind, data):
@@ -1732,14 +1512,6 @@ class ChatGUI(tk.Tk):
             self._held_events.append((kind, data))
             if kind == "handshake_established" and self._holding:
                 self.after(700, self._handoff_to_chat)
-            return
-
-        if kind == "lab_control_result":
-            self._on_lab_control_result(data)
-            return
-
-        if kind == "lab_attack_performed":
-            self._on_lab_attack_performed(data)
             return
 
         if kind == "envelope_sent":
@@ -1871,7 +1643,7 @@ def main():
     parser.add_argument("--presentation", action="store_true",
                         help="start in Presentation mode (~25% larger text and padding, for a projector)")
     parser.add_argument("--log-path", default=None,
-                        help="security event log the Attack Lab reads results from "
+                        help="security event log path "
                              "(default: the server's logs/security_events.jsonl)")
     parser.add_argument("--theme", choices=("dark", "light"), default=None,
                         help="colour theme (default: the last one chosen, else dark)")

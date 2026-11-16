@@ -1,244 +1,226 @@
-"""Tests for Stage C: the opt-in, lab-mode-only Attack Lab.
-
-Covers the safety restrictions (lab_control rejected when --lab is off, or
-from a non-localhost peer), the one-shot arm/fire/disarm semantics, and the
-end-to-end path through real TLS clients for all four actions, each caught
-by the real, unmodified client-side check it's meant to defeat.
-
-Determinism notes: servers/clients come from the shared `net` fixture
-(ephemeral ports, guaranteed teardown). End-to-end assertions wait on real
-conditions (a client event / client state) with a timeout -- never on a fixed
-sleep -- and rely on TCP ordering: a lab_control envelope and the chat
-envelope sent right after it travel the SAME connection, so the server's
-handler thread processes them in that order.
-"""
+"""Separate hostile relay, genuine clients, one-shot semantics and product separation."""
 
 import base64
 import json
+import subprocess
+import sys
 import time
 
+import pytest
+from sqlalchemy import select
 import _demo_common as dc
-from server.security_log import read_events
+from attack_lab.relay import RogueRelay, lab_database
+from server.lockout import LockoutGuard
+from server.security_log import log_event, read_events
 from server.server import ChatServer
+from server.db import relayed_envelopes
 
-WAIT_SECONDS = 15
 
-
-def wait_until(predicate, what, timeout=WAIT_SECONDS):
-    deadline = time.time() + timeout
-    while not predicate():
-        if time.time() > deadline:
-            raise AssertionError(f"timed out after {timeout}s waiting for: {what}")
+def wait(predicate, timeout=10):
+    end = time.time() + timeout
+    while time.time() < end:
+        if predicate():
+            return
         time.sleep(0.01)
+    assert predicate(), "Expected real client detection did not arrive"
 
 
-def collect_events(client):
-    """Record every (kind, data) event the client emits from now on."""
+@pytest.fixture()
+def rogue(net, tmp_path, security_log_path):
+    database = lab_database("sqlite:///" + str(tmp_path / "separate_lab.db"))
+    logger = lambda event, **fields: log_event(
+        event, path=security_log_path, database=database, **fields
+    )
+    server, _, port = net.start_server(
+        server_cls=RogueRelay,
+        database=database,
+        lockout=LockoutGuard(database=database),
+        logger=logger,
+    )
+    return server, port
+
+
+def pair(net, rogue):
+    server, port = rogue
+    a = net.register_client(port, "alice", "bob")
+    b = net.register_client(port, "bob", "alice")
+    assert dc.establish_signed_handshake(a, b)
     events = []
-    client.on_event = lambda kind, data: events.append((kind, data))
-    return events
+    b.on_event = lambda kind, data: events.append((kind, data))
+    return server, a, b, events
 
 
-def kinds(events):
-    return [k for k, _ in events]
+@pytest.mark.parametrize(
+    "action,reason",
+    [
+        ("tamper_next", "decryption_failed"),
+        ("drop_next", "chain_gap"),
+        ("reorder_next", "chain_broken"),
+        ("inject_next", "decryption_failed"),
+    ],
+)
+def test_attacks_are_caught_by_real_unmodified_clients(net, rogue, action, reason):
+    server, a, b, events = pair(net, rogue)
+    server.arm(action, "alice")
+    a.send_message("first confidential message")
+    if action in ("drop_next", "reorder_next"):
+        a.send_message("second confidential message")
+    wait(lambda: any(d.get("reason") == reason for _, d in events))
+    assert "alice" not in server.pending
+    if action in ("tamper_next", "drop_next"):
+        assert not any(
+            r["message"] == "first confidential message" for r in b.transcript
+        )
+    if action == "inject_next":
+        assert all(r["message"] == "first confidential message" for r in b.transcript)
+    if action == "reorder_next":
+        assert [r["message"] for r in b.transcript] == ["second confidential message"]
+    a.send_message("third, unmodified")
+    wait(lambda: any(r["message"] == "third, unmodified" for r in b.transcript))
 
 
-class FakeConn:
-    def __init__(self):
-        self.sent = []
-
-    def sendall(self, data):
-        self.sent.append(json.loads(data.decode("utf-8")))
-
-    def last(self):
-        return self.sent[-1]
+def test_replay_rejected_and_only_displayed_once(net, rogue):
+    server, a, b, events = pair(net, rogue)
+    a.send_message("captured")
+    wait(lambda: any(r["message"] == "captured" for r in b.transcript))
+    server.arm("replay_last", "alice")
+    wait(lambda: any(d.get("reason") == "replay_duplicate" for _, d in events))
+    assert sum(r["message"] == "captured" for r in b.transcript) == 1
 
 
-def offline_server(lab_mode):
-    """A ChatServer used only for its handler/route methods -- never
-    listens, so there is no port at all."""
-    return ChatServer("127.0.0.1", 0, lab_mode=lab_mode)
+def test_mitm_stops_key_derivation(net, rogue):
+    server, port = rogue
+    a = net.register_client(port, "alice", "bob")
+    server.arm("mitm_next_handshake", "alice")
+    events = []
+    b = net.register_client(
+        port, "bob", "alice", event_callback=lambda k, d: events.append((k, d))
+    )
+    wait(lambda: any(k == "handshake_aborted" for k, _ in events))
+    assert b.session_key is None and a.session_key is None
+    assert "alice" not in server.pending
 
 
-# --- safety restrictions, as unit tests on the handler directly ------------
-
-def test_lab_control_rejected_when_lab_mode_is_off(security_log_path):
-    server = offline_server(lab_mode=False)
-    conn = FakeConn()
-    server._handle_lab_control(conn, ("127.0.0.1", 9), "alice",
-                               {"type": "lab_control", "action": "tamper_next"})
-
-    assert conn.last() == {
-        "type": "lab_control_result", "action": "tamper_next", "target": "alice",
-        "armed": False,
-        "detail": "lab mode is not enabled on this server (start it with --lab)"}
-    events = read_events(security_log_path)
-    assert len(events) == 1 and events[0]["event"] == "lab_control_rejected"
-    assert events[0]["requested_by"] == "alice"
-    assert not server._lab_pending
-
-
-def test_lab_control_rejected_from_non_localhost_peer(security_log_path):
-    server = offline_server(lab_mode=True)  # lab IS on
-    conn = FakeConn()
-    server._handle_lab_control(conn, ("203.0.113.5", 9), "alice",
-                               {"type": "lab_control", "action": "tamper_next"})
-
-    assert conn.last()["armed"] is False
-    assert "localhost" in conn.last()["detail"]
-    events = read_events(security_log_path)
-    assert events[0]["event"] == "lab_control_rejected"
-    assert events[0]["from_addr"] == "203.0.113.5"
-    assert "alice" not in server._lab_pending  # nothing was armed
+def test_one_shot_tamper_does_not_mutate_sender_envelope(rogue):
+    server, _ = rogue
+    envelope = dict(
+        type="chat",
+        **{"from": "alice", "to": "bob"},
+        nonce="bg==",
+        ciphertext="Y2lwaGVy",
+        tag="dA==",
+    )
+    original = dict(envelope)
+    server.arm("tamper_next", "alice")
+    first = server.intercept(envelope, "alice")
+    second = server.intercept(envelope, "alice")
+    assert first[0]["ciphertext"] != envelope["ciphertext"]
+    assert second == [original] and envelope == original
+    assert len([e for e in server.events if e["event"] == "lab_attack_performed"]) == 1
 
 
-def test_unknown_action_is_rejected_and_nothing_armed():
-    server = offline_server(lab_mode=True)
-    conn = FakeConn()
-    server._handle_lab_control(conn, ("127.0.0.1", 9), "alice",
-                               {"type": "lab_control", "action": "format_the_disk"})
-    assert conn.last()["armed"] is False
-    assert not server._lab_pending
+def test_drop_is_silent_and_disarms(rogue):
+    server, _ = rogue
+    server.arm("drop_next", "alice")
+    envelope = dict(type="chat", ciphertext="YQ==", to="bob")
+    assert server.intercept(envelope, "alice") == []
+    assert server.intercept(envelope, "alice") == [envelope]
+    assert not server.pending
 
 
-# --- one-shot semantics, driven directly through route() -------------------
-
-def _fake_chat_envelope(sender, nonce=b"n" * 12, ct=b"c" * 16, tag=b"t" * 16):
-    return {"type": "chat", "from": sender, "to": "bob",
-            "nonce": base64.b64encode(nonce).decode(),
-            "ciphertext": base64.b64encode(ct).decode(),
-            "tag": base64.b64encode(tag).decode()}
-
-
-def test_tamper_next_fires_exactly_once_then_disarms():
-    server = offline_server(lab_mode=True)
-    conn = FakeConn()
-    server.clients["bob"] = conn
-    server._handle_lab_control(conn, ("127.0.0.1", 9), "alice",
-                               {"action": "tamper_next", "target": "alice"})
-    assert server._lab_pending["alice"][0] == "tamper_next"
-
-    env1 = _fake_chat_envelope("alice")
-    server.route(dict(env1), "alice")
-    assert "alice" not in server._lab_pending  # disarmed after firing once
-    assert conn.last()["ciphertext"] != env1["ciphertext"]  # byte flipped
-
-    env2 = _fake_chat_envelope("alice")
-    server.route(dict(env2), "alice")
-    assert conn.last()["ciphertext"] == env2["ciphertext"]  # pristine: no longer armed
+def test_no_replay_before_capture_and_unknown_actions_rejected(rogue):
+    server, _ = rogue
+    with pytest.raises(ValueError, match="No captured"):
+        server.arm("replay_last", "alice")
+    with pytest.raises(ValueError, match="Unknown"):
+        server.arm("format_disk", "alice")
+    assert server.pending == {}
 
 
-def test_drop_next_fires_exactly_once_then_disarms():
-    server = offline_server(lab_mode=True)
-    conn = FakeConn()
-    server.clients["bob"] = conn
-    server._handle_lab_control(conn, ("127.0.0.1", 9), "alice",
-                               {"action": "drop_next", "target": "alice"})
+def test_nonlocal_legacy_tcp_control_is_rejected(rogue):
+    server, _ = rogue
 
-    server.route(_fake_chat_envelope("alice"), "alice")
-    assert len(conn.sent) == 1  # only the lab_control_result -- the chat was dropped
-    assert "alice" not in server._lab_pending
+    class Conn:
+        def sendall(self, data):
+            self.result = json.loads(data)
 
-    server.route(_fake_chat_envelope("alice"), "alice")
-    assert len(conn.sent) == 2  # second message relayed normally
-
-
-def test_replay_last_resends_immediately_not_on_next_message():
-    server = offline_server(lab_mode=True)
-    bob_conn = FakeConn()
-    server.clients["bob"] = bob_conn
-    original = _fake_chat_envelope("alice")
-    server.route(dict(original), "alice")
-    assert len(bob_conn.sent) == 1
-
-    armer_conn = FakeConn()
-    server.clients["alice"] = armer_conn
-    server._handle_lab_control(armer_conn, ("127.0.0.1", 9), "alice",
-                               {"action": "replay_last", "target": "alice"})
-    # Fired immediately: bob now has the original PLUS the replay, with no
-    # new message having been sent.
-    assert len(bob_conn.sent) == 2
-    assert bob_conn.sent[1]["ciphertext"] == original["ciphertext"]
-    assert bob_conn.sent[1]["nonce"] == original["nonce"]  # same envelope, same nonce
+    conn = Conn()
+    server.handle_authenticated(
+        conn, ("203.0.113.5", 1), "alice", dict(type="lab_control", action="drop_next")
+    )
+    assert not conn.result["armed"] and not server.pending
+    assert server.events[-1]["event"] == "lab_control_rejected"
 
 
-def test_replay_last_with_nothing_to_replay_is_rejected():
-    server = offline_server(lab_mode=True)
-    conn = FakeConn()
-    server.clients["alice"] = conn
-    server._handle_lab_control(conn, ("127.0.0.1", 9), "alice",
-                               {"action": "replay_last", "target": "alice"})
-    assert conn.last()["armed"] is False
-    assert "no previous chat message" in conn.last()["detail"]
+def test_production_control_is_unknown_and_logged(net, security_log_path):
+    server, _, port = net.start_server()
+    c = net.register_client(port, "real_user", "nobody")
+    events = []
+    c.on_event = lambda k, d: events.append((k, d))
+    c.send_envelope(dict(type="lab_control", action="tamper_next"))
+    wait(
+        lambda: any(
+            e.get("event") == "unsupported_envelope"
+            for e in read_events(security_log_path)
+        )
+    )
+    event = [
+        e
+        for e in read_events(security_log_path)
+        if e["event"] == "unsupported_envelope"
+    ][-1]
+    assert event["envelope_type"] == "lab_control"
+    wait(
+        lambda: any(
+            k == "envelope_received" and d.get("envelope", {}).get("type") == "error"
+            for k, d in events
+        )
+    )
+    errors = [
+        d["envelope"]
+        for k, d in events
+        if k == "envelope_received" and d.get("envelope", {}).get("type") == "error"
+    ]
+    assert errors[-1]["reason"] == "unknown envelope type"
+    assert not hasattr(server, "arm") and not hasattr(
+        server, "_apply_lab_tamper_or_drop"
+    )
+    assert server.interceptor is None
 
 
-# --- end-to-end detection, through real TLS clients -------------------------
-
-def make_secure_pair(net):
-    """Lab-mode server plus alice/bob with an established signed session.
-    Returns (server, alice, bob, alice_events, bob_events)."""
-    server, host, port = net.start_server(lab_mode=True)
-    alice_name, bob_name = dc.demo_username("alice"), dc.demo_username("bob")
-    alice = net.register_client(port, alice_name, bob_name)
-    bob = net.register_client(port, bob_name, alice_name)
-    assert dc.establish_signed_handshake(alice, bob, timeout=WAIT_SECONDS)
-    return server, alice, bob, collect_events(alice), collect_events(bob)
-
-
-def test_login_result_reports_lab_mode(net):
-    _, _, port = net.start_server(lab_mode=True)
-    assert net.register_attempt(port, dc.demo_username("x"))["lab_mode"] is True
-    _, _, plain_port = net.start_server(lab_mode=False)
-    assert net.register_attempt(plain_port, dc.demo_username("y"))["lab_mode"] is False
+def test_product_imports_never_import_attack_lab():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            'import sys,web,server.server; assert not any(n=="attack_lab" or n.startswith("attack_lab.") for n in sys.modules)',
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
-def test_end_to_end_tamper_is_caught_by_gcm_tag(net):
-    server, alice, bob, a_events, b_events = make_secure_pair(net)
-    alice.send_envelope({"type": "lab_control", "action": "tamper_next"})
-    alice.send_message("do not tamper with this")
-
-    wait_until(lambda: "message_rejected" in kinds(b_events), "bob rejecting the tampered message")
-    rejected = [d for k, d in b_events if k == "message_rejected"][0]
-    assert rejected["reason"] == "decryption_failed"
-    assert not any(t["message"] == "do not tamper with this" for t in bob.transcript)
+def test_production_flag_is_removed():
+    result = subprocess.run(
+        [sys.executable, "server/server.py", "--lab"], capture_output=True, text=True
+    )
+    assert result.returncode != 0 and "unrecognized arguments: --lab" in result.stderr
 
 
-def test_end_to_end_drop_is_caught_as_a_chain_gap(net):
-    server, alice, bob, a_events, b_events = make_secure_pair(net)
-    alice.send_envelope({"type": "lab_control", "action": "drop_next"})
-    alice.send_message("dropped message")
-    alice.send_message("the one that exposes the gap")
+def test_raw_tls_failure_uses_only_the_supplied_lab_logger(rogue):
+    from unittest.mock import Mock, patch
+    import ssl
 
-    wait_until(lambda: any(t["message"] == "the one that exposes the gap"
-                           for t in bob.transcript), "bob receiving the second message")
-    # TCP is ordered: had the first message been delivered at all, bob would
-    # have processed it before this one.
-    assert not any(t["message"] == "dropped message" for t in bob.transcript)
-    warnings = [d for k, d in b_events if k == "chain_warning"]
-    assert len(warnings) == 1
-    assert "missing" in warnings[0]["detail"]
-    assert "possible deletion by the relay" in warnings[0]["detail"]
-
-
-def test_end_to_end_replay_is_caught_as_a_duplicate(net):
-    server, alice, bob, a_events, b_events = make_secure_pair(net)
-    alice.send_message("replay me")
-    alice.send_envelope({"type": "lab_control", "action": "replay_last"})
-
-    wait_until(lambda: any(d["reason"] == "replay_duplicate"
-                           for k, d in b_events if k == "message_rejected"),
-               "bob rejecting the replayed duplicate")
-    assert [t["message"] for t in bob.transcript].count("replay me") == 1  # shown once
-
-
-def test_lab_attack_performed_is_reported_only_to_the_armer(net):
-    """The armer gets a lab_attack_performed event confirming what the relay
-    did; the OTHER party never does -- they only see the (real, unprompted)
-    rejection their own client already produces for a bad message."""
-    server, alice, bob, a_events, b_events = make_secure_pair(net)
-    alice.send_envelope({"type": "lab_control", "action": "tamper_next"})
-    alice.send_message("hello")
-
-    wait_until(lambda: "lab_attack_performed" in kinds(a_events), "alice's lab_attack_performed")
-    wait_until(lambda: "message_rejected" in kinds(b_events), "bob's own rejection")
-    assert "lab_attack_performed" not in kinds(b_events)
+    server, _ = rogue
+    raw = Mock()
+    with patch.object(
+        server.ssl_context, "wrap_socket", side_effect=ssl.SSLError("invalid TLS")
+    ):
+        with patch(
+            "server.server.log_event",
+            side_effect=AssertionError("default service logger used"),
+        ):
+            server._handle_raw_connection(raw, ("127.0.0.1", 12345))
+    raw.close.assert_called_once()
+    assert server.events[-1]["event"] == "non_tls_connection"

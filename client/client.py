@@ -321,12 +321,6 @@ class SecureChatClient:
         self.peer_public_key = None
         self.peer_public_key_pem = None  # raw PEM string, for fingerprinting
 
-        # Stage C: whether the server we're connected to was started with
-        # --lab (set from the register_result/login_result envelope once
-        # authenticated). Purely informational for the presentation layer --
-        # it only decides whether to show the Attack Lab button; the server
-        # itself is the one that enforces every actual safety restriction.
-        self.lab_mode = False
 
         # Phase 7a race-avoidance: envelopes that arrived before we had the
         # peer's public key cached, held here until it arrives (or we learn
@@ -782,15 +776,6 @@ class SecureChatClient:
         from client.evidence import DEFAULT_EXPORT_DIR, export_evidence
         return export_evidence(self, directory or DEFAULT_EXPORT_DIR, format_version=format_version)
 
-    def send_lab_control(self, action, target=None):
-        """Stage C: arm (or, for replay_last, immediately perform) a one-shot
-        relay attack on the connected server. A no-op unless that server was
-        started with --lab -- see server.server.ChatServer / _handle_lab_control
-        for the actual enforcement; this call succeeding is not a guarantee
-        the server will honor it, only that the envelope was sent."""
-        self.send_envelope({"type": "lab_control", "action": action,
-                            "target": target or self.username})
-
     def _own_fingerprint(self):
         if self.rsa_private_key is None:
             return None
@@ -1004,13 +989,6 @@ class SecureChatClient:
                         if envelope.get("username") == self.peer:
                             self._cache_peer_public_key(envelope)
                             self._replay_deferred_handshake()
-                    elif etype == "lab_control_result":
-                        self._emit("lab_control_result", action=envelope.get("action"),
-                                   target=envelope.get("target"),
-                                   armed=envelope.get("armed"), detail=envelope.get("detail"))
-                    elif etype == "lab_attack_performed":
-                        self._emit("lab_attack_performed", action=envelope.get("action"),
-                                   detail=envelope.get("detail"))
                     elif etype == "system":
                         print(f"\r{envelope.get('text', '')}\n> ", end="", flush=True)
                         self._emit("system_message", text=envelope.get("text", ""))
@@ -1088,7 +1066,6 @@ def authenticate(client):
             return False
         if result.get("success"):
             print(f"[*] {result.get('reason', 'Success.')}")
-            client.lab_mode = bool(result.get("lab_mode"))
             if choice in ("1", "register"):
                 save_private_key(username, rsa_private_key)
                 client.rsa_private_key = rsa_private_key
@@ -1149,7 +1126,6 @@ def main():
         authenticated = bool(result and result.get("success"))
         if result:
             print(f"[{'*' if authenticated else '!'}] {result.get('reason')}")
-            client.lab_mode = bool(result.get("lab_mode"))
         if authenticated:
             if args.register:
                 save_private_key(args.username, rsa_private_key)

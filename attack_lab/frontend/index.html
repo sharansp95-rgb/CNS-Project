@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Attack Lab — Team 15 sandbox</title>
+  </head>
+  <body>
+    <header>
+      <strong>ATTACK LAB — sandbox, not the real service</strong
+      ><span>Hostile relay / genuine client defenses</span>
+    </header>
+    <main>
+      <section class="controls">
+        <p class="eyebrow">TEAM 15 / ISOLATED SECURITY LAB</p>
+        <h1>Try the attack. Watch the defense.</h1>
+        <p>
+          Two production clients, one rogue relay. Victim keys stay in this
+          browser. The relay console sees ciphertext and routing metadata only.
+        </p>
+        <div class="toolbar">
+          <button id="start">Start lab session</button
+          ><button id="connect" disabled>Connect victims</button
+          ><button id="reset" disabled>Reset lab</button
+          ><button id="send" disabled>Send next message</button
+          ><button id="follow" disabled>Send follow-up message</button>
+        </div>
+        <p id="status" role="status">
+          Start a lab session, then connect the victims.
+        </p>
+        <div id="actions" class="actions"></div>
+        <p>
+          Drop/reorder need two messages. Replay needs an earlier message. Arm
+          MITM before connecting victims. Injection creates an invalid GCM
+          envelope because the rogue relay has no session key.
+        </p>
+      </section>
+      <section class="victims">
+        <article>
+          <h2>Victim A · lab_alice</h2>
+          <iframe title="Victim A" id="alice" src="/victim"></iframe>
+        </article>
+        <article>
+          <h2>Victim B · lab_bob</h2>
+          <iframe title="Victim B" id="bob" src="/victim"></iframe>
+        </article>
+      </section>
+      <section class="feeds">
+        <article>
+          <h2>Attacker console</h2>
+          <p>Attempted actions are not successful detections.</p>
+          <pre id="attempts"></pre>
+          <h3>What the relay sees</h3>
+          <pre id="wire"></pre>
+        </article>
+        <article>
+          <h2>Live detection feed</h2>
+          <p>
+            Only actual security reports from the victims, or the real lockout
+            guard, appear here. A missing report is never labeled “caught”.
+          </p>
+          <div id="detections" aria-live="polite"></div>
+        </article>
+      </section>
+    </main>
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>

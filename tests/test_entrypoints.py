@@ -32,15 +32,15 @@ def test_cli_entry_point_starts_in_script_mode(script):
     assert "usage:" in result.stdout
 
 
-def test_server_script_actually_serves_with_lab_mode():
-    """Not just --help: start `python server/server.py --lab --port 0` for
+def test_server_script_actually_serves_without_attack_mode():
+    """Not just --help: start `python server/server.py --port 0` for
     real, wait for its startup banner, then stop it."""
-    proc = subprocess.Popen([sys.executable, "-u", "server/server.py", "--port", "0", "--lab"],
+    proc = subprocess.Popen([sys.executable, "-u", "server/server.py", "--port", "0"],
                             cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         lines = []
         deadline = time.time() + 30
-        while time.time() < deadline and not any("LAB MODE ENABLED" in l for l in lines):
+        while time.time() < deadline and not any("Server listening" in l for l in lines):
             line = proc.stdout.readline()
             if not line:
                 break  # process exited early: fall through to the assertions
@@ -48,7 +48,7 @@ def test_server_script_actually_serves_with_lab_mode():
         output = "".join(lines)
         assert "Server listening on 127.0.0.1:" in output, output
         assert "cert fingerprint:" in output
-        assert "LAB MODE ENABLED" in output, output
+        assert "LAB MODE ENABLED" not in output, output
     finally:
         proc.terminate()
         proc.wait(timeout=10)

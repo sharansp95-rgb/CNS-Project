@@ -1,13 +1,13 @@
 #!/bin/bash
 # One-command live demo: opens clearly titled Terminal windows for
-#   1) the relay server (with the Attack Lab enabled)
+#   1) the normal relay server
 #   2) chat window A   3) chat window B   4) the security dashboard
 # and the three GUI windows, arranged so none fully covers another.
 #
-#   demo/start_demo.sh               server on port 5000, Attack Lab ON
+#   demo/start_demo.sh               normal server on port 5000
 #   demo/start_demo.sh --web       also serve the browser client on localhost:8080
 #   demo/start_demo.sh --web-port N  choose the browser port
-#   demo/start_demo.sh --no-lab      normal mode (no Attack Lab)
+#   demo/start_demo.sh --lab         separate sandbox site on localhost:8090
 #   demo/start_demo.sh --port 5055   use another port (e.g. if you prefer
 #                                    to stay clear of macOS AirPlay on 5000)
 #   demo/start_demo.sh --simple      NO extra windows: the server runs in the
@@ -29,7 +29,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/_demo_lib.sh"
 
 PORT=5000
-LAB=1
+LAB=0
 SIMPLE=0
 WIRESHARK=0
 PRESENTATION=0
@@ -38,6 +38,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --web) WEB_PORT=8080; shift ;;
         --web-port) [ $# -ge 2 ] || { echo "--web-port needs a number" >&2; exit 2; }; WEB_PORT="$2"; shift 2 ;;
+        --lab) LAB=1; shift ;;
         --no-lab) LAB=0; shift ;;
         --simple) SIMPLE=1; shift ;;
         --wireshark) WIRESHARK=1; shift ;;
@@ -49,7 +50,7 @@ while [ $# -gt 0 ]; do
 done
 case "$PORT" in ''|*[!0-9]*) echo "--port needs a number, got '$PORT'" >&2; exit 2 ;; esac
 
-if [ -n "$WEB_PORT" ]; then
+if [ -n "$WEB_PORT" ] && [ "$LAB" = 0 ]; then
     case "$WEB_PORT" in *[!0-9]*) echo "--web-port needs a number" >&2; exit 2 ;; esac
     if [ "$WEB_PORT" -lt 1 ] || [ "$WEB_PORT" -gt 65535 ]; then echo "--web-port must be 1..65535" >&2; exit 2; fi
     if [ ! -f "$ROOT/web/static/index.html" ]; then echo "Build the browser client: cd web/frontend && npm ci && npm run build" >&2; exit 1; fi
@@ -64,6 +65,15 @@ if [ ! -x "$PY" ]; then
 fi
 # shellcheck disable=SC1091
 source "$ROOT/.venv/bin/activate"
+
+if [ "$LAB" = 1 ]; then
+    LAB_HTTP_PORT="${WEB_PORT:-${PORT_LAB:-8090}}"
+    export LAB_ALLOWED_ORIGINS="${LAB_ALLOWED_ORIGINS:-http://localhost:$LAB_HTTP_PORT,http://127.0.0.1:$LAB_HTTP_PORT}"
+    echo "ATTACK LAB — sandbox, not the real service"
+    echo "Open http://localhost:$LAB_HTTP_PORT ; Ctrl+C stops the lab."
+    echo "Optional local TCP relay: $PORT (trust data/attack_lab/certs/server.crt)."
+    exec "$PY" -m attack_lab --port "$LAB_HTTP_PORT" --tcp-port "$PORT"
+fi
 
 echo "=== Secure Chat demo launcher ==="
 echo "Project: $ROOT"
@@ -114,10 +124,9 @@ PRESFLAG=""; LAYOUT_FLAGS=""
 eval "$("$PY" demo/layout.py $SCREEN $LAYOUT_FLAGS)"
 echo "    screen $SCREEN -> windows tiled$( [ "$OVERLAP" = 1 ] && echo " (screen too small to tile without overlap: click a title bar to raise a window)" )"
 
-LABFLAG=""; MODE="normal mode"
+MODE="normal mode"
 WEBFLAG=""
 [ -n "$WEB_PORT" ] && WEBFLAG="--web-port $WEB_PORT"
-[ "$LAB" = 1 ] && { LABFLAG="--lab"; MODE="Attack Lab ON"; }
 
 wait_for_server() {
     "$PY" - "$PORT" "$WEB_PORT" <<'PYEOF'
@@ -161,7 +170,7 @@ if [ "$SIMPLE" = 1 ]; then
     mkdir -p "$ROOT/logs"
     if [ "$WIRESHARK" = 1 ]; then echo "[3/5] Starting the Wireshark capture"; start_wireshark; fi
     echo "[4/5] Starting the server in the background ($MODE, port $PORT)"
-    nohup "$PY" -u server/server.py $LABFLAG $WEBFLAG --port "$PORT" > "$ROOT/logs/demo_server.log" 2>&1 &
+    nohup "$PY" -u server/server.py $WEBFLAG --port "$PORT" > "$ROOT/logs/demo_server.log" 2>&1 &
     if ! wait_for_server; then
         echo "The server did not start; see logs/demo_server.log" >&2; exit 1
     fi
@@ -199,7 +208,7 @@ OSA
 }
 
 echo "[3/5] Opening the server window ($MODE, port $PORT)"
-open_terminal "$TITLE_PREFIX · Server (port $PORT)" "SECURECHAT_ALLOWED_ORIGINS='http://localhost:${WEB_PORT:-8080},http://127.0.0.1:${WEB_PORT:-8080}' python server/server.py $LABFLAG $WEBFLAG --port $PORT" $SERVER_BOUNDS
+open_terminal "$TITLE_PREFIX · Server (port $PORT)" "SECURECHAT_ALLOWED_ORIGINS='http://localhost:${WEB_PORT:-8080},http://127.0.0.1:${WEB_PORT:-8080}' python server/server.py $WEBFLAG --port $PORT" $SERVER_BOUNDS
 
 echo "[4/5] Waiting for the server to accept TLS connections"
 if ! wait_for_server
@@ -224,7 +233,7 @@ cat <<MSG
  What to do    : in window A log in (or Register) as one user and name the
                  OTHER user as "Peer"; in window B do the reverse. Once both
                  show a fingerprint, send a message, click a bubble for its
-                 security receipt$( [ "$LAB" = 1 ] && echo ", open Attack Lab, and watch the dashboard" ).
+                 security receipt.
  Projector     : Cmd+Shift+P toggles Presentation mode in any window
                  (or start with demo/start_demo.sh --presentation).
  When finished : demo/stop_demo.sh   (stops only our server and windows)

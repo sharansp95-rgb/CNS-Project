@@ -133,12 +133,11 @@ class NetEnv:
 
     # -- servers ------------------------------------------------------------
 
-    def start_server(self, server_cls=None, lab_mode=False, lockout=None, **kwargs):
+    def start_server(self, server_cls=None, lockout=None, **kwargs):
         """Start a real TLS ChatServer on an OS-chosen free port. Returns
         (server, host, port); the server is already accepting connections."""
         server_cls = server_cls or server_module.ChatServer
-        server = server_cls(HOST, 0, lab_mode=lab_mode,
-                            lockout=lockout or LockoutGuard(), **kwargs)
+        server = server_cls(HOST, 0, lockout=lockout or LockoutGuard(), **kwargs)
         port = server.listen()
         thread = threading.Thread(target=server.serve_forever, daemon=True,
                                   name=f"test-server-{port}")

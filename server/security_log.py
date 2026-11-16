@@ -3,10 +3,7 @@
 Events are JSON lines in logs/security_events.jsonl (gitignored -- see
 .gitignore): one compact JSON object per line, each carrying at least `ts`
 (Unix seconds) and `event` (a short event-type string). This file is
-intentionally minimal -- Stage C (the Attack Lab) is the first caller, using
-only "lab_control_rejected" and "lab_attack_performed"; Stage D (login
-lockout + the security dashboard) adds the rest of the event types and the
-reader that tails this file.
+used by authentication, protocol rejection and client security alerts.
 
 Never logs a password, a private key, a session key, or message plaintext --
 every call site here passes only metadata (usernames, addresses, counts,
@@ -50,7 +47,7 @@ DEFAULT_LOG_PATH = os.path.join(
 _lock = threading.Lock()
 
 
-def log_event(event: str, path: str = DEFAULT_LOG_PATH, **fields) -> dict:
+def log_event(event: str, path: str = DEFAULT_LOG_PATH, database=None, **fields) -> dict:
     """Append one event and return the record that was written (useful for
     tests). `fields` are arbitrary metadata -- callers must not pass
     passwords, keys, or plaintext message content."""
@@ -58,7 +55,7 @@ def log_event(event: str, path: str = DEFAULT_LOG_PATH, **fields) -> dict:
     record.update(fields)
     line = json.dumps(record, sort_keys=True, default=str)
     with _lock:
-        with get_database().transaction() as conn:
+        with (database if database is not None else get_database()).transaction() as conn:
             digest = event_digest(record)
             ordinal = conn.execute(select(func.count()).select_from(security_events).where(
                 security_events.c.import_key.like(digest + ":%"))).scalar_one()

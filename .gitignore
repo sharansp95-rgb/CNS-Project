@@ -54,3 +54,7 @@ web/frontend/playwright-report/
 *tsa*.pem
 # Synthetic public fixture key is intentionally shared; no private fixture keys.
 !tests/fixtures/evidence_corpus/tsa_public.pem
+
+# Separate sandbox browser test artifacts.
+attack_lab/test-results/
+attack_lab/playwright-report/

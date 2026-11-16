@@ -10,7 +10,7 @@ used with a fixed meaning everywhere:
     teal   brand / secure / primary action
     green  success: a check passed, session established
     red    danger: something was blocked or failed
-    amber  warning: Attack Lab ("lab mode") and "waiting"
+    amber  warning and waiting states
 
 Every text-on-background pair listed in `Theme.TEXT_PAIRS` is checked to have a WCAG
 contrast ratio of at least 4.5:1 (tests/test_theme.py).
@@ -133,14 +133,13 @@ def _pick_font(priority_list, families):
 #   light  white surfaces, near-black text
 #
 # Both use the same brand teal and the same signal meanings (green ok, red blocked, amber
-# lab / waiting). Keys are attribute names on Theme. Two keys that share a colour in one
+# warnings / waiting). Keys are attribute names on Theme. Two keys that share a colour in one
 # theme share it in the other too, so a live switch can recolour widgets by value
 # (tests/test_theme.py checks this).
 # ---------------------------------------------------------------------------------
 _COMMON = {
     "bg_accent": "#0f766e", "bg_accent_hover": "#0b5f58", "fg_on_accent": "#ffffff",
     "bg_danger": "#be123c", "bg_danger_hover": "#9f1239",
-    "bg_lab": "#b45309", "bg_lab_hover": "#92400e",
     "fg_on_sent": "#f0fdfa",
 }
 PALETTES = {
@@ -153,7 +152,7 @@ PALETTES = {
         "accent": "#2dd4bf", "bg_accent_soft": "#062522",
         "success": "#4ade80", "bg_success_soft": "#07210f",
         "danger": "#fb7185", "bg_danger_soft": "#2a0a11", "danger_outline": "#5c1a28",
-        "warning": "#fbbf24", "bg_warning_soft": "#241b06", "lab_outline": "#5c3d0c",
+        "warning": "#fbbf24", "bg_warning_soft": "#241b06",
         "info": "#7cc4ff", "violet": "#c4b5fd", "wire_chat": "#5eead4", "wire_info": "#c2c2c2",
         "scroll_hover": "#4a4a4a", "glow_a": "#10786f", "glow_b": "#3730a3",
         "on_signal": "#000000",
@@ -167,7 +166,7 @@ PALETTES = {
         "accent": "#0d6b63", "bg_accent_soft": "#e6f6f4",
         "success": "#157a3a", "bg_success_soft": "#eaf7ef",
         "danger": "#b8173f", "bg_danger_soft": "#fdeef1", "danger_outline": "#f3b9c6",
-        "warning": "#94470a", "bg_warning_soft": "#fdf4e3", "lab_outline": "#f0cf9a",
+        "warning": "#94470a", "bg_warning_soft": "#fdf4e3",
         "info": "#1d4ed8", "violet": "#6d28d9", "wire_chat": "#0b6d64", "wire_info": "#45454d",
         "scroll_hover": "#a8a8b0", "glow_a": "#99e6dc", "glow_b": "#c7c2f5",
         "on_signal": "#fefefe",
@@ -237,7 +236,6 @@ class Theme:
     def _apply_palette(self, palette):
         for key, value in palette.items():
             setattr(self, key, value)
-        self.bg_lab_panel = self.bg_app       # Attack Lab window background
         # message bubbles
         self.bg_bubble_sent = self.bg_accent
         self.bg_bubble_recv = self.bg_raised
@@ -253,7 +251,6 @@ class Theme:
         self.fg_accent = self.accent
         self.fg_pending = self.warning
         self.fg_warning = self.danger            # NB: historically the red "warning" text
-        self.fg_lab_banner = self.warning
         self.bg_fingerprint = self.bg_accent_soft
         self.bg_pending = self.bg_warning_soft
         self.wire_sent = self.wire_chat
@@ -284,7 +281,6 @@ class Theme:
         pairs += [
             (self.fg_on_accent, self.bg_accent), (self.fg_on_accent, self.bg_accent_hover),
             (self.fg_on_sent, self.bg_bubble_sent), (self.fg_on_recv, self.bg_bubble_recv),
-            (self.fg_on_accent, self.bg_lab), (self.fg_on_accent, self.bg_lab_hover),
             (self.fg_on_accent, self.bg_danger), (self.fg_on_accent, self.bg_danger_hover),
             (self.fg_primary, self.bg_raised_hover), (self.fg_secondary, self.bg_raised_hover),
             (self.accent, self.bg_accent_soft), (self.success, self.bg_success_soft),
@@ -292,8 +288,6 @@ class Theme:
             (self.fg_primary, self.bg_danger_soft), (self.fg_secondary, self.bg_danger_soft),
             (self.fg_primary, self.bg_warning_soft), (self.fg_primary, self.bg_success_soft),
             (self.fg_primary, self.bg_accent_soft), (self.fg_secondary, self.bg_accent_soft),
-            (self.fg_primary, self.bg_lab_panel), (self.fg_secondary, self.bg_lab_panel),
-            (self.warning, self.bg_lab_panel),
             (self.fg_secondary, self.bg_bubble_recv), (self.accent, self.bg_bubble_recv),
             (self.wire_handshake, self.bg_panel_alt), (self.wire_chat, self.bg_panel_alt),
             (self.wire_info, self.bg_panel_alt),
@@ -345,7 +339,6 @@ class Theme:
     BUTTON_KINDS = {
         "TButton":           ("bg_accent", "bg_accent_hover", "bg_accent_hover", "fg_on_accent", None),
         "Secondary.TButton": ("bg_raised", "bg_raised_hover", "border_strong", "fg_primary", None),
-        "Lab.TButton":       ("bg_lab", "bg_lab_hover", "bg_lab_hover", "fg_on_accent", None),
         "Danger.TButton":    ("bg_danger", "bg_danger_hover", "bg_danger_hover", "fg_on_accent", None),
         "Ghost.TButton":     (None, "bg_raised", "bg_raised_hover", "fg_secondary", "border_strong"),
     }

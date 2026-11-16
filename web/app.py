@@ -60,7 +60,7 @@ class WebSocketPeer:
             await self.websocket.send_json(await self.outbox.get())
 
 
-def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None, idle_timeout=None):
+def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None, idle_timeout=None, include_vault=True):
     allowed_origins = set(origins if origins is not None else filter(None,
         (x.strip() for x in os.environ.get("SECURECHAT_ALLOWED_ORIGINS",
             "http://localhost:8080,http://127.0.0.1:8080").split(","))))
@@ -83,7 +83,7 @@ def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None
     app.state.relay = core
     app.state.peers = set()
     from web.vault_api import VaultAPI
-    vault = VaultAPI(app, core.database)
+    vault = VaultAPI(app, core.database) if include_vault else None
     app.state.vault = vault
 
     @app.middleware("http")
@@ -134,6 +134,7 @@ def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None
                     await ws.close(code=1008)
                     break
                 if not isinstance(envelope, dict) or not isinstance(envelope.get("type"), str) or envelope["type"] not in ALLOWED_TYPES:
+                    await asyncio.to_thread(core.log_event, "unsupported_envelope", username=name, from_addr=addr[0], envelope_type="unknown type")
                     await ws.close(code=1008)
                     break
                 if any(field in envelope and not isinstance(envelope[field], str)
@@ -150,7 +151,8 @@ def create_app(relay=None, *, origins=None, max_frame_size=None, rate_limit=None
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
-            vault.revoke(peer.token)
+            if vault:
+                vault.revoke(peer.token)
             peer.closed.set()
             writer.cancel()
             with suppress(asyncio.CancelledError, RuntimeError, WebSocketDisconnect):

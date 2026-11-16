@@ -25,7 +25,7 @@ our_pids() {
 our_server_pids_on_port() {
     local pid
     for pid in $(lsof -nP -iTCP:"$1" -sTCP:LISTEN -t 2>/dev/null | sort -u); do
-        ps -p "$pid" -o command= 2>/dev/null | grep -q "server/server\.py" || continue
+        ps -p "$pid" -o command= 2>/dev/null | grep -Eq "server/server\.py| -m attack_lab( |$)" || continue
         [ "$(proc_cwd "$pid")" = "$ROOT" ] && echo "$pid"
     done
 }
@@ -71,7 +71,7 @@ OSA
 stop_demo_processes() {
     local port="${1:-}" servers guis
     if [ -n "$port" ]; then servers="$(our_server_pids_on_port "$port")"
-    else servers="$(our_pids 'server/server\.py')"; fi
+    else servers="$(our_pids 'server/server\.py| -m attack_lab( |$)')"; fi
     guis="$(our_pids 'gui/chat_gui\.py|gui/security_dashboard\.py')"
     local all
     all="$(printf '%s\n%s\n' "$servers" "$guis" | grep -E '^[0-9]+$' | sort -un | tr '\n' ' ')"

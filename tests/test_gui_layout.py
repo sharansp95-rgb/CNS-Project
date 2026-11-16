@@ -52,7 +52,7 @@ def test_header_rows_fit_the_minimum_window_width(app):
     app.update()
     row1 = [w for w in app.header_row1.winfo_children() if w.winfo_manager()
             and w is not app.header_row1.winfo_children()[-1]]
-    fixed = sum(w.winfo_reqwidth() for w in (app.avatar, app.lab_button, app.export_button,
+    fixed = sum(w.winfo_reqwidth() for w in (app.avatar, app.export_button,
                                               app.network_button))
     assert fixed <= app.winfo_width(), f"avatar + action buttons need {fixed}px"
     chips = sum(w.winfo_reqwidth() for w in app.chip_row.winfo_children() if w.winfo_manager())
@@ -66,7 +66,7 @@ def test_action_buttons_are_actually_mapped_and_inside_the_window(app, size):
     _long_header(app)
     app.update()
     width = app.winfo_width()
-    for button in (app.export_button, app.lab_button, app.network_button):
+    for button in (app.export_button, app.network_button):
         assert button.winfo_ismapped()
         assert button.winfo_width() > 60, f"{button.cget('text')} squeezed to {button.winfo_width()}px"
         assert button.winfo_rootx() - app.winfo_rootx() + button.winfo_width() <= width

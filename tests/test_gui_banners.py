@@ -8,6 +8,7 @@ import pytest
 
 import gui.chat_gui as chat_gui
 from gui.explain import banner_for
+from test_gui_attack_lab import site  # separate sandbox fixture
 
 AUTH = {"username": "alice", "peer": "bob", "lab_mode": True,
         "own_fingerprint": "AAAA BBBB CCCC DDDD", "peer_key_found": True}
@@ -128,13 +129,19 @@ def test_settings_menu_has_the_explain_toggle_and_is_on_by_default(app):
     assert "Explain events" in labels
 
 
-def test_attacker_window_gets_an_info_banner_without_claiming_detection(app):
-    app._handle_event("lab_attack_performed", {"detail": "flipped a byte in alice's next chat "
-                                                         "message's ciphertext", "action": "tamper_next"})
-    app.update()
-    text = banner_text(app)
-    assert "their own checks decide" in text and "caught" in text.lower()
-    assert "was caught" not in text and "detected" not in text
+def test_separate_lab_does_not_claim_detection_for_an_attempt(site):
+    from test_gui_attack_lab import start, ORIGIN
+    client, lab = site
+    start(client)
+    response = client.post('/lab/arm', json={'action': 'tamper_next', 'target': 'lab_alice'},
+                           headers={'origin': ORIGIN})
+    assert response.status_code == 200
+    html = client.get('/').text
+    assert 'Attempted actions are not successful detections.' in html
+    assert 'A missing report is never labeled' in html and 'caught' in html
+    events = lab.state.relay.events
+    assert events[-1]['event'] == 'lab_attack_armed'
+    assert not any(e['event'] == 'security_alert' for e in events)
 
 
 def test_banner_wraps_within_a_narrow_window(app):

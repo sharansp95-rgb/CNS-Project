@@ -8,22 +8,23 @@ import threading
 from server.db import get_database, record_relay
 from server.lockout import LockoutGuard
 from server.security_log import log_event
-from server.user_store import register_user, verify_user, get_public_key
+from server.user_store import DatabaseUserStore
 
 RELAYED_TYPES = frozenset(("chat", "handshake_init", "handshake_response"))
 
 
 class RelayCore:
-    def __init__(self, lockout=None, register=None, verify=None, public_key=None, logger=None):
+    def __init__(self, lockout=None, register=None, verify=None, public_key=None, logger=None, database=None, interceptor=None):
         self.clients = {}
         self._lock = threading.RLock()
-        self.database = get_database()
-        self.lockout = lockout if lockout is not None else LockoutGuard()
-        self.register_user = register or register_user
-        self.verify_user = verify or verify_user
-        self.get_public_key = public_key or get_public_key
-        self.log_event = logger or log_event
-        self.lab_mode = False
+        self.database = database if database is not None else get_database()
+        self.interceptor = interceptor
+        scoped = DatabaseUserStore(self.database)
+        self.lockout = lockout if lockout is not None else LockoutGuard(database=self.database)
+        self.register_user = register or scoped.register_user
+        self.verify_user = verify or scoped.verify_user
+        self.get_public_key = public_key or scoped.get_public_key
+        self.log_event = logger or (lambda event, **fields: log_event(event, database=self.database, **fields))
 
     def _send(self, conn, envelope):
         conn.send_envelope(envelope)
@@ -122,7 +123,6 @@ class RelayCore:
             self._send(conn, {
                 "type": "register_result", "success": True,
                 "reason": "registered and logged in",
-                "lab_mode": self.lab_mode,
             })
             print(f"[+] {username} registered from {addr[0]}:{addr[1]}")
             self.log_event("user_registered", username=username, from_addr=addr[0])
@@ -145,7 +145,6 @@ class RelayCore:
             self._send(conn, {
                 "type": "login_result", "success": True,
                 "reason": "login successful",
-                "lab_mode": self.lab_mode,
             })
             print(f"[+] {username} logged in from {addr[0]}:{addr[1]}")
             self.log_event("user_login", username=username, from_addr=addr[0])
@@ -170,6 +169,16 @@ class RelayCore:
         return name
 
     def route(self, envelope, sender_name):
+        """The optional neutral interceptor returns zero or more routed envelopes.
+
+        All normal calls use None and deliver one original envelope. A supplied
+        interceptor owns its synchronization and must not mutate caller data.
+        """
+        outgoing = self.interceptor(envelope, sender_name) if self.interceptor else [envelope]
+        for item in outgoing:
+            self.deliver(item, sender_name)
+
+    def deliver(self, envelope, sender_name):
         with self._lock:
             target = self.clients.get(envelope.get("to"))
             sender = self.clients.get(sender_name)
@@ -188,7 +197,7 @@ class RelayCore:
 
     def handle_authenticated(self, conn, addr, name, envelope):
         etype = envelope.get("type")
-        if etype in RELAYED_TYPES:
+        if isinstance(etype, str) and etype in RELAYED_TYPES:
             self.route(envelope, name)
         elif etype == "get_pubkey":
             self._handle_get_pubkey(conn, envelope)
@@ -197,4 +206,6 @@ class RelayCore:
                            alert=envelope.get("alert"), reason=envelope.get("reason"),
                            peer=envelope.get("peer"), seq=envelope.get("seq"))
         else:
+            self.log_event("unsupported_envelope", username=name, from_addr=addr[0],
+                           envelope_type=etype if isinstance(etype, str) else "invalid type")
             self._send(conn, {"type": "error", "reason": "unknown envelope type"})

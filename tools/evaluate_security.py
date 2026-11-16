@@ -13,7 +13,7 @@ effectiveness) and for the Review 1 non-functional requirement "encryption
 overhead small enough for real-time chat (< 1 s)".
 
   1. Functional verification   the pytest suite, grouped by area
-  2. Attack resistance         each attack N times through the real lab-mode
+  2. Attack resistance         each attack N times through the real sandbox
                                relay (tamper, replay, drop, MITM key swap), plus
                                edited evidence files and wrong-password bursts,
                                and normal traffic to measure false rejections
@@ -21,7 +21,7 @@ overhead small enough for real-time chat (< 1 s)".
                                primitive and for end-to-end message latency and
                                session setup through the real TLS server
 
-Isolation: everything runs against a local server (OS-chosen port, lab mode)
+Isolation: everything runs against a local server (OS-chosen port, separate attack_lab relay)
 with a TEMPORARY data directory, key store, security log and exports folder.
 The real data/ is never touched (its SHA-256 is compared before and after) and
 all temporary files are deleted at the end.
@@ -61,6 +61,8 @@ from crypto_engine.dh_exchange import compute_shared_key  # noqa: E402
 from crypto_engine.dh_exchange import generate_keypair as generate_ecdh_keypair  # noqa: E402
 from crypto_engine.signatures import generate_keypair as generate_rsa_keypair  # noqa: E402
 from crypto_engine.signatures import serialize_public_key, sign, verify  # noqa: E402
+from attack_lab.relay import RogueRelay, lab_database
+from server.user_store import DatabaseUserStore
 from server.lockout import LockoutGuard  # noqa: E402
 from server.security_log import log_event as real_log_event  # noqa: E402
 from server.security_log import read_events  # noqa: E402
@@ -263,7 +265,6 @@ class Session:
         if not result or not result.get("success"):
             raise RuntimeError(f"login failed for {name}: {result}")
         self.client.rsa_private_key = harness.keys[name]
-        self.client.lab_mode = bool(result.get("lab_mode"))
 
     def fetch_peer_key(self):
         t = time.perf_counter()
@@ -296,7 +297,7 @@ class Session:
 
 
 class Harness:
-    """An in-process, lab-mode relay with a temporary user store, security log
+    """An in-process, sandbox relay with a temporary user store, security log
     and exports folder, on an OS-chosen port."""
 
     def __init__(self, tmp, backoff_seconds=0.5):
@@ -304,23 +305,16 @@ class Harness:
         self.keys = {}
         self.exports_dir = os.path.join(tmp, "exports")
         self.log_path = os.path.join(tmp, "security_events.jsonl")
-        self._previous_database_url = os.environ.get("DATABASE_URL")
-        os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(tmp, "users.db")
-        store = os.path.join(tmp, "users.json")
-        self._saved = {n: getattr(server_module, n)
-                       for n in ("register_user", "verify_user", "get_public_key", "log_event")}
-        for name in ("register_user", "verify_user", "get_public_key"):
-            setattr(server_module, name, functools.partial(self._saved[name], path=store))
-        server_module.log_event = lambda event, **fields: real_log_event(
-            event, path=self.log_path, **fields)
+        self.database = lab_database("sqlite:///" + os.path.join(tmp,"lab.db"))
         # Production lockout defaults (5 failures / 5 minutes) except: the lock
         # lasts `backoff_seconds` so a burst can be repeated quickly, and the
         # per-address rate limit is off (it would otherwise throttle the
         # hundreds of logins this experiment makes from one address).
         self.lockout = LockoutGuard(threshold=5, window=300, backoff_schedule=(backoff_seconds,),
-                                    addr_limit=10 ** 9)
+                                    addr_limit=10 ** 9, database=self.database)
         self.backoff = backoff_seconds
-        self.server = server_module.ChatServer(HOST, 0, lab_mode=True, lockout=self.lockout)
+        self.server = RogueRelay(HOST, 0, database=self.database, lockout=self.lockout,
+            logger=lambda event, **fields: real_log_event(event, path=self.log_path, database=self.database, **fields))
         self.port = self.server.listen()
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -328,12 +322,6 @@ class Harness:
     def close(self):
         self.server.shutdown()
         self.thread.join(timeout=10)
-        for name, fn in self._saved.items():
-            setattr(server_module, name, fn)
-        if self._previous_database_url is None:
-            os.environ.pop("DATABASE_URL", None)
-        else:
-            os.environ["DATABASE_URL"] = self._previous_database_url
 
     def register(self, name):
         priv, pub = generate_rsa_keypair()
@@ -398,7 +386,7 @@ class Harness:
 def trial_tamper(h, i):
     a, b = h.pair()
     text = f"tamper-{i}"
-    a.client.send_envelope({"type": "lab_control", "action": "tamper_next"})
+    h.server.arm("tamper_next", a.name)
     a.client.send_message(text)
     caught = b.wait(lambda: b.has_event("message_rejected", reason="decryption_failed"))
     result = {"detected": caught and not b.displayed(text),
@@ -412,7 +400,7 @@ def trial_replay(h, i):
     text = f"replay-{i}"
     a.client.send_message(text)
     b.wait(lambda: b.displayed(text))
-    a.client.send_envelope({"type": "lab_control", "action": "replay_last"})
+    h.server.arm("replay_last", a.name)
     caught = b.wait(lambda: b.has_event("message_rejected", reason="replay_duplicate"))
     shown_once = sum(1 for t in b.client.transcript if t["message"] == text) == 1
     result = {"detected": caught and shown_once,
@@ -424,7 +412,7 @@ def trial_replay(h, i):
 def trial_drop(h, i):
     a, b = h.pair()
     dropped, follow = f"dropped-{i}", f"follow-{i}"
-    a.client.send_envelope({"type": "lab_control", "action": "drop_next"})
+    h.server.arm("drop_next", a.name)
     a.client.send_message(dropped)
     a.client.send_message(follow)
     caught = b.wait(lambda: b.has_event("chain_warning", reason="chain_gap"))
@@ -438,8 +426,8 @@ def trial_drop(h, i):
 def trial_mitm(h, i):
     a = Session(h, "eval_alice", "eval_bob")          # alice joins first and arms the attack
     a.fetch_peer_key()
-    a.client.send_envelope({"type": "lab_control", "action": "mitm_next_handshake"})
-    armed = a.wait(lambda: a.has_event("lab_control_result", armed=True))
+    h.server.arm("mitm_next_handshake", a.name)
+    armed = True
     b = Session(h, "eval_bob", "eval_alice")         # bob joins; alice initiates; relay swaps the key
     b.fetch_peer_key()
     caught = armed and b.wait(lambda: b.has_event("handshake_aborted"))
@@ -743,7 +731,7 @@ def print_summary(results):
     say("=" * 100)
     say("\n1. FUNCTIONAL VERIFICATION (pytest)")
     say(text_table(["Area", "Passed", "Failed"], [[r[0], r[2], r[3]] for r in functional]))
-    say("\n2. ATTACK RESISTANCE (each attack run N times through the real lab-mode relay)")
+    say("\n2. ATTACK RESISTANCE (each attack run N times through the real sandbox relay)")
     say(text_table(["Attack", "Tried", "Detected", "Rate", "Detected by"], attacks))
     say("\n   Normal traffic")
     say(text_table(["Measure", "Result"], normal))
@@ -797,7 +785,7 @@ def write_markdown(results, path, command):
         "",
         "Parameters used: `" + json.dumps(p) + "`",
         "",
-        "Everything ran against a local lab-mode server on an OS-chosen loopback port with a temporary user store,",
+        "Everything ran against a local sandbox server on an OS-chosen loopback port with a temporary user store,",
         "security log and exports folder (deleted afterwards).",
         "",
         f"> **Caveat 1 - lockout duration.** For the repeated wrong-password trials the lock duration was shortened to "
@@ -817,7 +805,7 @@ def write_markdown(results, path, command):
         "",
         "## 2. Attack resistance",
         "",
-        "Each attack was run through the real lab-mode relay (the same `lab_control` actions the Attack Lab uses), "
+        "Each attack was run through the separate attack_lab rogue relay using the same neutral interceptor as the sandbox site, "
         "with a fresh pair of real clients per trial. An attack counts as **detected** only if the receiving side's "
         "own check flagged it **and** the tampered/replayed/dropped content was not displayed. The server never "
         "announces a detection; the table names the client-side check that fired.",

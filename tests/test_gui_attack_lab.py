@@ -14,7 +14,7 @@ import tkinter as tk
 import pytest
 
 import gui.chat_gui as chat_gui
-from gui.explain import (
+from attack_lab.presentation import (
     HANDSHAKE_SIGNATURE,
     LAB_ATTACKS,
     REJECTIONS,
@@ -28,7 +28,10 @@ from gui.theme import is_no_display_error
 
 def test_three_attacks_in_demo_order_each_with_an_expected_defence():
     assert [a["action"] for a in LAB_ATTACKS] == [
-        "tamper_next", "replay_last", "drop_next"]
+        "tamper_next",
+        "replay_last",
+        "drop_next",
+    ]
     for a in LAB_ATTACKS:
         assert a["glyph"] and a["desc"] and a["check"] and a["label"] and a["title"]
     checks = {a["action"]: a["check"] for a in LAB_ATTACKS}
@@ -38,27 +41,38 @@ def test_three_attacks_in_demo_order_each_with_an_expected_defence():
 
 
 def alert(**kw):
-    base = {"event": "security_alert", "reported_by": "bob", "ts": 1000.0,
-            "alert": "message_rejected", "reason": "decryption_failed"}
+    base = {
+        "event": "security_alert",
+        "reported_by": "bob",
+        "ts": 1000.0,
+        "alert": "message_rejected",
+        "reason": "decryption_failed",
+    }
     return {**base, **kw}
 
 
-@pytest.mark.parametrize("action,event", [
-    ("tamper_next", alert()),
-    ("replay_last", alert(reason="replay_duplicate")),
-    ("drop_next", alert(alert="chain_warning", reason="chain_gap")),
-])
+@pytest.mark.parametrize(
+    "action,event",
+    [
+        ("tamper_next", alert()),
+        ("replay_last", alert(reason="replay_duplicate")),
+        ("drop_next", alert(alert="chain_warning", reason="chain_gap")),
+    ],
+)
 def test_detection_matches_the_victims_own_report(action, event):
     assert find_lab_detection(action, [event], "bob", 999.0) == event
 
 
-@pytest.mark.parametrize("event", [
-    alert(reported_by="alice"),                 # the attacker's own report is not the victim's
-    alert(ts=900.0),                            # before the attack fired
-    alert(reason="replay_duplicate"),           # a different check fired
-    alert(alert="chain_warning"),               # a different kind of alert
-    {"event": "lab_attack_performed", "ts": 1000.0},   # not a detection at all
-])
+@pytest.mark.parametrize(
+    "event",
+    [
+        alert(reported_by="alice"),  # the attacker's own report is not the victim's
+        alert(ts=900.0),  # before the attack fired
+        alert(reason="replay_duplicate"),  # a different check fired
+        alert(alert="chain_warning"),  # a different kind of alert
+        {"event": "lab_attack_performed", "ts": 1000.0},  # not a detection at all
+    ],
+)
 def test_unrelated_records_are_not_detections(event):
     assert find_lab_detection("tamper_next", [event], "bob", 999.0) is None
 
@@ -67,172 +81,213 @@ def test_status_wording_for_every_state():
     assert lab_status("idle", "tamper_next", "bob") == ("off", "Not armed")
     assert lab_status("arming", "tamper_next", "bob")[0] == "warn"
     assert "send a message" in lab_status("armed", "tamper_next", "bob")[1]
-    assert lab_status("fired", "tamper_next", "bob") == ("warn", "Fired. Waiting for bob's check...")
+    assert lab_status("fired", "tamper_next", "bob") == (
+        "warn",
+        "Fired. Waiting for bob's check...",
+    )
     assert lab_status("caught", "tamper_next", "bob") == (
-        "ok", "Caught by AES-256-GCM authentication tag (reported by bob)")
+        "ok",
+        "Caught by AES-256-GCM authentication tag (reported by bob)",
+    )
     kind, text = lab_status("silent", "tamper_next", "bob")
-    assert kind == "warn" and "No report from bob yet" in text and "Watch bob's window" in text
+    assert (
+        kind == "warn"
+        and "No report from bob yet" in text
+        and "Watch bob's window" in text
+    )
     assert lab_status("rejected", "tamper_next", "bob", "lab mode is off") == (
-        "bad", "Rejected: lab mode is off")
+        "bad",
+        "Rejected: lab mode is off",
+    )
 
 
-# ---- the window -----------------------------------------------------------------------
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+from attack_lab.app import create_app, ACCOUNTS
+from attack_lab.relay import lab_database
+from server.db import users, get_database
+from web.app import create_app as product_app
 
-
-class FakeClient:
-    lab_mode = True
-    username = "alice"
-    peer = "bob"
-
-    def __init__(self):
-        self.armed = []
-        self.stop_event = threading.Event()
-
-    def send_lab_control(self, action, target=None):
-        self.armed.append(action)
+ORIGIN = "http://localhost:8090"
 
 
 @pytest.fixture()
-def app(tmp_path):
-    try:
-        window = chat_gui.ChatGUI(log_path=str(tmp_path / "events.jsonl"))
-    except tk.TclError as exc:
-        if is_no_display_error(exc):
-            pytest.skip(f"no display available for Tk: {exc}")
-        raise
-    window.geometry("1040x660+10000+10000")
-    window.update()
-    window.client = FakeClient()
-    window.username, window.peer = "alice", "bob"
-    window._show_chat_screen()          # events are applied live once the chat screen is up
-    yield window
-    window.update()
-    for child in window.winfo_children():
-        if isinstance(child, tk.Toplevel):
-            child.destroy()
-    window.update()
-    window.destroy()
+def site(tmp_path):
+    app = create_app(
+        database_url="sqlite:///" + str(tmp_path / "lab.db"),
+        state_dir=tmp_path / "state",
+        origins=[ORIGIN],
+    )
+    with TestClient(app) as client:
+        yield client, app
 
 
-def lab_texts(app):
-    out = []
-
-    def walk(widget):
-        for child in widget.winfo_children():
-            if isinstance(child, tk.Label):
-                out.append(str(child.cget("text")))
-            walk(child)
-    walk(app._lab_window)
-    return "\n".join(out)
+def start(client):
+    result = client.post("/lab/session", json={}, headers={"origin": ORIGIN})
+    assert result.status_code == 200
+    return result.json()
 
 
-def test_panel_has_the_lab_mode_banner_and_one_card_per_attack(app):
-    app._open_attack_lab()
-    app.update()
-    text = lab_texts(app)
-    assert "LAB MODE: relay is acting maliciously on request" in text
-    assert "one-shot" in text
-    for a in LAB_ATTACKS:
-        assert a["title"] in text and a["desc"] in text and a["check"] in text
-    assert text.count("Expected defence") == 3
-    assert len(app._lab_cards) == 3
-    assert app._lab_window.title() == "Attack Lab"
+def test_site_has_persistent_banner_and_separate_control_entry(site):
+    client, app = site
+    html = client.get("/").text
+    assert "ATTACK LAB — sandbox, not the real service" in html
+    assert html.count("<iframe") == 2
+    assert "/victim" in html
+    assert client.get("/victim").status_code == 200
 
 
-def test_panel_only_opens_in_lab_mode(app):
-    app.client.lab_mode = False
-    app._open_attack_lab()
-    assert not app._lab_window_alive()
+def test_victim_html_and_bundle_are_identical_to_product(site):
+    from web.app import STATIC
+    import re
+
+    client, _ = site
+    assert client.get("/victim").content == (STATIC / "index.html").read_bytes()
+    script = re.search(r'src="(/assets/[^"]+\.js)"', client.get("/victim").text).group(
+        1
+    )
+    assert (
+        client.get(script).content == (STATIC / script.removeprefix("/")).read_bytes()
+    )
 
 
-def test_opening_twice_reuses_the_same_window(app):
-    app._open_attack_lab()
-    first = app._lab_window
-    app._open_attack_lab()
-    assert app._lab_window is first
-    assert len([c for c in app.winfo_children() if isinstance(c, tk.Toplevel)]) == 1
+def test_controls_need_session_and_separate_origin(site):
+    client, _ = site
+    assert (
+        client.post(
+            "/lab/arm",
+            json={"action": "drop_next", "target": "lab_alice"},
+            headers={"origin": ORIGIN},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/lab/session", json={}, headers={"origin": "http://localhost:8080"}
+        ).status_code
+        == 403
+    )
+    start(client)
+    assert (
+        client.post(
+            "/lab/arm",
+            json={"action": "drop_next", "target": "real_user"},
+            headers={"origin": ORIGIN},
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/lab/arm",
+            json={"action": "unknown", "target": "lab_alice"},
+            headers={"origin": ORIGIN},
+        ).status_code
+        == 400
+    )
+
+    assert (
+        client.post(
+            "/lab/arm",
+            json={"action": [], "target": "lab_alice"},
+            headers={"origin": ORIGIN},
+        ).status_code
+        == 400
+    )
 
 
-def test_arm_buttons_send_the_matching_action_and_show_arming(app):
-    app._open_attack_lab()
-    for attack in LAB_ATTACKS:
-        card = app._lab_cards[attack["action"]]
-        assert card["button"].cget("text") == attack["label"]
-        card["button"].invoke()
-    deadline = time.time() + 3
-    while len(app.client.armed) < 3 and time.time() < deadline:
-        time.sleep(0.01)
-    assert sorted(app.client.armed) == sorted(a["action"] for a in LAB_ATTACKS)
-    assert app._lab_cards["tamper_next"]["chip"].cget("text") == "Arming..."
+def test_reset_wipes_only_lab_db_and_reseeds_accounts(site):
+    from server.user_store import register_user
+
+    client, app = site
+    start(client)
+    assert register_user("real_marker", "pw")
+    client.post(
+        "/lab/arm",
+        json={"action": "drop_next", "target": "lab_alice"},
+        headers={"origin": ORIGIN},
+    )
+    reset = client.post("/lab/reset", json={}, headers={"origin": ORIGIN})
+    assert reset.status_code == 200 and reset.json()["accounts"] == list(ACCOUNTS)
+    assert app.state.relay.pending == {} and app.state.relay.events == []
+    with app.state.database.engine.connect() as conn:
+        assert set(conn.execute(select(users.c.username)).scalars()) == {
+            "lab_alice",
+            "lab_bob",
+            "lab_lockout",
+        }
+    with get_database().engine.connect() as conn:
+        assert conn.execute(
+            select(users.c.username).where(users.c.username == "real_marker")
+        ).first()
 
 
-def test_server_replies_drive_the_card_state(app):
-    app._open_attack_lab()
-    app._handle_event("lab_control_result", {"action": "tamper_next", "armed": True,
-                                             "detail": "armed"})
-    chip = app._lab_cards["tamper_next"]["chip"]
-    assert chip.cget("text") == "Armed: send a message now" and chip.kind == "warn"
-    app._handle_event("lab_control_result", {"action": "drop_next", "armed": False,
-                                             "detail": "lab mode is off"})
-    drop = app._lab_cards["drop_next"]["chip"]
-    assert drop.cget("text") == "Rejected: lab mode is off" and drop.kind == "bad"
+def test_real_bruteforce_locks_sandbox_account_and_skips_pbkdf2(site):
+    from unittest.mock import patch
+
+    client, app = site
+    start(client)
+    response = client.post("/lab/brute-force", json={}, headers={"origin": ORIGIN})
+    assert response.status_code == 200 and response.json()["locked"]
+    replies = response.json()["results"]
+    assert replies[0]["reason"] == "invalid username or password"
+    assert replies[-2]["reason"] == "invalid username or password"
+    assert "locked" in replies[-1]["reason"]
+    assert any(e["event"] == "lockout_rejected" for e in app.state.relay.events)
+    with patch("server.user_store.verify_password") as verify:
+        assert app.state.relay.lockout.status("lab_lockout").locked
+
+        class Peer:
+            def send_envelope(self, e):
+                pass
+
+        app.state.relay.authenticate(
+            Peer(),
+            ("127.0.0.1", 0),
+            {"type": "login", "username": "lab_lockout", "password": "wrong"},
+        )
+        verify.assert_not_called()
 
 
-def test_card_turns_green_only_when_the_victims_report_is_in_the_log(app, tmp_path):
-    app._open_attack_lab()
-    app._handle_event("lab_attack_performed", {"action": "tamper_next",
-                                               "detail": "flipped a byte in alice's next message"})
-    chip = app._lab_cards["tamper_next"]["chip"]
-    assert chip.cget("text") == "Fired. Waiting for bob's check..." and chip.kind == "warn"
-    log = tmp_path / "events.jsonl"
-    now = time.time()
-    # records that must NOT count: wrong reporter, wrong check, and one logged before the attack
-    log.write_text("\n".join(json.dumps(r) for r in [
-        alert(reported_by="alice", ts=now + 1), alert(reason="replay_duplicate", ts=now + 1),
-        alert(ts=now - 60)]) + "\n")
-    app._poll_lab_detection()
-    assert app._lab_state["tamper_next"]["state"] == "fired"
-    with open(log, "a") as f:
-        f.write(json.dumps(alert(ts=time.time())) + "\n")
-    app._poll_lab_detection()
-    app.update()
-    assert chip.cget("text") == "Caught by AES-256-GCM authentication tag (reported by bob)"
-    assert chip.kind == "ok"
+def test_control_rate_limit_and_polling_are_separate(site):
+    client, _ = site
+    start(client)
+    for _ in range(35):
+        assert client.get("/lab/state").status_code == 200
+    codes = [
+        client.post(
+            "/lab/arm",
+            json={"action": "drop_next", "target": "lab_alice"},
+            headers={"origin": ORIGIN},
+        ).status_code
+        for _ in range(31)
+    ]
+    assert codes[:30] == [200] * 30 and codes[30] == 429
 
 
-def test_without_a_report_the_card_says_so_instead_of_claiming_anything(app):
-    app._open_attack_lab()
-    app._handle_event("lab_attack_performed", {"action": "replay_last", "detail": "resent"})
-    app._lab_state["replay_last"]["fired_at"] = time.time() - 30
-    app._poll_lab_detection()
-    chip = app._lab_cards["replay_last"]["chip"]
-    assert "No report from bob yet" in chip.cget("text") and chip.kind == "warn"
-    # and it keeps listening: a late report still turns it green
-    with open(app.log_path, "w") as f:
-        f.write(json.dumps(alert(reason="replay_duplicate", ts=time.time())) + "\n")
-    app._poll_lab_detection()
-    assert chip.kind == "ok"
+def test_production_has_no_lab_routes_or_controls():
+    with TestClient(product_app()) as client:
+        for path in (
+            "/lab/session",
+            "/lab/arm",
+            "/lab/state",
+            "/lab/reset",
+            "/lab/brute-force",
+        ):
+            assert client.get(path).status_code == 404
 
 
-def test_state_survives_closing_and_reopening_the_panel(app):
-    app._open_attack_lab()
-    app._handle_event("lab_control_result", {"action": "drop_next", "armed": True, "detail": "x"})
-    app._lab_window.destroy()
-    app.update()
-    app._open_attack_lab()
-    assert app._lab_cards["drop_next"]["chip"].kind == "warn"
-    assert "Armed" in app._lab_cards["drop_next"]["chip"].cget("text")
+def test_same_real_database_and_origin_are_refused(tmp_path, monkeypatch):
+    real = tmp_path / "real.db"
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///" + str(real))
+    with pytest.raises(ValueError, match="separate database"):
+        lab_database("sqlite:///" + str(real))
+    with pytest.raises(ValueError, match="different from"):
+        create_app(
+            database_url="sqlite:///" + str(tmp_path / "lab.db"),
+            origins=["http://localhost:8080"],
+            state_dir=tmp_path / "state",
+        )
 
 
-def test_panel_fits_a_laptop_screen_and_escape_closes_it(app):
-    app._open_attack_lab()
-    app.update()
-    win = app._lab_window
-    assert win.winfo_reqheight() <= 640 and win.winfo_reqwidth() <= 780, (
-        win.winfo_reqwidth(), win.winfo_reqheight())
-    # Tk only dispatches synthetic key events to the focused window.
-    win.focus_force()
-    app.update()
-    win.event_generate("<Escape>")
-    app.update()
-    assert not app._lab_window_alive()
+def test_product_gui_has_no_attack_panel():
+    assert not hasattr(chat_gui.ChatGUI, "_open_attack_lab")

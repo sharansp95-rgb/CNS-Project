@@ -69,14 +69,14 @@ class LockoutGuard:
 
     def __init__(self, threshold=DEFAULT_THRESHOLD, window=DEFAULT_WINDOW_SECONDS,
                  backoff_schedule=DEFAULT_BACKOFF_SCHEDULE,
-                 addr_limit=DEFAULT_ADDR_LIMIT, addr_window=DEFAULT_ADDR_WINDOW_SECONDS):
+                 addr_limit=DEFAULT_ADDR_LIMIT, addr_window=DEFAULT_ADDR_WINDOW_SECONDS, database=None):
         self.threshold = threshold
         self.window = window
         self.backoff_schedule = tuple(backoff_schedule)
         self.addr_limit = addr_limit
         self.addr_window = addr_window
         self._lock = threading.Lock()
-        self.database = get_database()
+        self.database = database if database is not None else get_database()
         self._by_addr = {}       # addr -> [timestamp, ...]
 
     # --- per-account lockout -------------------------------------------------

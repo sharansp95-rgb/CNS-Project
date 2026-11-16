@@ -589,7 +589,7 @@ class StepList(tk.Frame):
 
 def make_card(parent, theme, background=None, border=None, padx=None, pady=None, radius="lg"):
     """A rounded card with a hairline border (the one 'card' look used by login, receipt,
-    Attack Lab, dashboard...)."""
+    receipts, dashboard...)."""
     return RoundedFrame(parent, theme, fill=background or theme.bg_panel,
                         outline=border or theme.border, radius=radius,
                         padx=padx or "lg", pady=pady or "lg")

@@ -12,7 +12,11 @@ import pytest
 import _demo_common as dc
 from conftest import ROOT  # noqa: F401
 from crypto_engine.hash_chain import GAP, OK, IncomingChain
-from test_attack_lab import WAIT_SECONDS, kinds, make_secure_pair, wait_until
+from test_attack_lab import rogue, pair, wait  # shared isolated relay fixture
+
+
+def wait_until(predicate, what):
+    wait(predicate, timeout=15)
 
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import verify_transcript  # noqa: E402
@@ -36,8 +40,10 @@ def reports(events, kind):
 
 
 @pytest.fixture()
-def session(net):
-    server, alice, bob, a_events, b_events = make_secure_pair(net)
+def session(net, rogue):
+    server, alice, bob, b_events = pair(net, rogue)
+    a_events = []
+    alice.on_event = lambda kind, data: a_events.append((kind, data))
     return alice, bob, a_events, b_events, net
 
 

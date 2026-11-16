@@ -1,59 +1,6 @@
-"""Relay server: threaded TCP, JSON-line envelope protocol.
-
-Phase 1 broadcast raw plaintext lines to everyone. Phase 3 replaced that with
-a small JSON envelope protocol (see README.md "How the handshake works") so
-the server can route ECDH handshake messages and encrypted chat messages to a
-*specific* named peer instead of broadcasting them to the whole room. Phase 4
-adds a "register"/"login" step in front of that: a client must authenticate
-with a username + password (checked against server/user_store.py, which
-stores only a PBKDF2 hash -- see auth/password_hash.py) before it is admitted
-to the roster or allowed to send anything else.
-
-Crucially, the server is a dumb relay for these envelope types:
-  - "handshake_init" / "handshake_response": carry only public key bytes
-    (base64-encoded). Public keys are, by design, safe for the server to see.
-  - "chat": carries only nonce/ciphertext/tag (base64-encoded AES-GCM output).
-    The server never sees plaintext, never sees a private key, and never sees
-    (or computes) the derived shared session key -- it just forwards opaque
-    bytes from sender to the named recipient.
-
-Phase 5 adds long-term RSA identities for message signing (non-repudiation --
-see crypto_engine/signatures.py and client.py). Each user's RSA *public* key
-is submitted at registration and stored in server/user_store.py alongside
-their password hash; the matching private key never leaves the client. A
-"get_pubkey" envelope lets one client fetch another's public key by username
-so it can verify that user's signatures -- the server just looks up and
-returns what was already public by design.
-
-Phase 6 wraps every connection in TLS, so even the first register/login envelope
-is protected (before it, the whole protocol -- including passwords -- crossed the
-network as plain JSON): every accepted connection is now wrapped in TLS (ssl.PROTOCOL_TLS_SERVER)
-*before* a single byte of the envelope protocol is read, so even the very
-first "register"/"login" envelope travels inside the TLS tunnel. This is a
-transport-layer protection, layered on top of (not instead of) the
-application-layer crypto from Phases 2/3/5: TLS keeps the connection itself
-opaque to a network observer (nobody outside can even see "type": "login" or
-the JSON structure), while AES-GCM + the RSA signatures still protect chat
-content and identity even in a scenario where the relay server itself is
-compromised (TLS only protects data in transit to/from the server, not what
-the server does with it once decrypted at that endpoint). Certs are
-generated locally by each teammate via certs/generate_certs.py -- see
-README.md -- and are never committed (a shared private key would let anyone
-with repo access impersonate the server).
-
-Later stages added, on the same relay design: a hash-chained conversation log and
-signed evidence export (clients; the server only forwards the extra fields),
-account lockout (server/lockout.py), a security event log (server/security_log.py)
-and the opt-in Attack Lab (--lab). The server still never sees plaintext or keys.
-
-Wire format: one UTF-8 JSON object per line (newline-terminated), now
-carried inside the TLS tunnel. Every envelope has a "type" field. Envelopes
-that name a "to" recipient are unicast to that user if online; everything
-else (register, login, roster) is handled directly by the server.
-"""
+"""Production TLS transport for the shared authenticated envelope relay."""
 
 import argparse
-import base64
 import json
 import os
 import socket
@@ -63,14 +10,10 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server.user_store import get_public_key, register_user, verify_user
+from server.user_store import get_public_key, register_user, verify_user, DatabaseUserStore
 
 from certs.generate_certs import cert_fingerprint_from_file  # noqa: E402
-from crypto_engine.dh_exchange import generate_keypair as generate_ecdh_keypair  # noqa: E402
-from crypto_engine.signatures import generate_keypair as generate_rsa_keypair  # noqa: E402
-from crypto_engine.signatures import sign  # noqa: E402
 # Package imports are identical in script and module mode (server/__init__.py).
-from server.db import get_database, record_relay
 from server.lockout import LockoutGuard
 from server.security_log import log_event
 from server.relay_core import RelayCore
@@ -129,49 +72,20 @@ def build_server_ssl_context(certfile=None, keyfile=None):
 
 # Envelope types relayed verbatim to a specific "to" recipient without the
 # server inspecting their payload beyond routing fields.
-_RELAYED_TYPES = {"handshake_init", "handshake_response", "chat"}
-
-
-# Stage C: Attack Lab. One-shot, opt-in attacks performed BY THE RELAY --
-# the threat model this whole project defends against -- so the professor
-# can watch a real attack happen and get caught live, in the same two chat
-# windows, instead of only through a separate script. Every safety
-# restriction below is enforced server-side, never trusted to the GUI:
-#   * the server must be started with --lab (default: disabled, and in that
-#     default state the server behaves exactly as it always has)
-#   * even in --lab mode, a lab_control envelope is honored only from a
-#     connection whose PEER ADDRESS is 127.0.0.1, so it can never be
-#     triggered over a real network
-#   * only from a connection that has already completed register/login
-#     (the lab_control case in handle_client's main loop runs only after
-#     _authenticate() has returned a name -- the same gate every chat/
-#     handshake envelope is already behind)
-# A rejected attempt (wrong mode, wrong address, or unknown action) is
-# always logged as "lab_control_rejected" -- including when --lab was never
-# passed at all -- so a real attacker probing for this feature leaves a
-# trace. A performed attack is logged as "lab_attack_performed" and reported
-# ONLY to the client that armed it, as "armed" / "performed" -- never as a
-# claim that the attack succeeded. Whether it was actually caught is left
-# entirely to the real, unmodified client-side checks (AES-GCM tag, RSA
-# signature, replay window/nonce, hash chain, handshake signature) on
-# whichever client receives the attacked envelope -- the server never
-# announces a detection result, because in the real world a malicious relay
-# obviously wouldn't either.
-_LAB_ACTIONS = {"tamper_next", "replay_last", "drop_next"}
-
-
 class ChatServer(RelayCore):
     def __init__(self, host=DEFAULT_HOST, port=DEFAULT_PORT,
                  certfile=None, keyfile=None,
-                 lab_mode=False, lockout=None):
+                 lockout=None, database=None, store=None, logger=None, interceptor=None):
+        if database is not None and store is None:
+            store = DatabaseUserStore(database)
         super().__init__(lockout=lockout,
-            register=lambda *a, **kw: register_user(*a, **kw),
-            verify=lambda *a, **kw: verify_user(*a, **kw),
-            public_key=lambda *a, **kw: get_public_key(*a, **kw),
-            logger=lambda *a, **kw: log_event(*a, **kw))
+            register=store.register_user if store else lambda *a, **kw: register_user(*a, **kw),
+            verify=store.verify_user if store else lambda *a, **kw: verify_user(*a, **kw),
+            public_key=store.get_public_key if store else lambda *a, **kw: get_public_key(*a, **kw),
+            logger=logger or (lambda *a, **kw: log_event(*a, **kw)),
+            database=database, interceptor=interceptor)
         self.host = host
         self.port = port
-        self.lab_mode = lab_mode
         default_certfile, default_keyfile = default_cert_paths()
         certfile = default_certfile if certfile is None else certfile
         keyfile = default_keyfile if keyfile is None else keyfile
@@ -188,7 +102,6 @@ class ChatServer(RelayCore):
         # restarting it) is diagnosable by comparing fingerprints, instead of
         # a bare CERTIFICATE_VERIFY_FAILED that gives no hint why.
         self.cert_fingerprint = cert_fingerprint_from_file(certfile)
-        self.database = get_database()  # create/check schema before accepting clients
         # username -> conn (the TLS-wrapped socket). Guarded by _lock: every
         # client thread mutates it on join/leave and reads it on every
         # route/broadcast.
@@ -199,21 +112,6 @@ class ChatServer(RelayCore):
         self._srv = None
         self._stop = threading.Event()
         self._open_conns = set()
-
-        # Stage C lab state, all guarded by _lab_lock (separate from _lock,
-        # which is purely about self.clients, to avoid widening that lock's
-        # critical sections). _lab_pending maps a TARGET username (whose
-        # next matching outgoing envelope gets acted on) -> (action, armer
-        # username). _last_chat_envelope maps a sender username -> the most
-        # recent chat envelope genuinely relayed from them (used by
-        # replay_last). _lab_attacker_key is a throwaway RSA identity
-        # generated on first use -- signed with
-        # this key, never with the real target's, so the victim's signature
-        # check still fails exactly as it would for a real attacker.
-        self._lab_lock = threading.Lock()
-        self._lab_pending = {}
-        self._last_chat_envelope = {}
-        self._lab_attacker_key = None
 
     def _send(self, conn, envelope):
         try:
@@ -239,100 +137,6 @@ class ChatServer(RelayCore):
             targets = [c for c in self.clients.values() if c is not exclude]
         for conn in targets:
             self._send(conn, envelope)
-
-    def _notify_armer(self, armer_name, detail, **extra):
-        with self._lock:
-            armer_conn = self.clients.get(armer_name)
-        if armer_conn is not None:
-            self._send(armer_conn, dict({"type": "lab_attack_performed", "detail": detail},
-                                        **extra))
-
-    def _apply_lab_tamper_or_drop(self, envelope, sender_name):
-        """Chat-envelope lab actions, applied (if armed) before the normal
-        relay below. Returns the (possibly altered) envelope, or None if it
-        should not be relayed at all (drop_next)."""
-        with self._lab_lock:
-            self._last_chat_envelope[sender_name] = envelope
-            pending = self._lab_pending.get(sender_name)
-            action = pending[0] if pending and pending[0] in ("tamper_next", "drop_next") else None
-            if action:
-                del self._lab_pending[sender_name]
-                armer = pending[1]
-
-        if action == "tamper_next":
-            raw = bytearray(base64.b64decode(envelope["ciphertext"]))
-            raw[0] ^= 0xFF  # flip every bit of the first ciphertext byte
-            tampered = dict(envelope, ciphertext=base64.b64encode(bytes(raw)).decode("ascii"))
-            detail = f"flipped a byte in {sender_name}'s next chat message's ciphertext"
-            print(f"    [LAB] {detail}.")
-            log_event("lab_attack_performed", action=action, target=sender_name, armed_by=armer)
-            self._notify_armer(armer, detail, action=action)
-            return tampered
-        if action == "drop_next":
-            detail = f"silently dropped {sender_name}'s next chat message"
-            print(f"    [LAB] {detail}.")
-            log_event("lab_attack_performed", action=action, target=sender_name, armed_by=armer)
-            self._notify_armer(armer, detail, action=action)
-            return None
-        return envelope
-
-    def route(self, envelope, sender_name):
-        """Forward a handshake/chat envelope to its named recipient only."""
-        etype = envelope.get("type")
-        if etype == "chat":
-            envelope = self._apply_lab_tamper_or_drop(envelope, sender_name)
-            if envelope is None:
-                return  # drop_next: never relayed
-
-        super().route(envelope, sender_name)
-
-    def _handle_lab_control(self, conn, addr, name, envelope):
-        """Arm (or, for replay_last, immediately perform) a one-shot lab
-        attack. See the _LAB_ACTIONS comment above ChatServer for the
-        safety restrictions this enforces."""
-        action = envelope.get("action")
-        target = envelope.get("target") or name
-
-        def reject(reason):
-            log_event("lab_control_rejected", requested_by=name, from_addr=addr[0],
-                      action=action, reason=reason)
-            self._send(conn, {"type": "lab_control_result", "action": action,
-                              "target": target, "armed": False, "detail": reason})
-
-        if not self.lab_mode:
-            reject("lab mode is not enabled on this server (start it with --lab)")
-            return
-        if addr[0] != "127.0.0.1":
-            reject("lab_control is only accepted from a localhost connection")
-            return
-        if action not in _LAB_ACTIONS:
-            reject(f"unknown lab action '{action}'")
-            return
-
-        if action == "replay_last":
-            with self._lab_lock:
-                last = self._last_chat_envelope.get(target)
-            if last is None:
-                reject(f"no previous chat message from {target} to replay yet")
-                return
-            detail = f"resent {target}'s most recent chat message a second time"
-            print(f"    [LAB] {detail}.")
-            log_event("lab_attack_performed", action=action, target=target, armed_by=name)
-            self._send(conn, {"type": "lab_control_result", "action": action, "target": target,
-                              "armed": True, "detail": "resent immediately"})
-            self._notify_armer(name, detail, action=action)
-            self.route(dict(last), target)  # a copy: route() may tag the next pending action
-            return
-
-        with self._lab_lock:
-            self._lab_pending[target] = (action, name)
-        detail = {
-            "tamper_next": f"next chat message from {target} will be tampered with",
-            "drop_next": f"next chat message from {target} will be silently dropped",
-        }[action]
-        print(f"    [LAB] armed by {name} from {addr[0]}: {detail}")
-        self._send(conn, {"type": "lab_control_result", "action": action, "target": target,
-                          "armed": True, "detail": detail})
 
     def _authenticate(self, conn, stream, addr):
         for line in stream:
@@ -362,16 +166,13 @@ class ChatServer(RelayCore):
                     try:
                         envelope = json.loads(line)
                     except json.JSONDecodeError:
-                        log_event("malformed_envelope", from_user=name, from_addr=addr[0],
+                        self.log_event("malformed_envelope", from_user=name, from_addr=addr[0],
                                  length=len(line))
                         continue
 
                     if not isinstance(envelope, dict):
                         continue
-                    if envelope.get("type") == "lab_control":
-                        self._handle_lab_control(conn, addr, name, envelope)
-                    else:
-                        self.handle_authenticated(conn, addr, name, envelope)
+                    self.handle_authenticated(conn, addr, name, envelope)
         except (ConnectionResetError, ConnectionAbortedError, OSError):
             pass
         finally:
@@ -391,7 +192,7 @@ class ChatServer(RelayCore):
             tls_conn = self.ssl_context.wrap_socket(conn, server_side=True)
         except (ssl.SSLError, OSError) as exc:
             print(f"[!] TLS handshake failed with {addr[0]}:{addr[1]} -- {exc}")
-            log_event("non_tls_connection", from_addr=addr[0], reason=str(exc))
+            self.log_event("non_tls_connection", from_addr=addr[0], reason=str(exc))
             try:
                 conn.close()
             except OSError:
@@ -449,10 +250,6 @@ class ChatServer(RelayCore):
               f"(cert fingerprint: {self.cert_fingerprint}) "
               f"(routes handshake/chat envelopes; never sees plaintext app "
               f"secrets or session keys)")
-        if self.lab_mode:
-            print("[*] LAB MODE ENABLED -- localhost, authenticated clients may arm "
-                  "one-shot relay attacks via lab_control. Never enable this on a "
-                  "server reachable from anywhere but localhost.")
         try:
             while not self._stop.is_set():
                 try:
@@ -484,13 +281,9 @@ def main():
     parser.add_argument("--certfile", default=None)
     parser.add_argument("--keyfile", default=None)
     parser.add_argument("--web-port", type=int, help="also serve HTTP/WebSocket clients on this port")
-    parser.add_argument("--lab", action="store_true",
-                         help="enable the opt-in Attack Lab (lab_control envelopes from "
-                              "authenticated localhost clients only); OFF by default")
     args = parser.parse_args()
     try:
-        server = ChatServer(args.host, args.port, args.certfile, args.keyfile,
-                            lab_mode=args.lab)
+        server = ChatServer(args.host, args.port, args.certfile, args.keyfile)
     except CertsMissingError as exc:
         print(f"[!] {exc}")
         sys.exit(1)

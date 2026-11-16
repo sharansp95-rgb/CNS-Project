@@ -6,7 +6,9 @@
   "scripts": {
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:lab": "vite build --config vite.lab.config.ts",
+    "test:lab": "playwright test --config playwright.lab.config.ts"
   },
   "dependencies": {
     "@fontsource/noto-sans": "5.3.0",

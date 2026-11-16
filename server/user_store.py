@@ -30,43 +30,57 @@ def _database(path):
     return get_database(URL.create("sqlite", database=str(target)))
 
 
+class DatabaseUserStore:
+    """Account adapter bound to one explicit database; never changes process globals."""
+    def __init__(self, database):
+        self.database = database
+
+    def register_user(self, username, password, public_key_pem=None):
+        if not username or not password or self.user_exists(username):
+            return False
+        encoded = hash_password(password)
+        try:
+            with self.database.transaction() as conn:
+                conn.execute(insert(users).values(username=username, password_hash=encoded,
+                    public_key_pem=public_key_pem, created_at=time.time()))
+        except IntegrityError:
+            return False
+        return True
+
+    def verify_user(self, username, password):
+        with self.database.engine.connect() as conn:
+            encoded = conn.execute(select(users.c.password_hash).where(
+                users.c.username == username)).scalar_one_or_none()
+        if encoded is None:
+            return False
+        try:
+            return verify_password(password, encoded)
+        except Exception:
+            return False
+
+    def user_exists(self, username):
+        with self.database.engine.connect() as conn:
+            return conn.execute(select(users.c.username).where(
+                users.c.username == username)).first() is not None
+
+    def get_public_key(self, username):
+        with self.database.engine.connect() as conn:
+            return conn.execute(select(users.c.public_key_pem).where(
+                users.c.username == username)).scalar_one_or_none()
+
+
 def register_user(username: str, password: str, public_key_pem: str = None,
                   path: str = DEFAULT_STORE_PATH) -> bool:
-    """Register an account, returning False for empty credentials/duplicates."""
-    if not username or not password:
-        return False
-    database = _database(path)
-    if user_exists(username, path):
-        return False
-    encoded = hash_password(password)
-    try:
-        with database.transaction() as conn:
-            conn.execute(insert(users).values(username=username, password_hash=encoded,
-                public_key_pem=public_key_pem, created_at=time.time()))
-    except IntegrityError:
-        return False
-    return True
+    return DatabaseUserStore(_database(path)).register_user(username, password, public_key_pem)
 
 
 def verify_user(username: str, password: str, path: str = DEFAULT_STORE_PATH) -> bool:
-    with _database(path).engine.connect() as conn:
-        encoded = conn.execute(select(users.c.password_hash).where(
-            users.c.username == username)).scalar_one_or_none()
-    if encoded is None:
-        return False
-    try:
-        return verify_password(password, encoded)
-    except Exception:
-        return False
+    return DatabaseUserStore(_database(path)).verify_user(username, password)
 
 
 def user_exists(username: str, path: str = DEFAULT_STORE_PATH) -> bool:
-    with _database(path).engine.connect() as conn:
-        return conn.execute(select(users.c.username).where(
-            users.c.username == username)).first() is not None
+    return DatabaseUserStore(_database(path)).user_exists(username)
 
 
 def get_public_key(username: str, path: str = DEFAULT_STORE_PATH):
-    with _database(path).engine.connect() as conn:
-        return conn.execute(select(users.c.public_key_pem).where(
-            users.c.username == username)).scalar_one_or_none()
+    return DatabaseUserStore(_database(path)).get_public_key(username)
