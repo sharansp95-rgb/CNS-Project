@@ -150,6 +150,9 @@ def test_receipt_fits_the_screen_and_escape_closes_it(app):
     app.update()
     assert win.winfo_reqheight() <= 640 and win.winfo_reqwidth() <= 560, (
         win.winfo_reqwidth(), win.winfo_reqheight())
+    # Tk only dispatches synthetic key events to the focused window.
+    win.focus_force()
+    app.update()
     win.event_generate("<Escape>")
     app.update()
     assert not win.winfo_exists()

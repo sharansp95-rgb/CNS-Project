@@ -210,6 +210,10 @@ class Theme:
 
     def __init__(self, root, mode=None):
         self.root = root
+        # Cocoa Tk builds report either 72 or 96 dpi. Compensate once: the
+        # former needs the Mac multiplier; the latter already scales points.
+        self.font_scale = (_FONT_SCALE / float(root.tk.call("tk", "scaling"))
+                           if _IS_MAC else _FONT_SCALE)
         families = set(tkfont.families(root))
         self.ui_font = _pick_font(UI_FONT_PRIORITY, families)
         self.mono_font = _pick_font(MONO_FONT_PRIORITY, families)
@@ -310,7 +314,7 @@ class Theme:
     def size(self, points):
         """Font size for `points`, platform- and presentation-scaled (legacy helper;
         prefer the named `fonts`, which also follow Presentation mode live)."""
-        return round(points * _FONT_SCALE * self.factor)
+        return round(points * self.font_scale * self.factor)
 
     def font(self, role):
         return self.fonts[role]
@@ -322,7 +326,7 @@ class Theme:
         for role, (points, weight, mono) in TYPE_SCALE.items():
             self.fonts[role].configure(
                 family=self.mono_font if mono else self.ui_font,
-                size=round(points * _FONT_SCALE * self.factor), weight=weight)
+                size=round(points * self.font_scale * self.factor), weight=weight)
 
     def set_presentation(self, on):
         """Switch Presentation mode on/off: every named font and every ttk style grows

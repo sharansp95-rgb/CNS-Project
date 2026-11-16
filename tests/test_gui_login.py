@@ -14,13 +14,16 @@ from gui.theme import is_no_display_error
 
 
 @pytest.fixture()
-def app():
+def app(monkeypatch):
     try:
         window = chat_gui.ChatGUI()
     except tk.TclError as exc:
         if is_no_display_error(exc):
             pytest.skip(f"no display available for Tk: {exc}")
         raise
+    # These are presentation tests driven by explicit events, not real sockets.
+    # An immediate connection-refused event races the initial progress assertion.
+    monkeypatch.setattr(window, "_auth_worker", lambda *args: None)
     window.geometry("780x540+10000+10000")
     window.update()
     yield window

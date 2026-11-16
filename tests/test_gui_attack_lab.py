@@ -230,6 +230,9 @@ def test_panel_fits_a_laptop_screen_and_escape_closes_it(app):
     win = app._lab_window
     assert win.winfo_reqheight() <= 640 and win.winfo_reqwidth() <= 780, (
         win.winfo_reqwidth(), win.winfo_reqheight())
+    # Tk only dispatches synthetic key events to the focused window.
+    win.focus_force()
+    app.update()
     win.event_generate("<Escape>")
     app.update()
     assert not app._lab_window_alive()
