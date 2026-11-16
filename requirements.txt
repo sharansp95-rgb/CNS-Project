@@ -7,3 +7,9 @@ cryptography==50.0.0
 # Database phase (SQLite locally, PostgreSQL on deployment):
 SQLAlchemy==2.0.56
 psycopg[binary]==3.3.9
+
+# Browser gateway and gateway test clients:
+fastapi==0.163.1
+uvicorn==0.54.0
+websockets==17.4
+httpx==0.28.1
