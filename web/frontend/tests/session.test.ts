@@ -133,3 +133,19 @@ it("browser evidence is accepted by the unmodified Python verifier", async () =>
     });
   }
 });
+
+it("v2 export captures exact envelope hashes and keeps v1 selectable", async () => {
+  const { a, b } = await pair();
+  await a.sendMessage("envelope evidence");
+  const envelope = lastChat(a);
+  await b.receive(envelope);
+  const v2 = await b.evidence(2);
+  expect(v2.format_version).toBe(2);
+  expect(v2.records[0].envelope_sha256).toBe(await c.hash(envelope));
+  expect((await a.evidence(2)).records[0].envelope_sha256).toBe(
+    v2.records[0].envelope_sha256,
+  );
+  const v1 = await b.evidence(1);
+  expect(v1.format).toBe("securechat-evidence/v1");
+  expect(v1.records[0].envelope_sha256).toBeUndefined();
+});

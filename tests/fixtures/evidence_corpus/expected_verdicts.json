@@ -1,0 +1,45 @@
+{
+  "valid_v1": {
+    "file": "valid_v1.json",
+    "valid": true,
+    "index": null
+  },
+  "valid_v2": {
+    "file": "valid_v2.json",
+    "receipt": "valid_receipt.json",
+    "valid": true,
+    "index": null
+  },
+  "edited_message": {
+    "file": "edited_message.json",
+    "valid": false,
+    "index": 1
+  },
+  "removed_message": {
+    "file": "removed_message.json",
+    "valid": false,
+    "index": 2
+  },
+  "reordered": {
+    "file": "reordered.json",
+    "valid": false,
+    "index": 1
+  },
+  "wrong_export_signature": {
+    "file": "wrong_export_signature.json",
+    "valid": false,
+    "index": null
+  },
+  "tampered_receipt": {
+    "file": "valid_v2.json",
+    "receipt": "tampered_receipt.json",
+    "valid": false,
+    "index": null
+  },
+  "receipt_another_file": {
+    "file": "valid_v2.json",
+    "receipt": "receipt_another_file.json",
+    "valid": false,
+    "index": null
+  }
+}

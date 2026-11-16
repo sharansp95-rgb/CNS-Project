@@ -6,6 +6,7 @@ import tempfile
 import threading
 sys.path.insert(0,str(Path(__file__).resolve().parents[3]))
 with tempfile.TemporaryDirectory(prefix='cns-browser-e2e-') as root:
+    os.environ['TSA_KEY_PATH']=str(Path(root)/'tsa.key')
     os.environ['DATABASE_URL']='sqlite:///'+str(Path(root)/'chat.db')
     os.environ['SECURECHAT_ALLOWED_ORIGINS']='http://127.0.0.1:8765'
     os.environ['SECURECHAT_CERT_DIR']=root

@@ -157,3 +157,105 @@ test("browser interoperates with a real Python SecureChatClient over TCP/TLS", a
   });
   await context.close();
 });
+
+test("chat evidence is encrypted, saved, listed, downloaded and verified locally", async ({
+  browser,
+}, testInfo) => {
+  const aContext = await browser.newContext(),
+    bContext = await browser.newContext(),
+    a = await aContext.newPage(),
+    b = await bContext.newPage();
+  await fill(a, "vault_alice", "vault_bob");
+  await a.getByRole("button", { name: "Create an identity" }).click();
+  await fill(b, "vault_bob", "vault_alice");
+  await b.getByRole("button", { name: "Create an identity" }).click();
+  await expect(a.getByLabel("Message", { exact: true })).toBeEnabled();
+  const message = "VAULT_BROWSER_SECRET नमस्ते 🙂";
+  await a.getByLabel("Message", { exact: true }).fill(message);
+  await a.getByRole("button", { name: "Send message" }).click();
+  await expect(
+    b.getByRole("button", {
+      name: "Security receipt: " + message,
+      exact: true,
+    }),
+  ).toBeVisible();
+  let upload = "";
+  a.on("request", (req) => {
+    if (req.url().endsWith("/api/evidence") && req.method() === "POST")
+      upload = req.postData() || "";
+  });
+  await a.getByRole("button", { name: "Save evidence", exact: true }).click();
+  await a.getByLabel("Vault password", { exact: true }).fill(password);
+  await a.getByLabel("Evidence title", { exact: true }).fill("Proof session");
+  await a
+    .getByRole("button", { name: "Encrypt and save", exact: true })
+    .click();
+  await expect(
+    a.getByRole("heading", { name: "Proof session", exact: true }),
+  ).toBeVisible();
+  await expect(
+    a.getByRole("heading", { name: "VALID", exact: true }),
+  ).toBeVisible();
+  expect(upload).not.toContain(message);
+  expect(upload).not.toContain(password);
+  await a.getByRole("button", { name: "Evidence", exact: true }).click();
+  await a.getByLabel("Vault password", { exact: true }).fill(password);
+  const downloading = a.waitForEvent("download");
+  await a.getByRole("button", { name: "Download JSON", exact: true }).click();
+  const file = testInfo.outputPath("vault-evidence.json");
+  await (await downloading).saveAs(file);
+  const receiptDownload = a.waitForEvent("download");
+  await a.getByRole("button", { name: "Download timestamp receipt" }).click();
+  const receiptFile = testInfo.outputPath("receipt.json");
+  await (await receiptDownload).saveAs(receiptFile);
+  const key = await a.request.get("/api/timestamp-key").then((r) => r.json());
+  const pdfDownload = a.waitForEvent("download");
+  await a.getByRole("button", { name: "Download companion PDF" }).click();
+  await (await pdfDownload).saveAs(testInfo.outputPath("companion.pdf"));
+  const local = await browser.newContext(),
+    page = await local.newPage();
+  let posted = false;
+  page.on("request", (r) => {
+    if (["POST", "PUT"].includes(r.method())) posted = true;
+  });
+  await page.goto("/verify");
+  await page
+    .getByLabel("Evidence JSON file", { exact: true })
+    .setInputFiles(file);
+  await page
+    .getByLabel("Receipt JSON file", { exact: true })
+    .setInputFiles(receiptFile);
+  await page
+    .getByLabel("Trusted TSA public key (PEM)", { exact: true })
+    .fill(key.public_key_pem);
+  await page.getByRole("button", { name: "Verify locally" }).click();
+  await expect(
+    page.getByRole("heading", { name: "VALID", exact: true }),
+  ).toBeVisible();
+  expect(posted).toBe(false);
+  await a.getByRole("button", { name: "Delete evidence", exact: true }).click();
+  await expect(a.getByText("No saved evidence yet.")).toBeVisible();
+  await aContext.close();
+  await bContext.close();
+  await local.close();
+});
+
+test("public verification names the edited message without uploading the file", async ({
+  page,
+}) => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  let uploads = 0;
+  page.on("request", (r) => {
+    if (r.method() === "POST") uploads++;
+  });
+  await page.goto("/verify");
+  await page
+    .getByLabel("Evidence JSON file", { exact: true })
+    .setInputFiles(root + "tests/fixtures/evidence_corpus/edited_message.json");
+  await page.getByRole("button", { name: "Verify locally" }).click();
+  await expect(
+    page.getByRole("heading", { name: "INVALID", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".proof-verdict")).toContainText("Message #1");
+  expect(uploads).toBe(0);
+});

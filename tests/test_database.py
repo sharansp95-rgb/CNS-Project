@@ -30,7 +30,7 @@ def test_database_url_override(tmp_path, monkeypatch):
     assert db.get_database().engine.url.database == str(target)
     assert user_store.verify_user("alice", "pw")
     assert user_store.get_public_key("alice") == "public-pem"
-    assert rows(db.schema_version) == [{"version": 1}]
+    assert rows(db.schema_version) == [{"version": 2}]
 
 
 def test_duplicate_username_rejected_by_database():

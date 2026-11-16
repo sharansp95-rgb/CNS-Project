@@ -100,6 +100,7 @@ def isolated_state(tmp_path, monkeypatch):
 
     DATABASE_URL is inherited by script-mode subprocesses as well.
     """
+    monkeypatch.setenv("TSA_KEY_PATH", str(tmp_path / "tsa.key"))
     monkeypatch.setenv("DATABASE_URL", "sqlite:///" + str(tmp_path / "securechat.db"))
     keys_dir = str(tmp_path / "keys")
     for module in (client_module, dc):

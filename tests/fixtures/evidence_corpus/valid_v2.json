@@ -1,0 +1,71 @@
+{
+  "format": "securechat-evidence/v2",
+  "exported_by": "bob",
+  "exported_at": 1800000000,
+  "session": {
+    "started_at": 1794821609,
+    "ended_at": 1800000000,
+    "initiator": "alice",
+    "responder": "bob",
+    "ecdh_public_keys": {
+      "initiator": "pXYxm0iPyEJumbMDZ7l+2jMUxCD6PIKKbmxxntKx10g=",
+      "responder": "FpAr5aWrTXp7r1N6IfkiCTYo8ONqdkRwjEERbPK/9BM="
+    },
+    "handshake_signatures": {
+      "initiator": "IcsVbomh6hvVHRprbB6+JFJlVcOPY2NE4DvqKd2f/93jQ9rbfCgAkIYxCQBqPdgpQdl1/w5WReY1mEBdCluoQ4oVCllJQgyTUzdzXSvI+jNniPSLS5jIsEFVPTc2w7XabjddkiIfzZEAd0eRYNSA99HH1LkK99E4UbSharCchCKSdXT3vBJuSxUPuXoHGZH2mswtdCtZHTefNY9Zo+DQnIcCawCd4K5iBo+DkGu6YXXtoVN/BHQpJKSUQIC4Ol2iNNs+2RpwJdjLiQoYYtHloSgSF2rhbQq0lRCtKMLVOmlz8cTJfVEt5mN197FZSJSVLtMZHa/0fqYteQAQX89wtQ==",
+      "responder": "XHa+SoOxuPo3xFDrzhs5z8DBmwu4Oufm9DGi8RDSJ5hlimAdJZ0q1kVVuipPjfw5rXyVJkbNnfYjUaZGK6fOUJm5TwKHW4axizDJYYOgLRk+aqZwz17g+rIkpTo/qD4h/yKpEkz8Z2phT07IctX2XQVnHQexngvbEhXGFv1Xb+JF+jGDo5w7l8NUdhsJGEYKmW9/Gc9/qNK6UH82LKVqCFBpq7LQ1DgZ/rKwZSw22HcQn5+ogqJlT+FBfLoV9X5wMaRDrTYK1AWv3gIEqQbmi+nInN+6TE90q3phMF/HYCnoG1w85Oc32Delzn6tXGD2fyre57MAft4nMVqZlzaghw=="
+    }
+  },
+  "participants": {
+    "bob": {
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuRSu4VZbe/FQJglk3eya\nnI7nC4/s2zsUZlQyJ8ltLeARuQNQZXRqA2T9MiqzTr4FoN+oh8dV1yWtUh9AWYAJ\njaGyr2wS0Iupk6odZ8QrMvY9wupypI/t0dEs3as8hUbPWWxAZfIDt27BxjmecXnG\nsBGDzljlnzp0xg6cn7JHbFeeutuEJsalERLMS+0Eyg1Hz0D0ija2TSh27grO3rCr\nEIRm3sK8UOs4/YGdMKC3B4mRUNKGmfLlYhESnEzeurJ0Em96IgGvo5WSHkCWdpwC\n0sKqmlLYXcpxO0ztFk0UGptXIhLUDifqEMwjNO3OW8p2mXEGB/I3jRKGM7kYcMLF\nOwIDAQAB\n-----END PUBLIC KEY-----\n",
+      "fingerprint": "FD89 5375 35DD 59B5"
+    },
+    "alice": {
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoSX7hWfaCoV59PVYpAhj\nhxa/dyx70k1FsFIpIfv62KqQI74N2Cbllu6gU0T40EOSxHl7hAYtp0QIbx39F6Rs\nrE7aqsov07uQYC1J+xyn3CusMWsancBs05lMo+5tEcghu5Vw9ok+fLUE+EvUY5vI\ndZtmUFpXYdYHCfMEbBmFEGB5GlVFgj6Enyp++RaDLOH7mPJh1FA0/sM/LbbJoFk3\nVuZIx5/WdVUWWBhCwjr+G5F/IxjdNDcX7Ns3zCV0VC6ei5fB0bavgVigy1OJNVJ1\n8sRdCR443vKw41zpAmbwhPXIRDRGH/LRltlkINhu9dIHSNCIrjH/7oAGeOzDcQE+\npwIDAQAB\n-----END PUBLIC KEY-----\n",
+      "fingerprint": "5CA7 D028 8195 DD88"
+    }
+  },
+  "records": [
+    {
+      "seq": 1,
+      "sender": "alice",
+      "recipient": "bob",
+      "timestamp": 1794821609,
+      "message": "Approve transfer 500",
+      "prev_hash": "d48a462da423de241c018c4af80a1b405e17cff19ab6bdbe5490e5c42e718d72",
+      "record_hash": "b71d2f19df77690e2f5389fdb5b5e4850e9d35c89b90186308434da58110fef4",
+      "signature": "KqjrPKzUpaLRVq4nxhQ2nAD0hvl+rjSJqGxrMCkixXRzMsgCEQpSzgqd+F6LndpvvmfFRlKFsqyNUXBKWR32Cf8cef0enZpWBr28HxjWKHsRHH0AKVTrxRXM0XXr5HQBIiSNc+iADc0nK2cv4GJDLgI/Bfpw2Sf3b6XvsKk17iJTEn7Dc+apr3xVF7YZ0HDLGgDUXFmQ/HOCfpmHk/sHwOM+Dvc5HWZMsN54aE8Pyg4mP0tCBpM3U6NJwXEFDeoveqBuadWW9qTVXu6jKRKhVdPAthEJG2YxLig42mhmy2CY+K87opBs1C99DftqZxMKtTGVbAiWchZOxUwsDNE+cw==",
+      "envelope_sha256": "4b9936ff48470891c7c461698e5b35b999642d95d8b6fa4bd7ab4036c87b61a4"
+    },
+    {
+      "seq": 1,
+      "sender": "bob",
+      "recipient": "alice",
+      "timestamp": 1794821609,
+      "message": "Approved",
+      "prev_hash": "c68864bfa856c473cc6a13352ca761f076899c19c891aca3c42ad7a91bd488b5",
+      "record_hash": "8b9fc48c24b5a2231790bb021368c9e4bed42cd5f2beec2c20b1e7a681bac12a",
+      "signature": "OZm/og0sOHrw1i9B4EUIyxdVVDylOEkgJ8sTBB6xtH3dS6GvkAKYNTgF6f5lT1HpTcSYPmNBcQ0NagqORC7/UznZoBkIUueJ7eiUBS6ybrFnjv0XxGnXZS+72KMW88c3TnpbOTGkUpydb4xtySoZVjw8rnaBCV6pKj20jbX0XG79lj4EB8/GuOWoOdu4oIqfEk/ltRb0Av7CuVjoiUqmAABSQdVMzPf4M6WCUYZJlRaD1h/Z5E5CG4vYyqfF842jTv4Gif8bCs9pVygTpEFF1STEJAyyWTZ0QCC005oGroyI+3lRQ12Ia00074tHmxSXoPGPFEAWNTWTWBZePH9MRw==",
+      "envelope_sha256": "324f10049c0accb3511ba13cdafcd18d53ae0ad983383c7f0e90107b998841a4"
+    },
+    {
+      "seq": 2,
+      "sender": "alice",
+      "recipient": "bob",
+      "timestamp": 1794821609,
+      "message": "Completed — नमस्ते 🙂",
+      "prev_hash": "b71d2f19df77690e2f5389fdb5b5e4850e9d35c89b90186308434da58110fef4",
+      "record_hash": "856af3441634981df29be64de0f35b905f59de611963e041e1a2257f1f96c11b",
+      "signature": "dke/akWyGKfO67dfXiKoqPGsQvpFdn/Z7LehFyaYk2J1wMfSXhGparYFu/rROFTC9w86qrSzZfYuk9NdkvrwOyxXN0V8nqQLAJb+ROrrNo9AQE2uapbAbv6bwsGfxHz/ia+T83N7QU2TVHB7idSpiBkGuYiqsG8AooRipFfMVeUQ/3x8hTvnFolNR2+00l2Gyyxxdz9oRTUhgOF8aEDd6qWV11dIlvmsBXwQhU42Zh5eZKwr/KWIvwl9eW430aHUznSuVj/6CvkSHplVNaIB0+/lLA39UPRw/hGXsNxMATWtjLJbBaVnIdeEwG7UX0W3vHtZHjTCY8FmTG3Cc2gjaw==",
+      "envelope_sha256": "aafb0790838f0660d3093b2b92c46cb6c6dfd388a0eb89a2fbe1379da20a98ae"
+    }
+  ],
+  "chain_heads": {
+    "bob": "8b9fc48c24b5a2231790bb021368c9e4bed42cd5f2beec2c20b1e7a681bac12a",
+    "alice": "856af3441634981df29be64de0f35b905f59de611963e041e1a2257f1f96c11b"
+  },
+  "rejected_events": [],
+  "format_version": 2,
+  "exporter_signature": "r7uctuZNJVCJZdZ1fjC7ioJ//vKGKeAeSvjbC7boqmi+vUH5wjuwMrpqcLOQbE+cnM4Ta3CX1AgCxo7CYOvPvZhQKvJf7xieOcxviCgeokUpqNzPIJJy9ny42lqR1+lasU9xNbI7yQDvyHZ4lHCvrH2JLWo3mc3UlTvlMsth8WAdJL79kuiR3pP1MuWUEj+rA23mFU34iunf+Z79O5PaziCCsJO8r8tDAKD5d02dh2/E8R3jw5CngAYAX2kFZrItKbTdwEs7eW399BCaFLm8B1GH3gH+5v5hTMsi7DQbLuqlko1Dqchje+TLRQrrA9dQK1iiUnmeVv2ybfc7hh140w=="
+}
