@@ -14,6 +14,15 @@ const attacks = [
 for (const [action, reason] of attacks)
   test("real victim detection: " + action, async ({ page }) => {
     await page.goto("/");
+    const gate = page.getByLabel("Lab access code", { exact: true });
+    if (await gate.isVisible()) {
+      await gate.fill(
+        process.env.LAB_ACCESS_CODE || "Local-test-access-code-ONLY-1234",
+      );
+      await page
+        .getByRole("button", { name: "Enter sandbox", exact: true })
+        .click();
+    }
     await expect(page.locator("header")).toContainText(
       "ATTACK LAB — sandbox, not the real service",
     );

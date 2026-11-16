@@ -1,8 +1,14 @@
 import { test, expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+const runId = process.env.E2E_RUN_ID || Date.now().toString(36);
 const password = "Browser-test-password-42!";
 async function fill(page: Page, user: string, peer: string) {
+  if (user !== "z_browser") {
+    const prefix = `${page.context().browser()!.browserType().name()}_${runId}_`;
+    user = prefix + user;
+    peer = prefix + peer;
+  }
   await page.goto("/");
   await page.getByLabel("Username", { exact: true }).fill(user);
   await page.getByLabel("Password", { exact: true }).fill(password);
@@ -124,6 +130,10 @@ test("browser interoperates with a real Python SecureChatClient over TCP/TLS", a
 }, testInfo) => {
   const context = await browser.newContext(),
     page = await context.newPage();
+  test.skip(
+    !!process.env.BASE_URL,
+    "Render has no raw TCP port; local-only interoperability test",
+  );
   await fill(page, "z_browser", "a_python");
   await page.getByRole("button", { name: "Create an identity" }).click();
   await expect(page.getByLabel("Message", { exact: true })).toBeEnabled();
@@ -258,4 +268,69 @@ test("public verification names the edited message without uploading the file", 
   ).toBeVisible();
   await expect(page.locator(".proof-verdict")).toContainText("Message #1");
   expect(uploads).toBe(0);
+});
+
+test("a dropped connection reconnects, requires login and derives a different signed session", async ({
+  browser,
+}) => {
+  const a = await browser.newPage(),
+    b = await browser.newPage();
+  await a.addInitScript(() => {
+    const Original = window.WebSocket;
+    (window as any).testSockets = [];
+    (window as any).handshakeKeys = [];
+    window.WebSocket = new Proxy(Original, {
+      construct(target, args) {
+        const socket = Reflect.construct(target, args) as WebSocket;
+        const send = socket.send.bind(socket);
+        socket.send = (data) => {
+          try {
+            const frame = JSON.parse(String(data));
+            if (frame.type === "handshake_init")
+              (window as any).handshakeKeys.push(frame.pubkey);
+          } catch {}
+          send(data);
+        };
+        (window as any).testSockets.push(socket);
+        return socket;
+      },
+    });
+  });
+  try {
+    await fill(a, "reconnect_alice", "reconnect_bob");
+    await a
+      .getByRole("button", { name: "Create an identity", exact: true })
+      .click();
+    await fill(b, "reconnect_bob", "reconnect_alice");
+    await b
+      .getByRole("button", { name: "Create an identity", exact: true })
+      .click();
+    await expect(a.getByLabel("Message", { exact: true })).toBeEnabled();
+    const before = await a.evaluate(() => (window as any).handshakeKeys.at(-1));
+    expect(before).toBeTruthy();
+    await a.evaluate(() => (window as any).testSockets.at(-1).close());
+    await expect(a.getByRole("status")).toContainText("Reconnecting…");
+    await expect(a.getByRole("status")).toContainText("log in again");
+    await expect(b.getByLabel("Message", { exact: true })).toBeDisabled();
+    await a.getByLabel("Password", { exact: true }).fill(password);
+    await a.getByRole("button", { name: "Log in", exact: false }).click();
+    await expect(a.getByLabel("Message", { exact: true })).toBeEnabled();
+    await expect(b.getByLabel("Message", { exact: true })).toBeEnabled();
+    const after = await a.evaluate(() => (window as any).handshakeKeys.at(-1));
+    expect(after).toBeTruthy();
+    expect(after).not.toBe(before);
+    await a
+      .getByLabel("Message", { exact: true })
+      .fill("Fresh session after reconnect");
+    await a.getByRole("button", { name: "Send message", exact: true }).click();
+    await expect(
+      b.getByRole("button", {
+        name: "Security receipt: Fresh session after reconnect",
+        exact: true,
+      }),
+    ).toBeVisible();
+  } finally {
+    await a.close();
+    await b.close();
+  }
 });

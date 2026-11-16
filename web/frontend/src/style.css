@@ -759,3 +759,25 @@ dd {
     padding: 17px;
   }
 }
+
+/* Long usernames must not force a mobile chat wider than its viewport. */
+.chat-header > div:first-child {
+  min-width: 0;
+}
+.chat-header h2,
+.contact strong,
+.sidebar-bottom strong {
+  overflow-wrap: anywhere;
+}
+.chat-actions {
+  flex-shrink: 0;
+}
+@media (max-width: 600px) {
+  .chat-header {
+    flex-wrap: wrap;
+  }
+  .chat-actions {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+}

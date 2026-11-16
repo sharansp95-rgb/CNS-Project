@@ -34,46 +34,127 @@ export class Session {
   rejectedNonces = new Set<string>();
   chain: Promise<unknown> = Promise.resolve();
   closed = false;
+  private epoch = 0;
+  private stopped = false;
+  private reconnecting = false;
+  private retries = 0;
+  private retryTimer?: ReturnType<typeof setTimeout>;
+  private openTimer?: ReturnType<typeof setTimeout>;
   constructor(
     public username: string,
     public peer: string,
     public ownPem: string,
     private privateKey: CryptoKey,
-    url: string,
+    private url: string,
     private changed: () => void,
     private authenticated: () => Promise<void> = async () => {},
   ) {
     this.secureTransport = url.startsWith("wss:");
-    this.socket = new WebSocket(url);
-    this.socket.onmessage = (e) =>
-      this.enqueue(async () => this.receive(JSON.parse(e.data)));
-    this.socket.onclose = () => {
+    this.socket = this.openSocket();
+  }
+  private clearSession() {
+    this.epoch++;
+    this.apiToken = "";
+    this.key = undefined;
+    this.pending = undefined;
+    this.pendingSig = "";
+    this.initiated = false;
+    this.peerOnline = false;
+    this.deferred = [];
+    this.seen.clear();
+    this.rejectedNonces.clear();
+    this.handshake = undefined;
+    this.outHead = this.inHead = "";
+    this.outSeq = this.inSeq = 1;
+  }
+  disconnect() {
+    this.stopped = true;
+    this.reconnecting = false;
+    clearTimeout(this.retryTimer);
+    clearTimeout(this.openTimer);
+    this.clearSession();
+    this.isAuthenticated = false;
+    this.socket.close();
+  }
+  private openSocket() {
+    const socket = new WebSocket(this.url);
+    socket.onmessage = (e) => {
+      if (this.socket === socket && !this.closed)
+        this.enqueue(async () => this.receive(JSON.parse(e.data)));
+    };
+    socket.onopen = () => {
+      if (this.socket !== socket || this.stopped) return;
+      clearTimeout(this.openTimer);
+      this.closed = false;
+      if (this.reconnecting) {
+        this.reconnecting = false;
+        this.retries = 0;
+        this.status =
+          "Connection restored — log in again for a fresh signed handshake.";
+        this.changed();
+      }
+    };
+    socket.onclose = () => {
+      if (this.socket !== socket) return;
+      clearTimeout(this.openTimer);
+      const retry =
+        !this.stopped && (this.isAuthenticated || this.reconnecting);
       this.closed = true;
-      this.apiToken = "";
-      this.key = undefined;
-      this.pending = undefined;
-      if (this.isAuthenticated)
-        this.status = "Disconnected — reconnect to start a fresh session";
+      this.clearSession();
+      this.isAuthenticated = false;
+      if (retry) this.retry();
       this.changed();
     };
-    this.socket.onerror = () => {
-      this.status = "Connection failed";
+    socket.onerror = () => {
+      if (!this.reconnecting)
+        this.status = "Connection failed — log in to retry";
       this.changed();
     };
+    return socket;
+  }
+  private retry() {
+    if (this.retries >= 8) {
+      this.reconnecting = false;
+      this.status =
+        "Could not reconnect. Wait for the service, then log in again.";
+      return;
+    }
+    this.reconnecting = true;
+    this.status =
+      "Reconnecting… Session keys discarded. Login will be required.";
+    const delay = Math.min(1000 * 2 ** this.retries++, 30000);
+    this.retryTimer = setTimeout(() => {
+      if (this.stopped) return;
+      this.socket = this.openSocket();
+      this.openTimer = setTimeout(() => this.socket.close(), 20000);
+    }, delay);
   }
   enqueue(work: () => Promise<unknown>) {
-    this.chain = this.chain.then(work).catch((e) => {
-      this.status = String(e.message || e);
-      this.changed();
-    });
+    const epoch = this.epoch;
+    this.chain = this.chain
+      .then(() => (epoch === this.epoch && !this.stopped ? work() : undefined))
+      .catch((e) => {
+        if (epoch !== this.epoch) return;
+        this.status = String(e.message || e);
+        this.changed();
+      });
     return this.chain;
   }
   async connect(mode: "register" | "login", password: string) {
     await new Promise<void>((resolve, reject) => {
-      this.socket.onopen = () => resolve();
+      if (this.socket.readyState === WebSocket.OPEN) {
+        resolve();
+        return;
+      }
+      this.socket.addEventListener("open", () => resolve(), { once: true });
       this.socket.addEventListener(
         "error",
         () => reject(Error("Cannot connect")),
+        { once: true },
+      );
+      this.socket.addEventListener(
+        "close",
+        () => reject(Error("Connection closed before login")),
         { once: true },
       );
     });
@@ -111,22 +192,27 @@ export class Session {
     if (e.type === "register_result" || e.type === "login_result") {
       if (!e.success) {
         this.status = e.reason;
-        this.socket.close();
+        this.disconnect();
         throw Error(e.reason);
       }
       this.apiToken = e.api_token || "";
+      const epoch = this.epoch;
       await this.authenticated();
+      if (epoch !== this.epoch) return;
       this.isAuthenticated = true;
       this.status = "Authenticated — waiting for peer";
       this.send({ type: "get_pubkey", username: this.username });
       this.send({ type: "get_pubkey", username: this.peer });
     } else if (e.type === "pubkey_result" && e.username === this.username) {
       if (!e.success || e.public_key !== this.ownPem) {
-        this.socket.close();
+        this.disconnect();
         throw Error(
           "Local identity does not match this account. Import the correct key backup.",
         );
       }
+    } else if (e.type === "user_left" && e.username === this.peer) {
+      this.clearSession();
+      this.status = "Peer disconnected — waiting for a fresh signed handshake";
     } else if (e.type === "roster" || e.type === "user_joined") {
       if (e.users?.includes(this.peer) || e.username === this.peer) {
         this.peerOnline = true;
@@ -180,19 +266,23 @@ export class Session {
     });
   }
   async receiveHandshake(e: Envelope) {
+    const epoch = this.epoch;
     if (e.type === "handshake_response" && !this.pending) return;
     const pub = c.un64(e.pubkey),
       sig = c.un64(e.handshake_sig);
     if (!(await c.verify(this.peerKey!, pub, sig))) {
+      if (epoch !== this.epoch) return;
       this.pending = undefined;
       this.initiated = false;
       this.reject("handshake_aborted", "signature_failed", e);
       return;
     }
+    if (epoch !== this.epoch) return;
     if (e.type === "handshake_init") {
       const own = await c.ephemeral(),
         ownSig = c.b64(await c.sign(this.privateKey, own.pub));
       const key = await c.shared(own, pub);
+      if (epoch !== this.epoch) return;
       this.send({
         type: "handshake_response",
         from: this.username,
@@ -208,6 +298,7 @@ export class Session {
         own.pub,
         e.handshake_sig,
         ownSig,
+        epoch,
       );
     } else {
       const own = this.pending!;
@@ -221,6 +312,7 @@ export class Session {
         pub,
         this.pendingSig,
         e.handshake_sig,
+        epoch,
       );
     }
   }
@@ -232,7 +324,13 @@ export class Session {
     rp: Uint8Array,
     is: string,
     rs: string,
+    epoch = this.epoch,
   ) {
+    const [outHead, inHead] = await Promise.all([
+      c.genesis(ip, rp, this.username),
+      c.genesis(ip, rp, this.peer),
+    ]);
+    if (epoch !== this.epoch || this.stopped || this.closed) return;
     this.key = key;
     this.handshake = {
       initiator,
@@ -240,8 +338,8 @@ export class Session {
       ecdh_public_keys: { initiator: c.b64(ip), responder: c.b64(rp) },
       handshake_signatures: { initiator: is, responder: rs },
     };
-    this.outHead = await c.genesis(ip, rp, this.username);
-    this.inHead = await c.genesis(ip, rp, this.peer);
+    this.outHead = outHead;
+    this.inHead = inHead;
     this.outSeq = this.inSeq = 1;
     this.seen.clear();
     this.rejectedNonces.clear();
@@ -273,6 +371,7 @@ export class Session {
     this.send({ type: "security_alert", alert: kind, reason, peer: this.peer });
   }
   async receiveChat(e: Envelope) {
+    const epoch = this.epoch;
     if (!this.key) {
       this.reject("message_rejected", "no_session_key", e);
       return;
@@ -320,6 +419,7 @@ export class Session {
       return;
     }
     const now = Date.now() / 1000;
+    if (epoch !== this.epoch) return;
     if (inner.timestamp < now - 30 || inner.timestamp > now + 5) {
       this.reject("message_rejected", "stale_timestamp", e);
       return;
@@ -344,6 +444,7 @@ export class Session {
       explained = Math.min(missing, this.rejectedNonces.size);
     if (gap) this.reject("chain_warning", "chain_gap", e, missing);
     this.inHead = await c.hash(rec);
+    if (epoch !== this.epoch) return;
     this.inSeq = inner.seq + 1;
     this.rejectedNonces.clear();
     this.transcript.push({
@@ -371,6 +472,7 @@ export class Session {
     });
   }
   async sendMessage(message: string) {
+    const epoch = this.epoch;
     return this.enqueue(async () => {
       if (!this.key) throw Error("Wait for a verified handshake");
       const rec = c.record(
@@ -391,6 +493,8 @@ export class Session {
         prev_hash: rec.prev_hash,
         signature,
       });
+      if (epoch !== this.epoch)
+        throw Error("Connection changed; message was not sent");
       const envelope = {
         type: "chat",
         from: this.username,

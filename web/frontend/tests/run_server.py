@@ -8,7 +8,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[3]))
 with tempfile.TemporaryDirectory(prefix='cns-browser-e2e-') as root:
     os.environ['TSA_KEY_PATH']=str(Path(root)/'tsa.key')
     os.environ['DATABASE_URL']='sqlite:///'+str(Path(root)/'chat.db')
-    os.environ['SECURECHAT_ALLOWED_ORIGINS']='http://127.0.0.1:8765'
+    port=int(os.environ.get('CNS_TEST_PORT','8765'))
+    os.environ['SECURECHAT_ALLOWED_ORIGINS']=f'http://127.0.0.1:{port}'
     os.environ['SECURECHAT_CERT_DIR']=root
     import uvicorn
     import certs.generate_certs as certs
@@ -36,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix='cns-browser-e2e-') as root:
     bot.register('a_python','Python-bot-test-password',public_key_pem=serialize_public_key(public).decode())
     assert bot.auth_results.get(timeout=10)['success']
     try:
-        uvicorn.run(create_app(relay),host='127.0.0.1',port=8765,log_level='warning')
+        uvicorn.run(create_app(relay),host='127.0.0.1',port=port,log_level='warning')
     finally:
         bot.stop_event.set()
         bot.sock.close()

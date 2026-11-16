@@ -50,7 +50,7 @@ function App() {
     }
     setBusy(true);
     setError("");
-    sessionRef.current?.socket.close();
+    sessionRef.current?.disconnect();
     sessionRef.current = undefined;
     try {
       const name = username.trim();
@@ -156,7 +156,7 @@ function App() {
           {active && (
             <button
               onClick={() => {
-                session!.socket.close();
+                session!.disconnect();
                 sessionRef.current = undefined;
                 setSession(undefined);
               }}

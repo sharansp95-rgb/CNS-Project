@@ -1,4 +1,10 @@
 import { x25519 } from "@noble/curves/ed25519.js";
+import type { pki } from "node-forge";
+const fallbackPrivate = new WeakMap<CryptoKey, pki.rsa.PrivateKey>();
+const publicPem = new WeakMap<CryptoKey, string>();
+const binary = (bytes: Uint8Array) =>
+  Array.from(bytes, (b) => String.fromCharCode(b)).join("");
+const forge = async () => (await import("node-forge")).default;
 export const utf8 = (s: string) => new TextEncoder().encode(s);
 export const b64 = (b: Uint8Array) =>
   btoa(Array.from(b, (v) => String.fromCharCode(v)).join(""));
@@ -62,26 +68,104 @@ export const fingerprint = async (pem: string) =>
     .match(/.{4}/g)!
     .join(" ");
 const rsa = { name: "RSA-PSS", hash: "SHA-256" };
-export const sign = async (key: CryptoKey, b: Uint8Array) =>
-  new Uint8Array(
-    await crypto.subtle.sign({ name: "RSA-PSS", saltLength: 222 }, key, raw(b)),
-  );
-export const verify = async (key: CryptoKey, b: Uint8Array, sig: Uint8Array) =>
-  crypto.subtle.verify(
-    { name: "RSA-PSS", saltLength: 222 },
-    key,
-    raw(sig),
-    raw(b),
-  );
+export async function sign(key: CryptoKey, b: Uint8Array) {
+  const legacy = fallbackPrivate.get(key);
+  if (!legacy)
+    return new Uint8Array(
+      await crypto.subtle.sign(
+        { name: "RSA-PSS", saltLength: 222 },
+        key,
+        raw(b),
+      ),
+    );
+  const f = await forge();
+  const md = f.md.sha256.create();
+  md.update(binary(b));
+  // WebKit's native RSA-PSS rejects MAX_LENGTH. Preserve the exact protocol,
+  // using forge only for this runtime key and CSPRNG-generated 222-byte salt.
+  const pss = f.pss.create({
+    md: f.md.sha256.create(),
+    mgf: f.mgf.mgf1.create(f.md.sha256.create()),
+    saltLength: 222,
+    salt: f.util.createBuffer(
+      binary(crypto.getRandomValues(new Uint8Array(222))),
+    ),
+  });
+  return Uint8Array.from(legacy.sign(md, pss), (x) => x.charCodeAt(0));
+}
+export async function verify(key: CryptoKey, b: Uint8Array, sig: Uint8Array) {
+  try {
+    if (
+      await crypto.subtle.verify(
+        { name: "RSA-PSS", saltLength: 222 },
+        key,
+        raw(sig),
+        raw(b),
+      )
+    )
+      return true;
+  } catch (error) {
+    if (
+      !["OperationError", "NotSupportedError"].includes((error as Error).name)
+    )
+      return false;
+  }
+  const pem = publicPem.get(key);
+  if (!pem) return false;
+  try {
+    const f = await forge();
+    const md = f.md.sha256.create();
+    md.update(binary(b));
+    return f.pki
+      .publicKeyFromPem(pem)
+      .verify(
+        md.digest().bytes(),
+        binary(sig),
+        f.pss.create({
+          md: f.md.sha256.create(),
+          mgf: f.mgf.mgf1.create(f.md.sha256.create()),
+          saltLength: 222,
+        }),
+      );
+  } catch {
+    return false;
+  }
+}
 export const pem = (b: Uint8Array, label: string) =>
   `-----BEGIN ${label}-----\n${b64(b)
     .match(/.{1,64}/g)!
     .join("\n")}\n-----END ${label}-----\n`;
 const der = (s: string) => un64(s.replace(/-----[^-]+-----|\s/g, ""));
-export const publicKey = (s: string) =>
-  crypto.subtle.importKey("spki", raw(der(s)), rsa, true, ["verify"]);
-export const privateKey = (b: Uint8Array) =>
-  crypto.subtle.importKey("pkcs8", raw(b), rsa, false, ["sign"]);
+export async function publicKey(s: string) {
+  const key = await crypto.subtle.importKey("spki", raw(der(s)), rsa, true, [
+    "verify",
+  ]);
+  publicPem.set(key, s);
+  return key;
+}
+export async function privateKey(b: Uint8Array) {
+  const key = await crypto.subtle.importKey("pkcs8", raw(b), rsa, false, [
+    "sign",
+  ]);
+  try {
+    await crypto.subtle.sign(
+      { name: "RSA-PSS", saltLength: 222 },
+      key,
+      new Uint8Array(0),
+    );
+  } catch (error) {
+    if (
+      !["OperationError", "NotSupportedError"].includes((error as Error).name)
+    )
+      throw error;
+    const f = await forge();
+    fallbackPrivate.set(
+      key,
+      f.pki.privateKeyFromAsn1(f.asn1.fromDer(binary(b), true)),
+    );
+  }
+  return key;
+}
 export async function identity() {
   const keys = (await crypto.subtle.generateKey(
     { ...rsa, modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]) },

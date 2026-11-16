@@ -126,3 +126,61 @@ it("keeps wrapped backup password-protected and binds its identity", async () =>
   await expect(unwrap(backup, "alice", "wrong")).rejects.toThrow();
   await expect(unwrap(backup, "bob", "secret-password")).rejects.toThrow();
 });
+
+describe("RSA-PSS compatibility fallback", () => {
+  it("keeps MAX_LENGTH signatures byte-compatible when native signing is unavailable", async () => {
+    const { vi } = await import("vitest");
+    const own = await c.identity();
+    const probe = vi
+      .spyOn(crypto.subtle, "sign")
+      .mockRejectedValueOnce(
+        new DOMException("native PSS unavailable", "OperationError"),
+      );
+    let key: CryptoKey;
+    try {
+      key = await c.privateKey(own.privateBytes);
+    } finally {
+      probe.mockRestore();
+      own.privateBytes.fill(0);
+    }
+    const message = c.utf8("WebKit fallback signature नमस्ते");
+    const signature = await c.sign(key, message);
+    expect(
+      await c.verify(await c.publicKey(own.publicPem), message, signature),
+    ).toBe(true);
+    const result = execFileSync(
+      python,
+      [
+        "-c",
+        'import sys,json,base64;from crypto_engine.signatures import deserialize_public_key,verify;d=json.load(sys.stdin);assert verify(deserialize_public_key(d["pem"].encode()),base64.b64decode(d["message"]),base64.b64decode(d["signature"]))',
+      ],
+      {
+        cwd: root,
+        input: JSON.stringify({
+          pem: own.publicPem,
+          message: c.b64(message),
+          signature: c.b64(signature),
+        }),
+        encoding: "utf8",
+      },
+    );
+    expect(result).toBe("");
+    const broken = new Uint8Array(signature);
+    broken[0] ^= 1;
+    const native = vi
+      .spyOn(crypto.subtle, "verify")
+      .mockRejectedValue(
+        new DOMException("native unavailable", "NotSupportedError"),
+      );
+    try {
+      const publicKey = await c.publicKey(own.publicPem);
+      expect(await c.verify(publicKey, message, signature)).toBe(true);
+      expect(await c.verify(publicKey, message, broken)).toBe(false);
+      expect(await c.verify(publicKey, c.utf8("edited"), signature)).toBe(
+        false,
+      );
+    } finally {
+      native.mockRestore();
+    }
+  });
+});

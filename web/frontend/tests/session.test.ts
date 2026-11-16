@@ -149,3 +149,69 @@ it("v2 export captures exact envelope hashes and keeps v1 selectable", async () 
   expect(v1.format).toBe("securechat-evidence/v1");
   expect(v1.records[0].envelope_sha256).toBeUndefined();
 });
+
+it("discards session keys on disconnect, reconnects transport and requires login again", async () => {
+  vi.useFakeTimers();
+  const { a } = await pair();
+  a.isAuthenticated = true;
+  a.apiToken = "old-bearer";
+  const before = a.socket;
+  (before as any).onclose();
+  expect(a.key).toBeUndefined();
+  expect(a.pending).toBeUndefined();
+  expect(a.isAuthenticated).toBe(false);
+  expect(a.apiToken).toBe("");
+  expect(a.status).toContain("Reconnecting…");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(a.socket).not.toBe(before);
+  (a.socket as any).onopen();
+  expect(a.status).toContain("log in again");
+  expect(a.key).toBeUndefined();
+  expect(a.isAuthenticated).toBe(false);
+  expect((a.socket as any).sent).toHaveLength(0);
+  a.disconnect();
+});
+it("explicit disconnect cancels reconnect attempts", async () => {
+  vi.useFakeTimers();
+  const { a } = await pair();
+  a.isAuthenticated = true;
+  (a.socket as any).onclose();
+  const before = a.socket;
+  a.disconnect();
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(a.socket).toBe(before);
+  expect(a.key).toBeUndefined();
+});
+it("a peer leaving invalidates keys so their next login needs a fresh handshake", async () => {
+  const { a } = await pair();
+  a.isAuthenticated = true;
+  await a.receive({ type: "user_left", username: "bob" });
+  expect(a.key).toBeUndefined();
+  expect(a.handshake).toBeUndefined();
+  expect(a.initiated).toBe(false);
+  expect(a.isAuthenticated).toBe(true);
+});
+it("a delayed old handshake cannot restore a discarded key", async () => {
+  const { a } = await pair();
+  let release!: (s: string) => void;
+  const slow = new Promise<string>((resolve) => {
+    release = resolve;
+  });
+  const spy = vi.spyOn(c, "genesis").mockReturnValue(slow);
+  const oldKey = a.key!;
+  const pending = a.finish(
+    oldKey,
+    "alice",
+    "bob",
+    new Uint8Array(32),
+    new Uint8Array(32),
+    "old",
+    "old",
+  );
+  a.disconnect();
+  release("old-head");
+  await pending;
+  expect(a.key).toBeUndefined();
+  expect(a.handshake).toBeUndefined();
+  spy.mockRestore();
+});
