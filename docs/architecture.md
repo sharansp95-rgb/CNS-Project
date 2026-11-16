@@ -50,6 +50,15 @@ flowchart LR
     C <-->|"WSS behind HTTPS proxy<br/>WS on localhost only"| WS
     P -. "end-to-end signed handshake and encrypted chat" .-> C
     C <-->|"Bearer HTTP API: encrypted evidence only"| WS
+    subgraph Lab["Separate Attack Lab site / origin / process"]
+        V["Two unchanged production client bundles"]
+        A["Sandbox console + authenticated controls"]
+        R["Rogue relay + neutral interceptor"]
+        LDB["LAB_DATABASE_URL<br/>own users, lockouts, logs, roster"]
+        V <-->|"sandbox WebSocket only"| R
+        A --> R
+        R --> LDB
+    end
     classDef local fill:#182c35,color:#f2f5f0,stroke:#668eaa;
     classDef relay fill:#203521,color:#f2f5f0,stroke:#8fba7a;
     class P,PK,UI,C,BK local;
@@ -69,9 +78,31 @@ serializes asynchronous crypto operations to preserve handshake/message ordering
 
 The gateway checks an exact Origin allowlist, UTF-8 frame size, connection rate and
 idle timeout, and rejects binary/unknown types. CSP allows same-origin external assets
-without inline scripts. The web path rejects lab controls even in shared local demo
-mode. The standalone web entry point never imports lab code. The roster remains
+without inline scripts. Both production adapters reject and log unknown envelope types, including lab controls.
+Neither production entry point imports lab code. The roster remains
 process-local; multiple deployment workers are not supported.
+
+## Separate Attack Lab boundary
+
+`python -m attack_lab` is a separate FastAPI site and hostile relay process. It imports
+the real adapters/core and supplies the core's one optional neutral interceptor.
+Production constructs that core with `interceptor=None`; it contains no attack flags,
+control handlers or lab UI. The dependency points from lab to product only.
+
+Two sandbox iframes serve byte-identical production HTML/JS at `/victim`; the controller
+fills the real login/composer forms. It never patches client crypto or detection code.
+A separate Vite entry builds only the console; this keeps its control code out of the
+production bundle. The console sees allowlisted public envelope fields and ciphertext,
+and displays real clients' reports. TLS TCP is optional and bound to localhost.
+
+The lab uses an explicitly supplied `DatabaseUserStore`, `LockoutGuard` and logger,
+`LAB_DATABASE_URL` and its own roster. It never assigns `DATABASE_URL`. Database alias
+checks reject the production DB (including SQLite symlinks/hardlinks and URI aliases).
+Operator configuration must still provide separate PostgreSQL credentials/databases;
+the sandbox is not a boundary against a malicious administrator changing source code.
+Lab origin allowlists are disjoint, control writes require Origin and a lab session,
+and read/write limits are separate. Reset deletes only sandbox rows and reseeds the
+victims and fixed lockout account. Sessions/rate limits/roster are process-local.
 
 ## Evidence, receipts and vault boundary
 

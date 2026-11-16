@@ -5,10 +5,20 @@ claims, and the scripts used to reproduce them live. For the full click-by-click
 demo script (what to click, what should appear, what to say), see
 [`full_walkthrough.md`](full_walkthrough.md).
 
+## Current live lab
+
+`demo/start_demo.sh` starts the normal product. `demo/start_demo.sh --lab` starts
+only the separate sandbox site (localhost:8090) and its optional local TCP adapter.
+See [Attack Lab](../attack_lab/README.md). The older `full_walkthrough.md` and
+screenshots show the removed in-app panel and are retained as historical artifacts.
+
+Attack implementations now live in `attack_lab/scripts/`; the `demo/run_*_demo.py`
+files are compatibility entrypoints. They use an isolated temporary lab database.
+
 ## Live demo scripts
 
 Each script is standalone: it starts its own real mini relay server (the actual
-`server/server.py` code, real TLS) and drives two real clients (the actual
+shared relay core/TLS adapter, extended only by `attack_lab`) and drives two real clients (the actual
 `client/client.py` code) against it — nothing here is mocked or simulated. Each prints
 a clear `[PASS]`/`[FAIL]` banner per check and a final overall result. Run them from
 the project root, after `python certs/generate_certs.py` has been run at least once:
@@ -78,7 +88,7 @@ To open it by hand, decode the printed port as TLS (Analyze, Decode As, or
 
 ```
 python certs/generate_certs.py     # once, if you haven't already
-pytest tests/ -v                   # all 348 automated tests
+pytest tests/ -v                   # full current automated suite
 python demo/run_tamper_demo.py
 python demo/run_replay_demo.py
 python demo/run_mitm_handshake_demo.py

@@ -1,3 +1,7 @@
+> **Historical walkthrough:** this document describes the removed in-app Attack Lab.
+> Use [the separate sandbox guide](../attack_lab/README.md) for current attack demos.
+> Normal chat, evidence and dashboard features remain available.
+
 # Full live demo walkthrough (click-by-click)
 
 Read this straight through, live, in front of the professor. Every step names the

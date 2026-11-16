@@ -2,13 +2,13 @@
 
 > ## At a glance
 >
-> **What it is.** A two-party chat where neither the relay server nor a network observer can read or silently alter messages. Every session starts with an RSA-signed ECDH (X25519) handshake, every message is signed and AES-256-GCM encrypted, the connection is TLS 1.3, logins are PBKDF2-hashed and rate-limited, and replayed, tampered, dropped or reordered messages are detected by the receiving client. A signed, independently verifiable evidence export proves who said what. Includes a Tkinter GUI, an opt-in Attack Lab and a read-only Security Dashboard (Team 15, course 26ECSC403).
+> **What it is.** A two-party chat where neither the relay server nor a network observer can read or silently alter messages. Every session starts with an RSA-signed ECDH (X25519) handshake, every message is signed and AES-256-GCM encrypted, the connection is TLS 1.3, logins are PBKDF2-hashed and rate-limited, and replayed, tampered, dropped or reordered messages are detected by the receiving client. A signed, independently verifiable evidence export proves who said what. Includes a Tkinter GUI, a separate sandbox Attack Lab and a read-only Security Dashboard (Team 15, course 26ECSC403).
 >
 > | Measured (see [Evaluation results](#evaluation-results)) | |
 > |---|---|
-> | Automated tests | **394 passing Python tests + 27 Vitest + 5 Playwright** |
+> | Automated tests | **396 passing Python tests + 27 Vitest + 12 Playwright (5 product + 7 lab)** |
 > | Attacks detected (tamper, replay, drop, MITM, edited evidence, password burst; 20 each) | **120 / 120**, 0 false rejections in 200 normal messages |
-> | End-to-end message latency (real TLS server, loopback) | **~1.2 ms** median (requirement: < 1 s) |
+> | End-to-end message latency (real TLS server, loopback) | **~1.9 ms** median (requirement: < 1 s) |
 >
 > **Run it in 3 commands** (macOS/Linux, Python 3.10+):
 >
@@ -31,9 +31,9 @@ to broker keys), derives a fresh AES-256-GCM session key, signs and encrypts eve
 message with it, wraps the whole client↔server connection in TLS, gates every
 connection behind a PBKDF2-hashed login, rejects replayed or tampered messages, detects
 a relay dropping or reordering messages via a hash-chained conversation log, and locks
-out repeated failed logins — all properties covered by the automated suite (394 Python tests, plus browser tests) and five
+out repeated failed logins — all properties covered by the automated suite (396 Python tests, plus browser tests) and five
 live attack-and-defense demo scripts, plus a Tkinter GUI whose "Wire Log" panel makes
-the cryptography visible during a demo instead of invisible, an opt-in **Attack Lab**
+the cryptography visible during a demo instead of invisible, a separate **Attack Lab**
 that triggers those same attacks for real with one click, and a live **Security
 Dashboard**.
 
@@ -55,7 +55,7 @@ trusts neither user nor server**.
 | **Relay drops or reorders a message** | Each message is authentic on its own; conversation integrity isn't a surfaced, auditable guarantee | **Detected**: a per-sender hash chain (sequence number + hash of the previous message, inside the signed payload) flags "message(s) missing, possible deletion by the relay" |
 | **Evidence for a third party** | None: nothing exportable that proves anything | **Signed evidence file** plus a standalone verifier (`tools/verify_transcript.py`) that imports no client or server code |
 | **What the user can see** | Opaque; at most a safety number | **Security receipt** on every message (click a bubble) and a live **Wire Log** of what actually crosses the network |
-| **Live attacks, on demand** | Not applicable (no equivalent feature) | **Attack Lab**: a GUI panel that arms a real relay attack (tamper/replay/drop/MITM) for the next message, caught live by the other window's real, unmodified checks |
+| **Live attacks, on demand** | Not applicable (no equivalent feature) | **Separate Attack Lab site**: hostile relay, two unchanged browser clients, seven attacks and genuine client/lockout reports |
 | **Account abuse / intrusion visibility** | Not applicable | **Login lockout** with exponential backoff, and a live **Security Dashboard** showing event counts, a colour-coded feed, and currently-locked accounts |
 
 **Target use cases:** regulated environments where "who said what, and was anything
@@ -65,21 +65,18 @@ legal and compliance communication, and command chains where orders must be
 attributable and complete. It is **not** the right tool where plausible deniability
 matters (e.g. whistleblowing or dissent): there, use Signal.
 
-**Making attacks and defenses visible from inside the app itself** (not just in
-separate scripts) is the other half of this: the opt-in **Attack Lab** (see "Running
-the Attack Lab + Security Dashboard" below) lets the team trigger a real relay attack
-with one click during a live demo and watch the other window's real client-side
-checks catch it, and the **Security Dashboard** gives a continuously-updated view of
-every login failure, lockout, and detected attack across the whole server.
+The separate **Attack Lab** site makes attacks and defenses visible with two real
+browser clients. Its hostile relay and sandbox database are isolated from the product.
+The read-only **Security Dashboard** remains available for normal service events.
 
 ## Quick start (clean clone → working two-GUI demo)
 
 **On a Mac, one command:** double-click [`demo/start_demo.command`](demo/start_demo.command)
 in Finder (or run `demo/start_demo.sh` in a terminal). It stops any leftover server of
 ours, checks the TLS certificate, then opens clearly titled Terminal windows for the
-server (Attack Lab on), two chat windows and the security dashboard, and waits until
+normal server, two chat windows and the security dashboard, and waits until
 the server is really accepting connections before launching them. Options:
-`--no-lab` (normal mode), `--port N`, `--simple` (only the two chat windows, server in
+`--lab` (separate sandbox site), `--port N`, `--simple` (only the two chat windows, server in
 the background) and `--wireshark` (start a live Wireshark capture first). Stop everything again with
 `demo/stop_demo.sh`, which touches only this project's own processes (never macOS
 AirPlay, which also listens on port 5000).
@@ -208,7 +205,7 @@ Exact compatibility parameters:
 
 Evidence exports intentionally contain verified plaintext and remain browser-local.
 `tools/verify_transcript.py` is unchanged. Browser protocol handlers and the UI action
-area can be extended in later phases; this phase adds no media, calls or web Attack Lab.
+area can be extended in later phases; media and calls remain future work. The separate web Attack Lab is described below.
 
 Run browser tests from `web/frontend/` after installing Python requirements:
 
@@ -366,7 +363,7 @@ test that exercises it (verified — see "Running the tests" below):
 | **Access control** | A connection is not admitted to the roster or allowed to route any handshake/chat envelope until it completes a successful PBKDF2-checked login | `auth/password_hash.py`, `server/server.py` (`_authenticate`) | `tests/test_tls_setup.py::test_tls_client_wrong_password_login_rejected` |
 | **Integrity of conversation** | A per-sender SHA-256 hash chain (`seq` + `prev_hash`, inside the signed and encrypted payload) lets the receiver detect a relay silently dropping, reordering or injecting messages | `crypto_engine/hash_chain.py`, chain check in `client/client.py` | `tests/test_hash_chain.py::test_real_pipeline_detects_relay_dropping_a_message` |
 | **Evidence** | Both directions of a session can be exported as one JSON file, signed by the exporter, and checked offline by an independent verifier (signatures, both hash chains, chain heads, export signature) | `client/evidence.py`, `tools/verify_transcript.py` | `tests/test_evidence_export.py::test_editing_one_message_makes_it_invalid_and_names_that_message` |
-| **Attack Lab containment** | A `lab_control` request is honored only when the server was started with `--lab`, only from a localhost peer, and only from an already-authenticated connection; any other attempt is rejected and logged, never silently ignored | `server/server.py` (`_handle_lab_control`) | `tests/test_attack_lab.py::test_lab_control_rejected_from_non_localhost_peer` |
+| **Attack Lab containment** | Separate app/origin, database, roster and controls; production has no attack flags, routes or imports, and logs unknown envelope types | `attack_lab/`, neutral `RelayCore.interceptor` | `tests/test_attack_lab.py`, `tests/test_gui_attack_lab.py` |
 | **Login lockout** | After repeated failed logins, an account is locked with exponential backoff; a locked attempt is rejected *before* PBKDF2 runs, so hammering a locked account cannot be used to burn CPU | `server/lockout.py` | `tests/test_security_events.py::test_full_lockout_flow_end_to_end` |
 
 Run any single one directly, e.g. `pytest tests/test_aes_gcm.py::test_ciphertext_is_not_plaintext -v`.
@@ -375,13 +372,6 @@ Run any single one directly, e.g. `pytest tests/test_aes_gcm.py::test_ciphertext
 
 Said out loud, not buried — these are the honest edges of this project's scope:
 
-- **The Attack Lab has no one-click brute-force/lockout demo button.** Lockout is
-  real and fully tested (`tests/test_lockout.py`, and
-  `tests/test_security_events.py::test_full_lockout_flow_end_to_end` end to end
-  through a real server, including that a locked attempt skips PBKDF2 entirely), but
-  the GUI does not expose a button that fires repeated login attempts at a named
-  account, even against one's own test account. See it live instead by running a
-  handful of deliberate wrong-password **Login** attempts in a GUI window.
 - **Per-address request limits remain in memory.** Account lockouts, failure windows
   and backoff tiers persist in the database across server restarts; the separate
   per-source-address limiter resets on restart.
@@ -455,43 +445,48 @@ See [`demo/README.md`](demo/README.md) for more detail, and
 live demo script (GUI + these demo scripts + the Wireshark capture + the Attack Lab
 and Security Dashboard, with talking points and timing).
 
-## Running the Attack Lab + Security Dashboard
+## Running the Attack Lab
 
-**1. Start the server with `--lab`** (off by default -- a server started without it
-behaves exactly as before, and rejects and logs any `lab_control` request it
-receives):
+Run the **separate sandbox site**, never the production server with an attack flag:
 
-```
-python server/server.py --lab
-```
-
-**2. Open the security dashboard**, in its own window, any time (it only tails
-`logs/security_events.jsonl` -- it never connects to the server):
-
-```
-python gui/security_dashboard.py
+```sh
+.venv/bin/python -m attack_lab             # http://localhost:8090 ($PORT supported)
+# macOS launcher alternative; also opens a local TCP listener:
+demo/start_demo.sh --lab --port 5056
 ```
 
-**3. Open two GUI clients** as in "Quick start" above. Once a secure session is
-established, each window shows an **Attack Lab** button (amber, top bar) -- it's only
-enabled when the connected server reports lab mode. Click it to open the panel (the
-amber "LAB MODE" banner is deliberate, so it's never mistaken for a real error), then
-click **Tamper next message**, **Replay last message**, **Drop next message**, or
-**MITM next handshake**. Each one is a real, one-shot attack carried out by the
-relay server itself -- never simulated -- and the *other* window's real, unmodified
-checks (AES-GCM tag, replay window, hash chain, or handshake signature) catch it live,
-exactly as the standalone `demo/run_*.py` scripts demonstrate, with the dashboard's
-event feed updating in real time alongside it.
+The persistent banner reads **ATTACK LAB — sandbox, not the real service**. Start a
+lab session, Reset lab, then Connect victims. Both panes load the exact production
+HTML and JavaScript bundle, pointed at the sandbox WebSocket endpoint. Private keys
+are generated locally. Arm tamper, replay, drop, reorder or injection and send a message;
+drop/reorder need a follow-up. MITM must be armed **before** connecting victims.
+Replay needs a previously delivered message. The brute-force button attacks only the
+fixed `lab_lockout` account and shows the real client login being rejected as locked.
 
-Login lockout triggers automatically: five wrong passwords for one username within
-five minutes lock that account with exponential backoff (30s, 60s, 120s, ... capped at
-15 minutes); the dashboard's "Locked accounts" panel shows it and the remaining time.
-A locked login is rejected *before* PBKDF2 ever runs (see `server/lockout.py`), so this
-cannot be used to burn CPU against an account that's already locked.
+The console shows the relay's ciphertext/public routing values and attempted actions.
+The detection feed displays actual client `security_alert` reports and real lockout
+events; arming or firing an attack alone is never labeled a successful detection.
+Injected garbage fails GCM; a forged RSA signature cannot be constructed without the
+victim's private key. Dropping the final message alone is undetectable until a later
+message reveals the chain gap.
+
+`LAB_DATABASE_URL` defaults to `sqlite:///<project>/data/attack_lab.db`, with own logs
+and optional TLS material under `LAB_STATE_DIR` (default `data/attack_lab/`). It must
+identify a different database from `DATABASE_URL`. `LAB_ALLOWED_ORIGINS` must be explicit
+and disjoint from production `SECURECHAT_ALLOWED_ORIGINS`. Controls require a lab
+session cookie, exact Origin on writes and rate limits. Reset wipes **only the lab DB**,
+clears connected sandbox peers and reseeds two victim accounts plus the lockout account.
+One process hosts one shared sandbox; resetting affects all its visitors.
+
+See [`attack_lab/README.md`](attack_lab/README.md) for configuration, optional TCP,
+build/test commands and containment limits. Production has no `--lab`, lab routes or
+lab UI. A `lab_control` envelope is an unknown type and is logged and rejected.
+The normal dashboard still runs with `python gui/security_dashboard.py`; it reads
+`logs/security_events.jsonl` without issuing controls.
 
 ## Evaluation results
 
-Measured, not claimed: `tools/evaluate_security.py` drives the real code against a local lab-mode server
+Measured, not claimed: `tools/evaluate_security.py` drives the real code against a separate local sandbox relay
 (temporary data, logs and exports; your real `data/` is never touched) and writes
 [`docs/evaluation_results.md`](docs/evaluation_results.md) (all tables, parameters, machine) and
 `docs/evaluation_results.json` (raw numbers). Reproduce: `python tools/evaluate_security.py` (about a minute;
@@ -499,11 +494,11 @@ Measured, not claimed: `tools/evaluate_security.py` drives the real code against
 
 | Measure | Result |
 |---|---|
-| Test suite (historical pre-DB evaluation) | 348 / 348 pass; current run below |
+| Current Python test suite | 396 / 396 pass |
 | Attacks detected (tamper, replay, drop, MITM key swap, edited evidence, wrong-password burst; 20 each) | 120 / 120 (100%) |
 | False rejections on 200 normal messages | 0 (0.0%) |
-| End-to-end message latency through the real TLS server | median 1.2 ms, p95 1.4 ms |
-| Full session setup (TLS + login + signed handshake) | median 45.0 ms, p95 46.3 ms |
+| End-to-end message latency through the real TLS server | median 1.859 ms, p95 1.985 ms |
+| Full session setup (TLS + login + signed handshake) | median 48.1 ms, p95 49.6 ms |
 | Review 1 requirement, encryption overhead < 1 s | PASS (every p95 is far below 1 s) |
 
 **Caveats.** (1) For the repeated wrong-password trials the lockout duration was shortened to **0.5 s**; the
@@ -514,6 +509,12 @@ counts show the checks work on these attacks, not that no attack could evade the
 ![Evaluation summary](docs/screenshots/10_evaluation_results.png)
 
 ## Screenshots
+
+**Historical assets:** screenshots 01, 03, 04, 05 and 09 show the former in-app lab
+layout or server mode; 03 is explicitly obsolete. `demo/full_walkthrough.md` and
+`docs/UI_REDESIGN_PROGRESS.md` describe that older UI. Existing evaluation screenshot
+10 predates this run. PDFs under `docs/pdf/` and local PowerPoint review files have
+not been refreshed or edited. Use the commands above for the current lab.
 
 Screenshots 01-06b were retaken after the front-end redesign (GUI only; 07-10 are terminal output and 12-13 are Wireshark). For a projector, press **Cmd+Shift+P** in any window (or start with `demo/start_demo.sh --presentation`) for ~25% larger text; the launcher tiles the windows to fit your screen (`demo/layout.py`). Every window has a **jet-black (dark) and a white (light) theme**: switch with the ◐ button, the View / ⚙ menu, or **Cmd+Shift+L** (Ctrl+Shift+L elsewhere); the choice is remembered in `~/.securechat/ui.json`, and `--theme dark|light` overrides it at launch.
 
@@ -554,19 +555,27 @@ now accounts for Tk's reported DPI; presentation tests control their worker/even
 keyboard focus. Assertions were preserved. Starlette currently emits a deprecation
 warning for its httpx test-client adapter; no tests fail or are skipped.
 
+Attack Lab separation: **396 pytest passed, 0 failed, 0 skipped**; **27 Vitest**;
+**5 production + 7 lab Playwright/Chromium**. The old Tk panel assertions were migrated
+to the separate site; real crypto/detection, chain recovery and evidence assertions
+remain. The lab suite checks every attack through the unchanged production bundle.
+Full evaluator: **120/120**, **0/200 false rejections**, **real data unchanged**.
+See [the phase report](docs/attack_lab_phase_report.md) for files, verification limits
+and the estimate-versus-elapsed-time record.
+
 The WebSocket suite covers admission, persistent lockout before PBKDF2, origin/frame/
 rate/idle/type policies, security headers, a DB plaintext scan after encrypted chat,
 and real combined CLI startup. Browser vectors run both directions against Python;
 Playwright exchanges messages between isolated browser contexts and with a real
 Python TCP/TLS client. Browser evidence is checked by the unmodified offline verifier.
 
-394 tests across 31 test files, including 15 database tests, 15 gateway tests and 12 evidence/vault tests (the first seven one per project phase): `test_aes_gcm.py`
+396 tests across 31 test files, including 15 database tests, 15 gateway tests and 12 evidence/vault tests (the first seven one per project phase): `test_aes_gcm.py`
 (encryption), `test_dh_exchange.py` (key exchange), `test_password_hash.py` (login),
 `test_signatures.py` (non-repudiation), `test_handshake_auth.py` (signed-handshake
 MITM fix), `test_replay_protection.py` (replay defenses), `test_tls_setup.py`
 (transport security), plus `test_hash_chain.py` (dropped/reordered-message detection),
 `test_evidence_export.py` (signed export + offline verifier, including tampered files),
-`test_attack_lab.py` (opt-in lab-mode relay attacks and their safety restrictions),
+`test_attack_lab.py` (separate hostile-relay attacks and product isolation),
 `test_lockout.py` (login lockout + per-address rate limiting),
 `test_security_events.py` (the security event log end to end, including the full
 lockout flow and that a locked attempt never runs PBKDF2), `test_entrypoints.py`
