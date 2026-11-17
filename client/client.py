@@ -1101,6 +1101,7 @@ class SecureChatClient:
     # --- receive loop ------------------------------------------------------
 
     def receive_loop(self):
+        lost = "connection lost"  # the peer closed the connection cleanly
         try:
             with self.sock.makefile("r", encoding="utf-8", newline="\n") as stream:
                 for line in stream:
@@ -1145,12 +1146,14 @@ class SecureChatClient:
                         self._handle_handshake_response(envelope)
                     elif etype == "chat" and envelope.get("from") == self.peer:
                         self._handle_chat(envelope)
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as exc:
+            # Keep the real cause (e.g. an SSLError "bad_record_mac" when a network
+            # attacker altered a record) so the user sees why, not just "lost".
+            lost = f"connection lost: {type(exc).__name__}: {exc}"[:200]
         finally:
             if not self.stop_event.is_set():
-                print("\r[!] Disconnected from server.", flush=True)
-                self._emit("disconnected", reason="connection lost")
+                print(f"\r[!] Disconnected from server. ({lost})", flush=True)
+                self._emit("disconnected", reason=lost)
             self.stop_event.set()
             # Unblock anyone still waiting on an auth or pubkey result.
             self.auth_results.put(None)

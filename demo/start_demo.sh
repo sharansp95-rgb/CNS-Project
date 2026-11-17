@@ -16,6 +16,11 @@
 #   demo/start_demo.sh --wireshark   also start a live Wireshark capture of
 #                                    the demo port BEFORE anything connects
 #                                    (combine: --simple --wireshark)
+#   demo/start_demo.sh --network-attack  "fake Wi-Fi" demo: real server on PORT, Mallory's
+#                                    TLS-blind proxy on PORT+1 and his window
+#                                    (http://localhost:8095), plus Alice and Bob whose
+#                                    clients connect THROUGH the proxy. Needs no root.
+#                                    Add --wireshark to also capture live.
 #   demo/start_demo.sh --presentation  Presentation mode in every GUI window
 #                                    (~25% larger text, for a projector); you can
 #                                    also toggle it in any window with Cmd+Shift+P
@@ -32,6 +37,8 @@ PORT=5000
 LAB=0
 SIMPLE=0
 WIRESHARK=0
+NETATTACK=0
+MALLORY_PORT=8095
 PRESENTATION=0
 WEB_PORT=""
 while [ $# -gt 0 ]; do
@@ -41,10 +48,12 @@ while [ $# -gt 0 ]; do
         --lab) LAB=1; shift ;;
         --no-lab) LAB=0; shift ;;
         --simple) SIMPLE=1; shift ;;
+        --network-attack) NETATTACK=1; shift ;;
+        --mallory-port) MALLORY_PORT="${2:-}"; shift 2 ;;
         --wireshark) WIRESHARK=1; shift ;;
         --presentation) PRESENTATION=1; shift ;;
         --port)   PORT="${2:-}"; shift 2 ;;
-        -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
     esac
 done
@@ -125,6 +134,48 @@ eval "$("$PY" demo/layout.py $SCREEN $LAYOUT_FLAGS)"
 echo "    screen $SCREEN -> windows tiled$( [ "$OVERLAP" = 1 ] && echo " (screen too small to tile without overlap: click a title bar to raise a window)" )"
 
 MODE="normal mode"
+if [ "$NETATTACK" = 1 ]; then
+    PROXY_PORT=$((PORT + 1))
+    case "$MALLORY_PORT" in ''|*[!0-9]*) echo "--mallory-port needs a number" >&2; exit 2 ;; esac
+    mkdir -p "$ROOT/logs"
+    [ "$WIRESHARK" = 1 ] && { echo "Starting the Wireshark capture (on the proxy port)"; PORT_BACKUP=$PORT; PORT=$PROXY_PORT; start_wireshark; PORT=$PORT_BACKUP; }
+    echo "[3/5] Starting the REAL server in the background (port $PORT)"
+    nohup "$PY" -u server/server.py --port "$PORT" > "$ROOT/logs/demo_server.log" 2>&1 &
+    "$PY" - "$PORT" <<'PYEOF' || { echo "The server did not start; see logs/demo_server.log" >&2; exit 1; }
+import sys, time
+sys.path.insert(0, ".")
+from client.client import TLSSetupError, connect_tls
+deadline = time.time() + 40
+while time.time() < deadline:
+    try:
+        connect_tls("127.0.0.1", int(sys.argv[1]), on_cert_fingerprint=lambda fp: None).close(); sys.exit(0)
+    except (TLSSetupError, OSError):
+        time.sleep(0.4)
+sys.exit(1)
+PYEOF
+    echo "[4/5] Starting Mallory's proxy (victims -> port $PROXY_PORT -> server $PORT) and his window"
+    nohup "$PY" -u -m attack_lab.netproxy --upstream "127.0.0.1:$PORT" --listen-port "$PROXY_PORT" \
+        --ui-port "$MALLORY_PORT" --identify > "$ROOT/logs/demo_netproxy.log" 2>&1 &
+    for _ in $(seq 1 50); do
+        curl -fs "http://localhost:$MALLORY_PORT/" >/dev/null 2>&1 && break; sleep 0.3
+    done
+    curl -fs "http://localhost:$MALLORY_PORT/" >/dev/null 2>&1 || { echo "Mallory's window did not start; see logs/demo_netproxy.log" >&2; exit 1; }
+    echo "[5/5] Opening Alice and Bob (connected through the proxy) and Mallory's window"
+    CNS_DEMO_LABEL=Alice nohup "$PY" gui/chat_gui.py --port "$PROXY_PORT" --geometry "$CHAT_A_GEOM" $PRESFLAG >/dev/null 2>&1 &
+    CNS_DEMO_LABEL=Bob nohup "$PY" gui/chat_gui.py --port "$PROXY_PORT" --geometry "$CHAT_B_GEOM" $PRESFLAG >/dev/null 2>&1 &
+    sleep 1; open "http://localhost:$MALLORY_PORT"
+    cat <<MSG
+
+=== Network attacker demo is running ===
+ Real server    : 127.0.0.1:$PORT over TLS (log: logs/demo_server.log)
+ Mallory proxy  : 127.0.0.1:$PROXY_PORT  - Alice and Bob connect HERE, not to the server
+ Mallory window : http://localhost:$MALLORY_PORT  (records, Intercept, results, Wireshark)
+ Alice / Bob    : the two chat windows. Register in each, naming the OTHER as Peer.
+ Script         : attack_lab/README.md, "Network attacker demo".
+ When finished  : demo/stop_demo.sh
+MSG
+    exit 0
+fi
 WEBFLAG=""
 [ -n "$WEB_PORT" ] && WEBFLAG="--web-port $WEB_PORT"
 

@@ -183,6 +183,16 @@ fingerprint must match the signed SDP before **Call verified**. `/?relay=1` forc
 TURN; otherwise direct connectivity is preferred. Metered credentials can take
 about a minute to become usable. No TURN secret is exposed to the browser or lab.
 
+## Network attacker demo
+
+`demo/start_demo.sh --network-attack` starts the real server, a TLS-blind
+man-in-the-middle proxy (`attack_lab/netproxy`, no TLS key), Mallory's window
+(`http://localhost:8095`) and two desktop clients (Alice, Bob) that connect through
+the proxy. Mallory sees only ciphertext records and can Forward, Alter, Drop, Replay or
+Delay them; the failures that follow (`bad record mac`, stalls) are produced by the
+real TLS stacks. Step-by-step script, browser (HTTPS/WSS) use and limits:
+[attack_lab/README.md](attack_lab/README.md#network-attacker-demo-fake-wi-fi).
+
 ## Running the Attack Lab
 
 ```sh
@@ -228,7 +238,8 @@ keyboard focus. ESLint’s isolated pinned parser uses TypeScript 6; the applica
 still builds/types with pinned TypeScript 7. The Starlette test adapter uses httpx2
 and no longer emits the deprecated-httpx warning.
 
-Current local results: **464 pytest passed / 2 opt-in Postgres skips**, **85 disposable
+Current local results: **478 pytest passed / 2 opt-in Postgres skips** (14 are the
+network-attacker tests), **85 disposable
 Neon tests passed**, **83 Vitest passed**, **43 main browser tests passed / 7 skips**
 and **26 lab browser tests passed / 4 skips** (Chromium + WebKit). Live results:
 **42 main passed / 8 skips**, **26 lab passed / 4 skips**, including a real

@@ -54,6 +54,110 @@ The relay console allowlists routing/ciphertext and public handshake values. It
 never receives chat plaintext or private/session keys. As in the real app, login
 passwords terminate at the gateway and must use HTTPS outside localhost.
 
+## Network attacker demo ("fake Wi-Fi")
+
+Mallory controls the network between two real users and the real server, like a rogue
+hotspot. This runs locally and shows what TLS does to a network attacker. It is
+separate from the Attack Lab website above: there the *relay* is hostile (a different
+threat, stopped by end-to-end crypto); here only the *network* is hostile.
+
+```bash
+demo/start_demo.sh --network-attack              # server :5000, proxy :5001, Mallory :8095
+demo/start_demo.sh --network-attack --port 5055  # avoid macOS AirPlay on 5000 (proxy :5056)
+demo/start_demo.sh --network-attack --wireshark  # also a live Wireshark capture of the proxy port
+demo/stop_demo.sh                                # stops everything of ours
+```
+
+### The windows
+
+| Window | What it is |
+|---|---|
+| **Alice** and **Bob** | The normal desktop clients, started with `--port <proxy port>`, so every byte they send goes through Mallory. They still pin `certs/server.crt` and verify it. |
+| **Mallory** (browser, `http://localhost:8095`) | Live list of captured TLS records: direction, record type, size, first bytes in hex and as text (visibly unreadable), status. **Intercept ON/OFF**, per-record **Forward / Alter / Drop / Replay / Delay**, a feed of the real outcomes, the one-line lesson, **Open in Wireshark** and **Download .pcap**. |
+| **Real server** | `server/server.py`, unchanged. Log: `logs/demo_server.log`. |
+
+Mallory's proxy (`python -m attack_lab.netproxy`) holds **no TLS key** and never
+terminates TLS. It cuts the TCP byte stream into TLS records and relays them. Alter
+flips one ciphertext byte, Drop withholds a record, Replay sends the same bytes a
+second time, Delay holds a record. **The outcome is never simulated**: whatever
+happens next is what the real TLS stacks of the clients and the server do; Mallory's
+feed only reports which side closed the connection and how soon after the attack.
+
+TLS 1.3 detail: after the ServerHello everything is wrapped as "Application Data", so
+Mallory cannot even tell a chat message from a handshake message. The first
+application-data record of each connection (TLS Finished) is always forwarded; with
+Intercept ON, later records wait for your decision. After an Alter, Replay or Drop the
+proxy switches Intercept OFF (checkbox "resume forwarding after an attack") because
+otherwise Mallory would also be holding the TLS alert the victim sends back.
+
+### Live review script
+
+1. Run `demo/start_demo.sh --network-attack`. Say: "Alice and Bob think they talk to
+   the server; Mallory is the Wi-Fi."
+2. In Alice's and Bob's windows register one user each, naming the other as Peer.
+   Mallory's window fills with records. Point at the hex: nothing readable, not even
+   the usernames or the password. (Optional: **Open in Wireshark**.)
+3. Intercept **OFF**: Alice sends "hello". Bob receives it. Mallory forwarded
+   untouched and read nothing.
+4. Intercept **ON**, Alice sends "pay 500". A record is waiting. Press **Forward**
+   (and Forward the server's copy towards Bob): delivered normally.
+5. Alice sends again; press **Alter**. Mallory's feed shows `ALTER ... closed by the
+   server ... bad_record_mac`, and **Alice's window** shows the real error
+   (`SSLError ... bad record mac`) and goes to "Disconnected".
+6. Log in again (Intercept ON), send, press **Replay** on that record: it is
+   delivered once, the duplicate breaks the connection (TLS sequence numbers).
+   Or use **Replay now** on any older record.
+7. Send and press **Drop**: the message never arrives, nothing tells Alice
+   (`STALLED` in the feed). Send another message: now the sequence numbers no longer
+   match and the connection breaks.
+8. **Delay** (3 s): the message arrives late but intact, because TLS only cares about
+   order and integrity.
+9. Lesson on the page: *TLS stops a network attacker: he sees only ciphertext, and any
+   change breaks the connection.*
+
+Things to say if asked: Mallory *can* still drop the connection or the traffic (TLS
+does not give availability), and he can see sizes and timing (traffic analysis). He
+cannot read or silently change anything. A malicious **server** is a different
+problem, handled by the end-to-end layer (Attack Lab website).
+
+### Browsers (HTTPS / WSS)
+
+The proxy only moves TLS records, so it works for the web client too. The gateway must
+serve HTTPS locally (uses the project certificate, which has `localhost` in its SAN):
+
+```bash
+SECURECHAT_ALLOWED_ORIGINS=https://localhost:8443 \
+  .venv/bin/uvicorn web.app:create_app --factory --port 8444 \
+  --ssl-certfile certs/server.crt --ssl-keyfile certs/server.key
+.venv/bin/python -m attack_lab.netproxy --upstream 127.0.0.1:8444 --listen-port 8443 --ui-port 8095
+# victims open https://localhost:8443  (click through the self-signed certificate warning)
+```
+
+A browser does not pin `certs/server.crt`, so it warns once about the self-signed
+certificate; adding the certificate to the macOS keychain as trusted removes that.
+Verified with real Chromium (page and WSS open through the proxy) and with pytest (HTTPS
+plus WSS, plaintext scan, altered record closes the socket). The full chat UI flow
+through the proxy was not automated.
+
+### Wireshark
+
+**Open in Wireshark** writes the records Mallory captured to a `.pcap` (each record as one
+TCP segment, bytes exactly as the proxy received them, decoded as TLS on the proxy port)
+and opens it with the helper from `attack_lab/scripts/run_wireshark_demo.py`. It needs no
+capture privileges. `--wireshark` additionally starts a live capture of the proxy port
+before anything connects, so the handshakes are recorded too.
+
+### Limits and honest notes
+
+- Victim labels ("Alice", "Bob") come from the `CNS_DEMO_LABEL` environment variable of
+  the GUI processes (macOS/Linux, via `lsof`); otherwise connections are "Client N".
+- The desktop GUI does not reconnect by itself: after any attack that breaks TLS the
+  victim shows "Disconnected ... restart to reconnect". A dropped message therefore
+  stalls first and fails on the *next* message, as described above.
+- `client/client.py` now passes the real exception text (for example the SSL error) into
+  the "disconnected" event instead of the fixed text "connection lost". No protocol change.
+- Tests: `tests/test_network_attacker.py`.
+
 ## Isolation and configuration
 
 - `$PORT` selects HTTP port (default 8090); `--port` overrides it. `--host` defaults
