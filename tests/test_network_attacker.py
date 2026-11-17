@@ -370,3 +370,54 @@ def test_victim_process_is_named_from_its_environment(rig):
         assert identify_label(client_port, rig.port) == "Alice"
     finally:
         proc.kill()
+
+
+@pytest.mark.skipif(shutil.which("lsof") is None, reason="needs lsof")
+def test_browser_profile_directory_names_the_victim_through_a_parent_process(rig):
+    """Chrome hides its environment: the label comes from --user-data-dir up the process tree."""
+    from attack_lab.netproxy.core import identify_label
+
+    child = (
+        "import socket,time,sys;s=socket.create_connection(('127.0.0.1',int(sys.argv[1])));"
+        "print(s.getsockname()[1],flush=True);time.sleep(5)"
+    )
+    parent = "import subprocess,sys;subprocess.run([sys.executable,'-c',sys.argv[2],sys.argv[1]])"
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            parent,
+            str(rig.port),
+            child,
+            "--user-data-dir=/tmp/cns-netattack.AbC123/Bob",
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        client_port = int(proc.stdout.readline())
+        assert identify_label(client_port, rig.port) == "Bob"
+    finally:
+        proc.kill()
+
+
+def test_web_certificate_is_generated_once_with_localhost_san_and_stable_spki(tmp_path):
+    import base64
+    import hashlib
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+
+    from attack_lab.netproxy import webcert
+
+    mode, cert, key = webcert.generate(tmp_path)
+    first = cert.read_bytes()
+    assert mode in ("mkcert", "selfsigned") and key.stat().st_mode & 0o077 == 0
+    assert webcert.generate(tmp_path)[0] == mode and cert.read_bytes() == first  # not regenerated
+    parsed = x509.load_pem_x509_certificate(first)
+    names = parsed.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    assert "localhost" in names.get_values_for_type(x509.DNSName)
+    der = parsed.public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    assert webcert.spki_hash(first) == base64.b64encode(hashlib.sha256(der).digest()).decode()

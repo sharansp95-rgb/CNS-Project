@@ -62,25 +62,38 @@ separate from the Attack Lab website above: there the *relay* is hostile (a diff
 threat, stopped by end-to-end crypto); here only the *network* is hostile.
 
 ```bash
-demo/start_demo.sh --network-attack              # server :5000, proxy :5001, Mallory :8095
-demo/start_demo.sh --network-attack --port 5055  # avoid macOS AirPlay on 5000 (proxy :5056)
-demo/start_demo.sh --network-attack --wireshark  # also a live Wireshark capture of the proxy port
-demo/stop_demo.sh                                # stops everything of ours
+demo/start_demo.sh --network-attack              # BROWSER demo (default): one command, no manual steps
+demo/start_demo.sh --network-attack --desktop    # same with the Tkinter clients (server :5000, proxy :5001)
+demo/start_demo.sh --network-attack --desktop --wireshark   # plus a live Wireshark capture
+demo/stop_demo.sh                                # stops everything of ours, closes the demo Chrome windows
 ```
+
+Browser demo ports: victims open **https://localhost:8443** (Mallory's proxy), the real
+web gateway listens on 127.0.0.1:8444 over HTTPS/WSS, Mallory's window is
+http://localhost:8095. Change them with `--proxy-port N` and `--mallory-port N`.
 
 ### The windows
 
 | Window | What it is |
 |---|---|
-| **Alice** and **Bob** | The normal desktop clients, started with `--port <proxy port>`, so every byte they send goes through Mallory. They still pin `certs/server.crt` and verify it. |
-| **Mallory** (browser, `http://localhost:8095`) | Live list of captured TLS records: direction, record type, size, first bytes in hex and as text (visibly unreadable), status. **Intercept ON/OFF**, per-record **Forward / Alter / Drop / Replay / Delay**, a feed of the real outcomes, the one-line lesson, **Open in Wireshark** and **Download .pcap**. |
-| **Real server** | `server/server.py`, unchanged. Log: `logs/demo_server.log`. |
+| **Alice** and **Bob** (default: two Google Chrome windows with their own throwaway profiles, so their sessions and keys are separate) | The web client served by the real gateway, opened on the proxied URL: every byte, including the WebSocket, goes through Mallory. With `--desktop` they are the Tkinter clients started with `--port <proxy port>`; they still pin `certs/server.crt`. |
+| **Mallory** (Chrome, `http://localhost:8095`) | Live list of captured TLS records: direction, record type, size, first bytes in hex and as text (visibly unreadable), status. **Intercept ON/OFF**, per-record **Forward / Alter / Drop / Replay / Delay**, a feed of the real outcomes, the one-line lesson, **Open in Wireshark** and **Download .pcap**. |
+| **Real gateway / server** | `uvicorn web.app:create_app` over TLS (`logs/demo_gateway.log`), or `server/server.py` with `--desktop`. Unchanged product code. |
+
+**Local certificate, automatically.** The launcher generates a self-signed certificate for
+`localhost` into `data/network_attack/` (git-ignored) with `python -m attack_lab.netproxy.webcert`.
+If `mkcert` is installed *and* its local CA exists (`mkcert -install` once), it uses an mkcert
+certificate instead and any browser trusts it. Otherwise the two demo Chrome windows are started
+with `--ignore-certificate-errors-spki-list=<hash of exactly this public key>` and their own
+`--user-data-dir`: no warning page, nothing added to the system trust store, no other certificate
+becomes trusted. Opening the URL in your normal browser (or Safari) shows the usual self-signed
+warning: click through once, or install mkcert. Google Chrome is required for the one-command mode.
 
 Mallory's proxy (`python -m attack_lab.netproxy`) holds **no TLS key** and never
 terminates TLS. It cuts the TCP byte stream into TLS records and relays them. Alter
 flips one ciphertext byte, Drop withholds a record, Replay sends the same bytes a
 second time, Delay holds a record. **The outcome is never simulated**: whatever
-happens next is what the real TLS stacks of the clients and the server do; Mallory's
+happens next is what the real TLS stacks of the browsers, gateway and server do; Mallory's
 feed only reports which side closed the connection and how soon after the attack.
 
 TLS 1.3 detail: after the ServerHello everything is wrapped as "Application Data", so
@@ -94,7 +107,8 @@ otherwise Mallory would also be holding the TLS alert the victim sends back.
 
 1. Run `demo/start_demo.sh --network-attack`. Say: "Alice and Bob think they talk to
    the server; Mallory is the Wi-Fi."
-2. In Alice's and Bob's windows register one user each, naming the other as Peer.
+2. In Alice's and Bob's windows choose *Create an identity* (a name and a password) and name
+   the other as Peer.
    Mallory's window fills with records. Point at the hex: nothing readable, not even
    the usernames or the password. (Optional: **Open in Wireshark**.)
 3. Intercept **OFF**: Alice sends "hello". Bob receives it. Mallory forwarded
@@ -102,10 +116,11 @@ otherwise Mallory would also be holding the TLS alert the victim sends back.
 4. Intercept **ON**, Alice sends "pay 500". A record is waiting. Press **Forward**
    (and Forward the server's copy towards Bob): delivered normally.
 5. Alice sends again; press **Alter**. Mallory's feed shows `ALTER ... closed by the
-   server ... bad_record_mac`, and **Alice's window** shows the real error
-   (`SSLError ... bad record mac`) and goes to "Disconnected".
-6. Log in again (Intercept ON), send, press **Replay** on that record: it is
-   delivered once, the duplicate breaks the connection (TLS sequence numbers).
+   server ... bad_record_mac`. **Alice's window** loses its session ("Reconnecting… Session
+   keys discarded. Login will be required."); with `--desktop` it shows the real error
+   (`SSLError ... bad record mac`) and "Disconnected".
+6. Log in again (Intercept ON), send, press **Replay** on that record: the original
+   usually goes through, but the duplicate breaks the connection (TLS sequence numbers).
    Or use **Replay now** on any older record.
 7. Send and press **Drop**: the message never arrives, nothing tells Alice
    (`STALLED` in the feed). Send another message: now the sequence numbers no longer
@@ -120,24 +135,21 @@ does not give availability), and he can see sizes and timing (traffic analysis).
 cannot read or silently change anything. A malicious **server** is a different
 problem, handled by the end-to-end layer (Attack Lab website).
 
-### Browsers (HTTPS / WSS)
+### What a browser can and cannot show
 
-The proxy only moves TLS records, so it works for the web client too. The gateway must
-serve HTTPS locally (uses the project certificate, which has `localhost` in its SAN):
+Browsers hide TLS error details from page JavaScript: when Mallory breaks the WebSocket the page
+only sees "closed", so the web client shows its own state ("Reconnecting… Session keys discarded.
+Login will be required."), not the TLS alert. The browser's *own* stack does report it: with
+Intercept ON, press **Alter** on a held request and open Chrome DevTools → Network: failed HTTPS
+requests show `net::ERR_SSL_PROTOCOL_ERROR` (verified by the Playwright suite below). Chrome also retries
+a failed request on a new connection by itself, so untick "resume forwarding after an attack" and
+keep Intercept ON if you want to see that error. With `--desktop` the Tkinter window shows the
+SSL error text directly.
 
-```bash
-SECURECHAT_ALLOWED_ORIGINS=https://localhost:8443 \
-  .venv/bin/uvicorn web.app:create_app --factory --port 8444 \
-  --ssl-certfile certs/server.crt --ssl-keyfile certs/server.key
-.venv/bin/python -m attack_lab.netproxy --upstream 127.0.0.1:8444 --listen-port 8443 --ui-port 8095
-# victims open https://localhost:8443  (click through the self-signed certificate warning)
-```
-
-A browser does not pin `certs/server.crt`, so it warns once about the self-signed
-certificate; adding the certificate to the macOS keychain as trusted removes that.
-Verified with real Chromium (page and WSS open through the proxy) and with pytest (HTTPS
-plus WSS, plaintext scan, altered record closes the socket). The full chat UI flow
-through the proxy was not automated.
+Verified end to end with real headless Chromium through the proxy (`npm --prefix web/frontend run
+test:netattack`): chat both ways, a photo, a voice call, no plaintext in Mallory's capture, and
+Alter / Replay / Drop each breaking the real session. WebRTC audio is peer-to-peer and does **not**
+pass through the proxy; only the call signalling (inside the WebSocket) does.
 
 ### Wireshark
 
@@ -149,14 +161,15 @@ before anything connects, so the handshakes are recorded too.
 
 ### Limits and honest notes
 
-- Victim labels ("Alice", "Bob") come from the `CNS_DEMO_LABEL` environment variable of
-  the GUI processes (macOS/Linux, via `lsof`); otherwise connections are "Client N".
-- The desktop GUI does not reconnect by itself: after any attack that breaks TLS the
+- Victim labels ("Alice", "Bob") are found with `lsof`: for Chrome from the `--user-data-dir`
+  profile name in the process tree, for the Tkinter clients from `CNS_DEMO_LABEL`. Short-lived
+  connections can stay "Client N".
+- The web client reconnects by itself (and discards its session keys); the desktop GUI does not: after any attack that breaks TLS the
   victim shows "Disconnected ... restart to reconnect". A dropped message therefore
   stalls first and fails on the *next* message, as described above.
 - `client/client.py` now passes the real exception text (for example the SSL error) into
   the "disconnected" event instead of the fixed text "connection lost". No protocol change.
-- Tests: `tests/test_network_attacker.py`.
+- Tests: `tests/test_network_attacker.py` (pytest) and `web/frontend/e2e-netattack/` (Playwright).
 
 ## Isolation and configuration
 

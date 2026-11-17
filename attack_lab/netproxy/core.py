@@ -284,10 +284,15 @@ class NetProxy:
 
     async def _identify(self, conn):
         loop = asyncio.get_running_loop()
-        label = await loop.run_in_executor(None, identify_label, conn.client_port, self.port)
-        if label:
-            conn.label = label
-            self.event("info", f"Connection {conn.id} is {label}", conn.id)
+        for delay in (0, 0.15, 0.4):  # a socket may not be visible to lsof for a moment
+            await asyncio.sleep(delay)
+            label = await loop.run_in_executor(None, identify_label, conn.client_port, self.port)
+            if label:
+                conn.label = label
+                self.event("info", f"Connection {conn.id} is {label}", conn.id)
+                return
+            if conn.state != "open":
+                return
 
     async def _pump(self, conn, direction, reader, writer):
         buf = bytearray()
@@ -484,8 +489,16 @@ class NetProxy:
             )
 
 
+PROFILE_RE = re.compile(r"cns-netattack\.[A-Za-z0-9]+/([A-Za-z0-9_-]{1,20})")
+
+
 def identify_label(client_port, proxy_port):
-    """Best effort (macOS/Linux): name the victim from CNS_DEMO_LABEL in its environment."""
+    """Best effort (macOS/Linux): name the victim that owns a client socket.
+
+    Desktop clients carry ``CNS_DEMO_LABEL`` in their environment. Chrome's environment is not
+    readable (hardened app), so demo browsers are recognised by their throwaway profile directory
+    ``.../cns-netattack.XXXX/<label>`` on the command line of the process or one of its parents.
+    """
     try:
         out = subprocess.run(
             ["lsof", "-nP", f"-iTCP:{proxy_port}", "-sTCP:ESTABLISHED", "-Fpn"],
@@ -493,22 +506,27 @@ def identify_label(client_port, proxy_port):
             text=True,
             timeout=3,
         ).stdout
-        pid = None
-        cur = None
+        pid = cur = None
         for line in out.splitlines():
             if line.startswith("p"):
                 cur = line[1:]
             elif line.startswith("n") and f":{client_port}->" in line:
                 pid = cur
-        if not pid:
-            return None
-        env = subprocess.run(
-            ["ps", "eww", "-p", pid], capture_output=True, text=True, timeout=3
-        ).stdout
-        match = LABEL_RE.search(env)
-        return match.group(1) if match else None
+        for _ in range(6):  # the socket owner, then its parents (Chrome network service -> browser)
+            if not pid or pid in ("0", "1"):
+                return None
+            env = subprocess.run(
+                ["ps", "eww", "-p", pid], capture_output=True, text=True, timeout=3
+            ).stdout
+            match = LABEL_RE.search(env) or PROFILE_RE.search(env)
+            if match:
+                return match.group(1)
+            pid = subprocess.run(
+                ["ps", "-o", "ppid=", "-p", pid], capture_output=True, text=True, timeout=3
+            ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return None
+    return None
 
 
 class ProxyRunner:

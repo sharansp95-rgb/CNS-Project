@@ -73,9 +73,12 @@ stop_demo_processes() {
     if [ -n "$port" ]; then servers="$(our_server_pids_on_port "$port")"
     else servers="$(our_pids 'server/server\.py| -m attack_lab( |$)')"; fi
     guis="$(our_pids 'gui/chat_gui\.py|gui/security_dashboard\.py')"
-    local all proxies
+    local all proxies gateways browsers
     proxies="$(our_pids ' -m attack_lab\.netproxy')"
-    all="$(printf '%s\n%s\n%s\n' "$servers" "$guis" "$proxies" | grep -E '^[0-9]+$' | sort -un | tr '\n' ' ')"
+    gateways="$(our_pids 'uvicorn --factory web\.app:create_app')"
+    # Demo Chrome windows are identified by their throwaway profile directory, never by name.
+    browsers="$(pgrep -f 'user-data-dir=[^ ]*cns-netattack' 2>/dev/null)"
+    all="$(printf '%s\n%s\n%s\n%s\n%s\n' "$servers" "$guis" "$proxies" "$gateways" "$browsers" | grep -E '^[0-9]+$' | sort -un | tr '\n' ' ')"
     if [ -n "$all" ]; then
         echo "    stopping our process(es): $all"
         # shellcheck disable=SC2086
@@ -84,4 +87,10 @@ stop_demo_processes() {
         echo "    no leftover demo processes of ours"
     fi
     close_demo_terminals
+    local profiles="$ROOT/logs/demo_netattack_profiles"
+    if [ -f "$profiles" ]; then
+        local dir; dir="$(cat "$profiles")"
+        case "$dir" in */cns-netattack.*) sleep 1; rm -rf "$dir" ;; esac
+        rm -f "$profiles"
+    fi
 }

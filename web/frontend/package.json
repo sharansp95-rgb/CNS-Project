@@ -9,6 +9,7 @@
     "test:e2e": "playwright test",
     "build:lab": "vite build --config vite.lab.config.ts",
     "test:lab": "playwright test --config playwright.lab.config.ts",
+    "test:netattack": "playwright test --config playwright.netattack.config.ts",
     "lint": "node lint/check.mjs",
     "format": "prettier --write src tests e2e *.ts *.json ../../eslint.config.mjs lint ../../attack_lab/frontend ../../attack_lab/e2e",
     "format:check": "prettier --check src tests e2e *.ts *.json ../../eslint.config.mjs lint ../../attack_lab/frontend ../../attack_lab/e2e",

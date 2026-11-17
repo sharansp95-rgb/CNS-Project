@@ -16,11 +16,14 @@
 #   demo/start_demo.sh --wireshark   also start a live Wireshark capture of
 #                                    the demo port BEFORE anything connects
 #                                    (combine: --simple --wireshark)
-#   demo/start_demo.sh --network-attack  "fake Wi-Fi" demo: real server on PORT, Mallory's
-#                                    TLS-blind proxy on PORT+1 and his window
-#                                    (http://localhost:8095), plus Alice and Bob whose
-#                                    clients connect THROUGH the proxy. Needs no root.
-#                                    Add --wireshark to also capture live.
+#   demo/start_demo.sh --network-attack  "fake Wi-Fi" demo with the WEB client: HTTPS/WSS gateway
+#                                    (127.0.0.1:8444) behind Mallory's TLS-blind proxy
+#                                    (https://localhost:8443), two Chrome windows (Alice,
+#                                    Bob) on the proxied URL and Mallory's window
+#                                    (http://localhost:8095). No root, no manual steps.
+#   demo/start_demo.sh --network-attack --desktop   same with the Tkinter clients: server
+#                                    on PORT, proxy on PORT+1. Add --wireshark for a live
+#                                    capture. --proxy-port N changes the browser proxy port.
 #   demo/start_demo.sh --presentation  Presentation mode in every GUI window
 #                                    (~25% larger text, for a projector); you can
 #                                    also toggle it in any window with Cmd+Shift+P
@@ -38,6 +41,8 @@ LAB=0
 SIMPLE=0
 WIRESHARK=0
 NETATTACK=0
+DESKTOP=0
+PROXY_PORT_WEB=8443
 MALLORY_PORT=8095
 PRESENTATION=0
 WEB_PORT=""
@@ -49,11 +54,13 @@ while [ $# -gt 0 ]; do
         --no-lab) LAB=0; shift ;;
         --simple) SIMPLE=1; shift ;;
         --network-attack) NETATTACK=1; shift ;;
+        --desktop) DESKTOP=1; shift ;;
+        --proxy-port) PROXY_PORT_WEB="${2:-}"; shift 2 ;;
         --mallory-port) MALLORY_PORT="${2:-}"; shift 2 ;;
         --wireshark) WIRESHARK=1; shift ;;
         --presentation) PRESENTATION=1; shift ;;
         --port)   PORT="${2:-}"; shift 2 ;;
-        -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
     esac
 done
@@ -134,7 +141,7 @@ eval "$("$PY" demo/layout.py $SCREEN $LAYOUT_FLAGS)"
 echo "    screen $SCREEN -> windows tiled$( [ "$OVERLAP" = 1 ] && echo " (screen too small to tile without overlap: click a title bar to raise a window)" )"
 
 MODE="normal mode"
-if [ "$NETATTACK" = 1 ]; then
+if [ "$NETATTACK" = 1 ] && [ "$DESKTOP" = 1 ]; then
     PROXY_PORT=$((PORT + 1))
     case "$MALLORY_PORT" in ''|*[!0-9]*) echo "--mallory-port needs a number" >&2; exit 2 ;; esac
     mkdir -p "$ROOT/logs"
@@ -214,6 +221,74 @@ start_wireshark() {
     sleep 4
     echo "    Wireshark is capturing loopback port $PORT (filter: tls)"
 }
+
+if [ "$NETATTACK" = 1 ]; then
+    case "$PROXY_PORT_WEB" in ''|*[!0-9]*) echo "--proxy-port needs a number" >&2; exit 2 ;; esac
+    case "$MALLORY_PORT" in ''|*[!0-9]*) echo "--mallory-port needs a number" >&2; exit 2 ;; esac
+    GW_PORT=$((PROXY_PORT_WEB + 1))
+    CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    [ -f "$ROOT/web/static/index.html" ] || { echo "Build the browser client: cd web/frontend && npm ci && npm run build" >&2; exit 1; }
+    [ -x "$CHROME" ] || { echo "Google Chrome is needed for the browser demo (or use --network-attack --desktop)" >&2; exit 1; }
+    mkdir -p "$ROOT/logs" "$ROOT/data/network_attack"
+    [ "$WIRESHARK" = 1 ] && { echo "Starting the Wireshark capture (on the proxy port)"; PORT_BACKUP=$PORT; PORT=$PROXY_PORT_WEB; start_wireshark; PORT=$PORT_BACKUP; }
+    echo "[3/5] Local HTTPS certificate"
+    read -r CERT_MODE SPKI <<< "$("$PY" -m attack_lab.netproxy.webcert --dir "$ROOT/data/network_attack")" || exit 1
+    if [ "$CERT_MODE" = mkcert ]; then
+        echo "    mkcert certificate (your browser trusts it)"
+    else
+        echo "    self-signed certificate; the demo Chrome windows accept exactly this one key"
+        echo "    (own throwaway profiles, nothing is added to your system trust store)"
+    fi
+    echo "[4/5] Starting the HTTPS/WSS gateway (127.0.0.1:$GW_PORT) behind Mallory's proxy (https://localhost:$PROXY_PORT_WEB)"
+    SECURECHAT_ALLOWED_ORIGINS="https://localhost:$PROXY_PORT_WEB,https://127.0.0.1:$PROXY_PORT_WEB" \
+        nohup "$PY" -u -m uvicorn --factory web.app:create_app --host 127.0.0.1 --port "$GW_PORT" \
+        --ssl-certfile "$ROOT/data/network_attack/web.crt" --ssl-keyfile "$ROOT/data/network_attack/web.key" \
+        --no-proxy-headers --ws-max-size 65536 --workers 1 > "$ROOT/logs/demo_gateway.log" 2>&1 &
+    nohup "$PY" -u -m attack_lab.netproxy --upstream "127.0.0.1:$GW_PORT" --listen-port "$PROXY_PORT_WEB" \
+        --ui-port "$MALLORY_PORT" --identify > "$ROOT/logs/demo_netproxy.log" 2>&1 &
+    "$PY" - "$GW_PORT" "$MALLORY_PORT" "$ROOT/data/network_attack/web.crt" <<'PYEOF' || { echo "Gateway or Mallory's window did not start; see logs/demo_gateway.log and logs/demo_netproxy.log" >&2; exit 1; }
+import ssl, sys, time, urllib.request
+gw, ui, cert = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+ctx = ssl.create_default_context(cafile=cert) if cert else None
+deadline, ok = time.time() + 40, False
+while time.time() < deadline and not ok:
+    try:
+        urllib.request.urlopen(f"http://localhost:{ui}/", timeout=1).read()
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+        urllib.request.urlopen(f"https://127.0.0.1:{gw}/", timeout=2, context=ctx).read()
+        ok = True
+    except OSError:
+        time.sleep(0.4)
+sys.exit(0 if ok else 1)
+PYEOF
+    echo "[5/5] Opening Alice and Bob (Chrome, through the proxy) and Mallory's window"
+    PROFILES="$(mktemp -d "${TMPDIR:-/tmp}/cns-netattack.XXXXXX")"
+    echo "$PROFILES" > "$ROOT/logs/demo_netattack_profiles"
+    read -r SX SY SW SH <<< "$SCREEN"
+    COLW=$(( (SW - 4 * 8) / 3 )); COLH=$(( SH - 16 ))
+    SPKIFLAG=""; [ "$CERT_MODE" = selfsigned ] && SPKIFLAG="--ignore-certificate-errors-spki-list=$SPKI"
+    open_chrome() {  # label  url  column  [extra flag]
+        CNS_DEMO_LABEL="$1" nohup "$CHROME" --user-data-dir="$PROFILES/$1" --no-first-run --no-default-browser-check \
+            --disable-features=WebRtcHideLocalIpsWithMdns --disable-search-engine-choice-screen \
+            --window-position=$(( SX + 8 + $3 * (COLW + 8) )),$(( SY + 8 )) --window-size=$COLW,$COLH \
+            $4 --new-window "$2" >/dev/null 2>&1 &
+    }
+    open_chrome Alice "https://localhost:$PROXY_PORT_WEB/" 0 "$SPKIFLAG"
+    open_chrome Bob "https://localhost:$PROXY_PORT_WEB/" 1 "$SPKIFLAG"
+    open_chrome Mallory "http://localhost:$MALLORY_PORT/" 2 ""
+    cat <<MSG
+
+=== Network attacker demo (browser) is running ===
+ Gateway        : https://127.0.0.1:$GW_PORT (the real web gateway, logs/demo_gateway.log)
+ Mallory proxy  : https://localhost:$PROXY_PORT_WEB  - Alice and Bob open THIS URL
+ Mallory window : http://localhost:$MALLORY_PORT  (records, Intercept, results, Wireshark)
+ Alice / Bob    : two Chrome windows. Create an identity in each, naming the OTHER as Peer.
+                  Photos and voice calls work too (allow the microphone for calls).
+ Script         : attack_lab/README.md, "Network attacker demo".
+ When finished  : demo/stop_demo.sh   (also closes the demo Chrome windows)
+MSG
+    exit 0
+fi
 
 if [ "$SIMPLE" = 1 ]; then
     # Only the two chat windows. Server runs quietly in the background; its
