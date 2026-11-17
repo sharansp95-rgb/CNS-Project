@@ -227,12 +227,14 @@ fails to launch a profile on the development Mac; see the deployment report.
 
 ## Live deployment
 
-Phase 5A prepares deployment; no account, remote repository, push or live deployment
-has been created. Follow [docs/DEPLOY.md](docs/DEPLOY.md) to create your private GitHub
-repository, Neon main/test branch and two separate Render Free Python services.
+Both services are provisioned on Render Free in Singapore, with main storage on
+Neon Free Postgres in the same region. Proxy trust is still under review; the live
+browser verification is pending. Deployment instructions remain in
+[docs/DEPLOY.md](docs/DEPLOY.md).
 
-- Main site: **https://<your-main-service>.onrender.com**
-- Attack Lab: **https://<your-lab-service>.onrender.com** (separate origin and access code)
+- Main site: [team15-securechat.onrender.com](https://team15-securechat.onrender.com)
+- Attack Lab: [team15-attack-lab.onrender.com](https://team15-attack-lab.onrender.com)
+  (separate origin and access code)
 
 `render.yaml` uses the committed frontend builds and one Python process/instance per
 service. Main data lives in Neon; the lab uses ephemeral SQLite. Production requires
@@ -247,7 +249,7 @@ Free services sleep after 15 minutes idle, lose local files on restart and share
 750-hour/month workspace budget. Open both URLs about two minutes before a demo and
 close them afterward. No keep-alive pinger was added. The in-memory roster permits
 **one instance/worker only**. Tkinter remains a local TCP/TLS demo; Render exposes
-only the browser HTTP/WS gateway. Live smoke testing is Phase 5B, after you deploy.
+only the browser HTTP/WS gateway. Live smoke testing remains pending proxy review.
 
 Browser reconnect discards old session keys and bearer tokens, retries the transport,
 and asks for login plus a fresh signed handshake. It retains no password for silent
