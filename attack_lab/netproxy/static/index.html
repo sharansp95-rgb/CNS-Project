@@ -39,6 +39,7 @@ td.hex{font-family:ui-monospace,Menlo,monospace;color:var(--mut)}tr.pending{back
   <thead><tr><th>#</th><th>Decision</th><th>Direction</th><th>Type</th><th>Size</th><th>First bytes (header | payload)</th><th>As text</th><th>Status</th></tr></thead>
   <tbody id="rows"></tbody></table></div></section>
  <div><section><h2>Real outcomes (from the victims' TLS stacks)</h2><div class="feed scroll" id="feed" aria-live="polite"></div></section>
+ <section id="lansec" style="margin-top:12px;display:none"><h2>Phone on the LAN</h2><div class="feed" id="lan"></div></section>
  <section style="margin-top:12px"><h2>Connections</h2><div id="conns"></div></section></div>
 </main>
 <script>
@@ -57,6 +58,12 @@ async function poll(){try{const s=await (await fetch("/api/state")).json();
   return `<tr class="${p?"pending":""}"><td>${r.id}</td><td>${btns(r,p)}</td><td>${esc(r.arrow)}</td><td>${esc(r.kind)}</td><td>${r.size} B</td><td class="hex">${esc(r.hex)}</td><td class="hex">${esc(r.ascii)}</td><td class="st-${r.status}">${r.status}${r.note?" — "+esc(r.note):""}</td></tr>`}).join("");
  if(html!==last){last=html;$("rows").innerHTML=html}
  $("feed").innerHTML=s.feed.slice().reverse().map(f=>`<div class="${f.level}">[${f.t.toFixed(1)}s] ${esc(f.text)}</div>`).join("");
+ const L=s.lan;$("lansec").style.display=L?"":"none";
+ if(L){const seen=L.peers.length||L.cert_hits.length;
+  $("lan").innerHTML=`<div>Phone URL: <b>${esc(L.url)}</b></div><div>Certificate page: <b>${esc(L.cert_url||"")}</b></div>`+
+   (seen?`<div class="info">Devices seen: ${esc(L.peers.concat(L.cert_hits.filter(x=>!L.peers.includes(x))).join(", "))}</div>`
+    :L.unreachable_hint?`<div class="warn">No phone has reached this Mac. Wi-Fi client isolation? Use the iPhone hotspot: connect the Mac to it and restart with --lan. macOS firewall? Allow Python for incoming connections.</div>`
+    :`<div class="info">Waiting for the phone to connect…</div>`)}
  $("conns").innerHTML=s.conns.map(c=>`<div class="conn">#${c.id} <b>${esc(c.label)}</b> (:${c.port}) — ${c.state}${c.closed_by?" (closed by "+c.closed_by+")":""}</div>`).join("")||'<div class="conn">no connections yet</div>';
 }catch(e){$("where").textContent="proxy not reachable"}}
 $("icpt").onclick=()=>api("/api/intercept",{on:$("icpt").getAttribute("aria-pressed")!=="true"}).then(poll);

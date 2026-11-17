@@ -79,10 +79,21 @@ stop_demo_processes() {
     # Demo Chrome windows are identified by their throwaway profile directory, never by name.
     browsers="$(pgrep -f 'user-data-dir=[^ ]*cns-netattack' 2>/dev/null)"
     all="$(printf '%s\n%s\n%s\n%s\n%s\n' "$servers" "$guis" "$proxies" "$gateways" "$browsers" | grep -E '^[0-9]+$' | sort -un | tr '\n' ' ')"
+    # A proxy started with --lan also listens on the Mac's LAN address: remember it to confirm it closed.
+    local lanpids lanip=""
+    lanpids="$(our_pids ' -m attack_lab\.netproxy .*--lan-ip')"
+    [ -n "$lanpids" ] && lanip="$(ps -p "$(echo "$lanpids" | head -1)" -o command= | sed -n 's/.*--lan-ip \([0-9.]*\).*/\1/p')"
     if [ -n "$all" ]; then
         echo "    stopping our process(es): $all"
         # shellcheck disable=SC2086
         stop_pids $all
+        if [ -n "$lanip" ]; then
+            if lsof -nP -iTCP@"$lanip" -sTCP:LISTEN 2>/dev/null | grep -q .; then
+                echo "    WARNING: something still listens on the LAN address $lanip (see: lsof -nP -iTCP@$lanip -sTCP:LISTEN)"
+            else
+                echo "    LAN listeners on $lanip closed"
+            fi
+        fi
     else
         echo "    no leftover demo processes of ours"
     fi

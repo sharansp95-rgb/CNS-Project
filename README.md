@@ -188,7 +188,9 @@ about a minute to become usable. No TURN secret is exposed to the browser or lab
 `demo/start_demo.sh --network-attack` starts the real web gateway over HTTPS/WSS, a
 TLS-blind man-in-the-middle proxy (`attack_lab/netproxy`, no TLS key), Mallory's window
 (`http://localhost:8095`) and two Chrome windows (Alice, Bob) on the proxied URL, with an
-automatically generated local certificate. `--desktop` runs it with the Tkinter clients. Mallory sees only ciphertext records and can Forward, Alter, Drop, Replay or
+automatically generated local certificate. `--desktop` runs it with the Tkinter clients; `--lan` lets
+a phone on the same Wi-Fi (or the Mac on the phone's hotspot) be a victim, with a QR code and a page
+for installing the demo CA. Mallory sees only ciphertext records and can Forward, Alter, Drop, Replay or
 Delay them; the failures that follow (`bad record mac`, stalls) are produced by the
 real TLS stacks. Step-by-step script, browser (HTTPS/WSS) use and limits:
 [attack_lab/README.md](attack_lab/README.md#network-attacker-demo-fake-wi-fi).
@@ -239,7 +241,7 @@ keyboard focus. ESLint’s isolated pinned parser uses TypeScript 6; the applica
 still builds/types with pinned TypeScript 7. The Starlette test adapter uses httpx2
 and no longer emits the deprecated-httpx warning.
 
-Current local results: **480 pytest passed / 2 opt-in Postgres skips** (16 are the
+Current local results: **488 pytest passed / 2 opt-in Postgres skips** (24 are the
 network-attacker tests), **85 disposable
 Neon tests passed**, **83 Vitest passed**, **43 main browser tests passed / 7 skips**
 and **26 lab browser tests passed / 4 skips** (Chromium + WebKit). Live results:

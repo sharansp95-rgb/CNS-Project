@@ -421,3 +421,264 @@ def test_web_certificate_is_generated_once_with_localhost_san_and_stable_spki(tm
         serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
     )
     assert webcert.spki_hash(first) == base64.b64encode(hashlib.sha256(der).digest()).decode()
+
+
+# ---------------------------------------------------------------------------------------------
+# Phone as a victim (--lan)
+# ---------------------------------------------------------------------------------------------
+
+
+def test_lan_address_must_be_private_and_detection_honours_override():
+    from attack_lab.netproxy import lan
+
+    for good in ("192.168.1.20", "10.75.1.231", "172.20.10.2"):  # Wi-Fi, campus, iPhone hotspot
+        assert lan.check_private(good) == good
+        assert lan.detect(good) == (good, "(given)")
+    for bad in ("8.8.8.8", "0.0.0.0", "127.0.0.1", "169.254.1.1", "::1", "not-an-ip", "172.32.0.1"):
+        with pytest.raises(lan.LanError):
+            lan.check_private(bad)
+    with pytest.raises(ValueError):
+        NetProxy(("127.0.0.1", 0), ("127.0.0.1", 1), lan_ip="8.8.8.8")
+    with pytest.raises(ValueError):
+        NetProxy(("0.0.0.0", 0), ("127.0.0.1", 1), lan_ip="192.168.1.5")
+
+
+def test_demo_ca_signs_a_leaf_for_the_lan_ip_and_survives_a_network_change(tmp_path):
+    import ssl
+
+    from attack_lab.netproxy import webcert
+
+    if webcert.mkcert_ready():
+        pytest.skip("mkcert present: the CA is mkcert's, covered by mkcert itself")
+    _, cert, key = webcert.generate(tmp_path, ["192.168.1.20"])
+    ca = (tmp_path / "ca.crt").read_bytes()
+    assert (tmp_path / "ca.key").stat().st_mode & 0o077 == 0
+    leaf = x509_load(cert)
+    assert leaf.issuer.rfc4514_string() != "CN=localhost"
+    ctx = ssl.create_default_context(cadata=ca.decode())
+    # The leaf validates against the CA for the LAN IP (phones check the SAN, not the name).
+    from cryptography import x509
+
+    sans = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    assert {str(i) for i in sans.get_values_for_type(x509.IPAddress)} >= {
+        "127.0.0.1",
+        "::1",
+        "192.168.1.20",
+    }
+    assert ctx.verify_mode == ssl.CERT_REQUIRED
+    ca_cert = x509_load(tmp_path / "ca.crt")
+    ca_cert.public_key().verify(
+        leaf.signature,
+        leaf.tbs_certificate_bytes,
+        __import__("cryptography").hazmat.primitives.asymmetric.ec.ECDSA(
+            leaf.signature_hash_algorithm
+        ),
+    )
+    assert (leaf.not_valid_after_utc - leaf.not_valid_before_utc).days <= 398
+    # New Wi-Fi, new IP: the leaf is reissued but the CA (already installed on the phone) is kept.
+    before = (tmp_path / "ca.crt").read_bytes()
+    webcert.generate(tmp_path, ["172.20.10.2"])
+    assert (tmp_path / "ca.crt").read_bytes() == before
+    assert "172.20.10.2" in {
+        str(i)
+        for i in x509_load(cert)
+        .extensions.get_extension_for_class(x509.SubjectAlternativeName)
+        .value.get_values_for_type(x509.IPAddress)
+    }
+
+
+def x509_load(path):
+    from cryptography import x509
+
+    return x509.load_pem_x509_certificate(Path(path).read_bytes())
+
+
+def test_certificate_page_serves_only_the_public_ca_to_private_clients(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from attack_lab.netproxy import webcert
+    from attack_lab.netproxy.certpage import CA_FILENAME, ca_info, create_app
+
+    webcert.generate(tmp_path, ["192.168.1.20"])
+    proxy = NetProxy(("127.0.0.1", 0), ("127.0.0.1", 1), lan_ip="192.168.1.20")
+    app = create_app(proxy, tmp_path / "ca.crt", 8443)
+    phone = TestClient(app, client=("192.168.1.50", 40000), base_url="http://192.168.1.20:8081")
+    page = phone.get("/")
+    assert page.status_code == 200
+    for text in (
+        "Certificate Trust Settings",
+        "Install a certificate",
+        "https://192.168.1.20:8443",
+    ):
+        assert text in page.text
+    der, subject, fingerprint = ca_info((tmp_path / "ca.crt").read_bytes())
+    download = phone.get("/" + CA_FILENAME)
+    assert (
+        download.content == der and download.headers["content-type"] == "application/x-x509-ca-cert"
+    )
+    assert fingerprint in page.text
+    # Nothing else is reachable: no keys, no traversal, no directory listing.
+    for path in ("/ca.key", "/web.key", "/web.crt", "/../web.key", "/data", "/api/state"):
+        assert phone.get(path).status_code == 404
+    assert b"PRIVATE KEY" not in download.content + page.content
+    # The first contact from the phone is recorded (this is how reachability is proven).
+    assert "192.168.1.50" in proxy.snapshot()["lan"]["cert_hits"]
+    internet = TestClient(app, client=("8.8.8.8", 1234))
+    assert internet.get("/").status_code == 403
+
+
+def test_proxy_lan_state_hint_and_peers():
+    async def scenario():
+        proxy = NetProxy(
+            ("127.0.0.1", 0), ("127.0.0.1", 1), lan_ip="192.168.1.20", lan_hint_seconds=0.1
+        )
+        assert proxy.is_remote("192.168.1.50")
+        assert not proxy.is_remote("127.0.0.1") and not proxy.is_remote("192.168.1.20")
+        await proxy._lan_watch()
+        return proxy
+
+    import asyncio
+
+    proxy = asyncio.run(scenario())
+    snap = proxy.snapshot()["lan"]
+    assert snap["unreachable_hint"] and snap["url"].startswith("https://192.168.1.20:")
+    assert any(
+        "Wi-Fi client isolation" in f["text"] and "Hotspot" in f["text"]
+        for f in proxy.snapshot()["feed"]
+    )
+    proxy.note_lan_peer("192.168.1.50")
+    assert not proxy.snapshot()["lan"]["unreachable_hint"]
+    assert NetProxy(("127.0.0.1", 0), ("127.0.0.1", 1)).snapshot()["lan"] is None
+
+
+def _real_lan_ip():
+    from attack_lab.netproxy import lan
+
+    try:
+        return lan.detect()[0]
+    except lan.LanError:
+        return None
+
+
+@pytest.mark.skipif(_real_lan_ip() is None, reason="this machine has no private LAN address")
+def test_proxy_really_listens_on_the_lan_address_and_relays_bytes():
+    import socket
+
+    ip = _real_lan_ip()
+    echo = socket.socket()
+    echo.bind(("127.0.0.1", 0))
+    echo.listen()
+
+    def serve():
+        conn, _ = echo.accept()
+        conn.sendall(conn.recv(100))
+        conn.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    proxy = NetProxy(("127.0.0.1", 0), ("127.0.0.1", echo.getsockname()[1]), lan_ip=ip)
+    runner = ProxyRunner(proxy)
+    port = runner.start()
+    try:
+        with socket.create_connection((ip, port), timeout=5) as s:  # the address a phone would use
+            s.sendall(b"hello over the LAN address")
+            assert s.recv(100) == b"hello over the LAN address"
+        # Loopback also works; any other address on this machine does not.
+        with socket.create_connection(("127.0.0.1", port), timeout=5):
+            pass
+        listening = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"], capture_output=True, text=True
+        ).stdout
+        assert f"{ip}:{port}" in listening and "*:" not in listening
+    finally:
+        runner.stop()
+        echo.close()
+
+
+def test_qr_codes_are_structurally_valid_and_deterministic():
+    from attack_lab.netproxy import qr
+
+    m = qr.encode("https://172.20.10.2:8443")
+    n = len(m)
+    assert n == 25 and m == qr.encode("https://172.20.10.2:8443")
+    for r0, c0 in ((0, 0), (0, n - 7), (n - 7, 0)):  # finder patterns
+        assert all(m[r0][c0 + i] and m[r0 + 6][c0 + i] and m[r0 + i][c0] for i in range(7))
+        assert not m[r0 + 1][c0 + 1] and m[r0 + 3][c0 + 3]
+    assert all(m[6][i] == (i % 2 == 0) for i in range(8, n - 8))  # timing pattern
+    assert m[n - 8][8]  # dark module
+    assert len(qr.encode("x" * 70)) > n
+    with pytest.raises(ValueError):
+        qr.encode("x" * 200)
+    out = qr.render_terminal("https://192.168.1.20:8443")
+    assert "\x1b[" in out and out.count("\n") >= 10
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or shutil.which("swift") is None, reason="needs CoreImage"
+)
+def test_qr_codes_decode_with_a_real_reader(tmp_path):
+    """Decode with Apple's CoreImage QR detector: proves the phone camera will read it."""
+    import struct
+    import zlib
+
+    from attack_lab.netproxy import qr
+
+    urls = ["https://172.20.10.2:8443", "http://192.168.100.100:8081/", "https://10.75.1.231:8443"]
+    images = []
+    for i, url in enumerate(urls):
+        m, scale, quiet = qr.encode(url), 10, 4
+        n = (len(m) + 2 * quiet) * scale
+        rows = []
+        for y in range(n):
+            row = bytearray([0])
+            for x in range(n):
+                r, c = y // scale - quiet, x // scale - quiet
+                dark = 0 <= r < len(m) and 0 <= c < len(m) and m[r][c]
+                row.append(0 if dark else 255)
+            rows.append(bytes(row))
+
+        def chunk(tag, data):
+            body = tag + data
+            return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+        png = (
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", n, n, 8, 0, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"".join(rows)))
+            + chunk(b"IEND", b"")
+        )
+        path = tmp_path / f"q{i}.png"
+        path.write_bytes(png)
+        images.append(str(path))
+    script = tmp_path / "dec.swift"
+    script.write_text(
+        "import CoreImage\nimport Foundation\n"
+        "for p in CommandLine.arguments.dropFirst() {\n"
+        "  let d = CIDetector(ofType: CIDetectorTypeQRCode, context: nil, options: [CIDetectorAccuracy: CIDetectorAccuracyHigh])!\n"
+        "  let f = d.features(in: CIImage(contentsOf: URL(fileURLWithPath: p))!).compactMap { ($0 as? CIQRCodeFeature)?.messageString }\n"
+        '  print(f.first ?? "NONE")\n}\n'
+    )
+    out = subprocess.run(
+        ["swift", str(script), *images], capture_output=True, text=True, timeout=180
+    ).stdout.split()
+    assert out == urls
+
+
+def test_launcher_lan_flags_are_documented_and_validated():
+    root = Path(__file__).parents[1]
+    helptext = subprocess.run(
+        ["bash", "demo/start_demo.sh", "--help"], cwd=root, capture_output=True, text=True
+    ).stdout
+    assert "--lan" in helptext and "8081" in helptext
+    bad = subprocess.run(
+        ["bash", "demo/start_demo.sh", "--network-attack", "--desktop", "--lan"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    assert bad.returncode == 2 and "browser demo only" in bad.stderr
+    for script in ("demo/start_demo.sh", "demo/stop_demo.sh", "demo/_demo_lib.sh"):
+        assert subprocess.run(["bash", "-n", script], cwd=root).returncode == 0
+    lib = (root / "demo/_demo_lib.sh").read_text()
+    assert (
+        "--lan-ip" in lib and "LAN listeners" in lib
+    )  # stop_demo closes and verifies the LAN listener

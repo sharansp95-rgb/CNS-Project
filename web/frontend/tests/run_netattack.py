@@ -17,7 +17,14 @@ with tempfile.TemporaryDirectory(prefix="cns-netattack-e2e-") as root:
     base = int(os.environ.get("CNS_NETATTACK_BASE", "8861"))
     os.environ["TSA_KEY_PATH"] = str(Path(root) / "tsa.key")
     os.environ["DATABASE_URL"] = "sqlite:///" + str(Path(root) / "chat.db")
-    os.environ["SECURECHAT_ALLOWED_ORIGINS"] = f"https://localhost:{base}"
+    from attack_lab.netproxy import lan
+
+    try:  # phone-as-victim rig, when this machine has a private LAN address
+        lan_ip = lan.detect()[0]
+    except lan.LanError:
+        lan_ip = None
+    origins = [f"https://localhost:{base}"] + ([f"https://{lan_ip}:{base}"] if lan_ip else [])
+    os.environ["SECURECHAT_ALLOWED_ORIGINS"] = ",".join(origins)
     os.environ["CALL_STUN_URLS"] = ""  # host candidates only: offline-safe calls
     os.environ["LOCAL_STORAGE_DIR"] = str(Path(root) / "attachments")
     import uvicorn
@@ -27,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix="cns-netattack-e2e-") as root:
     from attack_lab.netproxy.webcert import generate
     from web.app import create_app
 
-    _, cert, key = generate(Path(root) / "tls")
+    _, cert, key = generate(Path(root) / "tls", [lan_ip] if lan_ip else [])
     gateway = uvicorn.Server(
         uvicorn.Config(
             create_app(),
@@ -45,6 +52,7 @@ with tempfile.TemporaryDirectory(prefix="cns-netattack-e2e-") as root:
         ("127.0.0.1", base + 1),
         stall_seconds=float(os.environ.get("CNS_STALL_SECONDS", "2")),
         identify=False,
+        lan_ip=lan_ip,
     )
     runner = ProxyRunner(proxy)
     runner.start()

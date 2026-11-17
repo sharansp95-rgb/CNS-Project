@@ -1,4 +1,10 @@
-import { test, expect, type Page, type BrowserContext } from "@playwright/test";
+import {
+  test,
+  expect,
+  devices,
+  type Page,
+  type BrowserContext,
+} from "@playwright/test";
 import { fileURLToPath } from "node:url";
 // The victims' URL is Mallory's proxy; the real HTTPS/WSS gateway sits behind it.
 const VICTIM = "https://localhost:8861";
@@ -8,6 +14,19 @@ const runId = Date.now().toString(36);
 const fx = (n: string) =>
   fileURLToPath(new URL("../e2e/fixtures/" + n, import.meta.url));
 test.describe.configure({ mode: "serial" });
+// Mallory's state is shared by all tests: start each one with Intercept off and auto-resume on.
+test.beforeEach(async ({ request }) => {
+  const headers = { origin: MALLORY };
+  await request.post(MALLORY + "/api/intercept", {
+    data: { on: false },
+    headers,
+  });
+  await request.post(MALLORY + "/api/auto-resume", {
+    data: { on: true },
+    headers,
+  });
+  await request.post(MALLORY + "/api/clear", { headers });
+});
 
 let counter = 0;
 async function pair(browser: import("@playwright/test").Browser) {
@@ -198,5 +217,50 @@ test("the browser's own network stack reports the TLS failure for an altered HTT
     expect(errors.join(" ")).toMatch(/net::ERR_/);
   } finally {
     await close();
+  }
+});
+
+test("a phone-sized browser reaches the proxy on the LAN address and chats with a desktop browser", async ({
+  browser,
+  request,
+}) => {
+  const state = await (await request.get(MALLORY + "/api/state")).json();
+  test.skip(!state.lan, "this machine has no private LAN address");
+  const phoneUrl: string = state.lan.url; // https://<lan ip>:8861, what the QR code encodes
+  const tag = `ph${runId}`;
+  const phone = await browser.newContext({
+    ...devices["iPhone 13"],
+    defaultBrowserType: undefined,
+    permissions: ["microphone"],
+  });
+  const desktop = await browser.newContext();
+  try {
+    const [pp, dp] = [await phone.newPage(), await desktop.newPage()];
+    for (const [page, url, me, peer] of [
+      [pp, phoneUrl, "phone", "desk"],
+      [dp, VICTIM, "desk", "phone"],
+    ] as const) {
+      await page.goto(url + "/");
+      await page.getByLabel("Username", { exact: true }).fill(`${tag}_${me}`);
+      await page.getByLabel("Password", { exact: true }).fill(password);
+      await page
+        .getByLabel("Peer username", { exact: true })
+        .fill(`${tag}_${peer}`);
+      await page.getByRole("button", { name: "Create an identity" }).click();
+    }
+    await expect(pp.getByLabel("Message", { exact: true })).toBeEnabled();
+    await expect(dp.getByLabel("Message", { exact: true })).toBeEnabled();
+    await send(pp, "hello from the phone");
+    await expect(dp.getByText("hello from the phone")).toBeVisible();
+    await send(dp, "hello from the desktop");
+    await expect(pp.getByText("hello from the desktop")).toBeVisible();
+    // The phone's traffic passed through Mallory on the LAN address, and is unreadable there.
+    const pcap = Buffer.from(
+      await (await request.get(MALLORY + "/api/capture.pcap")).body(),
+    );
+    expect(pcap.includes(Buffer.from("hello from the phone"))).toBe(false);
+  } finally {
+    await phone.close();
+    await desktop.close();
   }
 });

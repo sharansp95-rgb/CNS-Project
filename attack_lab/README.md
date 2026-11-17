@@ -135,6 +135,118 @@ does not give availability), and he can see sizes and timing (traffic analysis).
 cannot read or silently change anything. A malicious **server** is a different
 problem, handled by the end-to-end layer (Attack Lab website).
 
+### Phone as a victim (`--lan`)
+
+```bash
+demo/start_demo.sh --network-attack --lan            # auto-detect the Mac's LAN address
+demo/start_demo.sh --network-attack --lan-ip 172.20.10.2   # or name it yourself
+demo/stop_demo.sh                                    # closes the LAN listener too and says so
+```
+
+What it does, and what stays private:
+
+| Item | Where it listens |
+|---|---|
+| Mallory's proxy | `127.0.0.1:8443` **and** `<LAN IP>:8443` (that one address, never `0.0.0.0`) |
+| Certificate page for the phone (plain HTTP) | `<LAN IP>:8081`: only the instructions and the *public* CA certificate, private-network clients only |
+| Real web gateway | `127.0.0.1:8444` only, behind the proxy |
+| Mallory's control page | `127.0.0.1:8095` only |
+
+The LAN address is found from the default route (`route get default` + `ipconfig getifaddr`), so it
+works on ordinary Wi-Fi (`192.168.x.x` or `10.x.x.x`) and on an iPhone Personal Hotspot (the Mac gets
+`172.20.10.x`). It is printed with its interface name. Only RFC 1918 private addresses are accepted;
+anything else (including `0.0.0.0`) is refused. The terminal prints the phone URL and a QR code, the
+certificate-page URL with its own QR code, and the CA's SHA-256 fingerprint (the page on the phone shows
+the same value: compare them).
+
+**Certificate.** With `--lan` the launcher builds a small demo CA (`data/network_attack/ca.crt`, key
+`ca.key` mode 0600, git-ignored, never served) and signs the server certificate with the LAN IP,
+`localhost`, `127.0.0.1` and `::1` in its SAN (EKU serverAuth, 90 days, so phones accept it). When you
+join another network only the server certificate is reissued: **a phone that installed the CA once keeps
+working**. If `mkcert` is installed and set up, its certificate is used and its public root is offered
+instead.
+
+#### Installing the demo CA on the phone (reliable path)
+
+Open `http://<LAN IP>:8081/` on the phone (scan the second QR code); the page repeats these steps.
+
+*iPhone (Safari)*
+1. Tap **Download the demo CA certificate**, then **Allow** ("This website is trying to download a
+   configuration profile").
+2. **Settings** → **Profile Downloaded** (or **General → VPN & Device Management**) → *Secure Chat
+   Network-Attack Demo CA* → **Install** → passcode → **Install** → **Install**.
+3. **Settings → General → About → Certificate Trust Settings** → switch **on** full trust for
+   *Secure Chat Network-Attack Demo CA* → **Continue**. (Without this step the profile is installed but
+   not trusted for websites.)
+4. Open `https://<LAN IP>:8443` in Safari: no warning.
+5. Afterwards: **Settings → General → VPN & Device Management** → the profile → **Remove Profile**.
+
+*Android (Chrome)*
+1. Tap the download button (file `cns-demo-ca.crt`).
+2. **Settings → Security & privacy → More security & privacy → Encryption & credentials → Install a
+   certificate → CA certificate** (menu names vary by vendor: search Settings for "CA certificate"),
+   **Install anyway**, pick the file. A screen lock is required.
+3. Open `https://<LAN IP>:8443` in Chrome: no warning.
+4. Afterwards: **Encryption & credentials → User credentials** → remove it.
+
+#### The simpler path: just accept the warning
+
+Open `https://<LAN IP>:8443` and accept the self-signed warning once (iPhone: *Show Details → visit this
+website*; Android Chrome: *Advanced → Proceed*). **Whether WSS keeps working after only accepting could not
+be tested here, because there is no phone in this environment.** What was verified: the page and the WebSocket
+work over the LAN address when the certificate is trusted (Python `ssl` with the demo CA, and Chromium on a
+phone-sized viewport with certificate errors ignored, which is *not* the same as a user pressing "proceed"),
+and a client that does not trust the CA is refused. What to expect: Chrome stores the exception per host and
+usually lets the WebSocket through; Safari on iPhone is known to refuse WebSocket connections to a host
+whose certificate it does not trust even after you accepted the page warning, and microphone/crypto APIs
+may need a trusted certificate. So: **on an iPhone install the CA; on Android try accepting first, and
+install the CA if the chat stays on "Connection failed".**
+
+#### If the phone cannot reach the Mac
+
+Mallory's window has a **Phone on the LAN** box (URL, certificate page, devices seen). A device counts as
+reached when it opens the certificate page or connects to the proxy. If nothing has reached the Mac after
+60 s the box and the feed show a warning. Typical causes:
+
+1. **Wi-Fi client isolation** (guest, hotel, campus or "AP isolation" Wi-Fi): devices on the same Wi-Fi are
+   not allowed to talk to each other, so the phone can never reach the Mac. Use the fallback: turn on the
+   iPhone **Personal Hotspot**, join it with the Mac (it gets `172.20.10.x`), run the command again and open the
+   new URL on the phone (the iPhone itself reaches the Mac on that network). Mobile data on the phone does *not*
+   work: it is a different network.
+2. **macOS firewall.** The launcher reads the firewall state (read-only) and prints this when it is on. When
+   macOS asks *"Do you want the application “python” to accept incoming network connections?"* click **Allow**.
+   If you dismissed it: **System Settings → Network → Firewall → Options → “+”**, add the Python binary printed
+   by the launcher (the real path behind `.venv/bin/python`), set it to **Allow incoming connections**, and make sure
+   **Block all incoming connections** is off. As a last resort turn the firewall off for the demo and back on afterwards.
+3. The phone is on another network than the Mac, a VPN is active on the Mac (the detected interface is
+   printed), or the Mac's address changed: restart with `--lan`.
+
+#### Phone review script
+
+1. Mac and phone on the same Wi-Fi (or the Mac on the phone's hotspot). Run
+   `demo/start_demo.sh --network-attack --lan`. Say: "Mallory is the Wi-Fi; the phone is a real victim."
+2. Phone: scan the second QR code, install the CA (steps above, one time), then scan the first QR code. The
+   chat page opens with no warning. Mallory's window shows *Phone on the LAN: devices seen* and the connection
+   as **Phone 192.168.x.x**.
+3. Phone: choose *Create an identity*, name the Mac's Alice window as Peer (and the reverse in Alice's window).
+   Send a message each way. Mallory's table fills with unreadable records from both devices.
+4. Mallory: **Intercept ON**, send from the phone, press **Alter**. The phone shows *Reconnecting… Session keys
+   discarded. Login will be required.* and the feed shows the server closing the connection (the real TLS failure).
+   Repeat with **Replay** and **Drop** (silent loss, then break on the next message).
+5. **Delay** 3 s: the phone's message arrives late but intact.
+6. Take a photo from the phone's gallery and send it; open **Download .pcap** or **Open in Wireshark**: only
+   TLS records, no image bytes.
+7. Voice call phone ↔ Mac works only with a trusted certificate (installed CA); the audio itself is peer to peer
+   and never crosses the proxy, only the signalling does.
+8. `demo/stop_demo.sh` ("LAN listeners on … closed"), then remove the CA from the phone.
+
+Not verified here (no phone available): the actual install flow on iOS/Android, WSS after merely accepting the
+warning, calls from a phone, and the behaviour behind real client-isolation Wi-Fi. Verified: LAN detection,
+the private-address guard, certificate chain and SAN, that the proxy and certificate page listen on the LAN
+address only (gateway and Mallory's page do not), the certificate page contents and fingerprint, HTTPS+WSS to
+the LAN address with the demo CA, QR codes (decoded back with Apple's CoreImage reader), a phone-sized Chromium
+chatting through the LAN address, and `stop_demo.sh` closing the listener.
+
 ### What a browser can and cannot show
 
 Browsers hide TLS error details from page JavaScript: when Mallory breaks the WebSocket the page

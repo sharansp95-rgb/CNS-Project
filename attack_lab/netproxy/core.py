@@ -17,8 +17,17 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from . import records as tls
+from .lan import check_private
 
 ACTIONS = ("forward", "alter", "drop", "replay", "delay")
+LAN_HINT = (
+    "No device on the LAN has reached this Mac yet. Likely causes: (1) Wi-Fi client isolation "
+    "(guest, hotel, campus or some router settings stop devices talking to each other) - use the "
+    "iPhone Personal Hotspot instead: connect the Mac to the hotspot and restart with --lan; "
+    "(2) the macOS firewall is blocking incoming connections - allow Python when macOS asks, or "
+    "add it under System Settings > Network > Firewall > Options; (3) the phone is on mobile data "
+    "or another network than the Mac."
+)
 KEEP_RAW = 500  # captured records whose bytes stay available for replay / pcap
 LABEL_RE = re.compile(r"CNS_DEMO_LABEL=([A-Za-z0-9_-]{1,20})")
 
@@ -76,6 +85,8 @@ class NetProxy:
         delay_seconds=3.0,
         stall_seconds=3.0,
         auto_resume=True,
+        lan_ip=None,
+        lan_hint_seconds=60.0,
         max_records=3000,
     ):
         if listen[0] not in ("127.0.0.1", "::1", "localhost"):
@@ -87,6 +98,13 @@ class NetProxy:
             stall_seconds,
         )
         self.auto_resume = auto_resume
+        # Phone-as-victim mode: also listen on this private LAN address (never 0.0.0.0).
+        self.lan_ip = check_private(lan_ip) if lan_ip else None
+        self.lan_hint_seconds = lan_hint_seconds
+        self.lan_peers: dict[str, float] = {}  # remote LAN address -> first contact (epoch)
+        self.cert_hits: dict[str, float] = {}
+        self.cert_url = None
+        self.lan_hint = False
         self.intercept = False
         self.port = listen[1]
         self._lock = threading.RLock()
@@ -98,6 +116,7 @@ class NetProxy:
         self._next_rec = self._next_conn = self._next_feed = 1
         self._loop = None
         self._server = None
+        self._lan_server = None
         self._tasks: set = set()
         self.t0 = time.time()
 
@@ -106,15 +125,21 @@ class NetProxy:
         self._loop = asyncio.get_running_loop()
         self._server = await asyncio.start_server(self._accept, *self.listen)
         self.port = self._server.sockets[0].getsockname()[1]
+        if self.lan_ip:  # same port on the LAN address only (never the wildcard address)
+            self._lan_server = await asyncio.start_server(self._accept, self.lan_ip, self.port)
+        if self.lan_ip:
+            self._spawn(self._lan_watch())
         self.event(
             "info",
-            f"Mallory's proxy listening on {self.listen[0]}:{self.port}, "
-            f"relaying to {self.upstream[0]}:{self.upstream[1]} (no TLS key, no TLS termination)",
+            f"Mallory's proxy listening on {self.listen[0]}:{self.port}"
+            + (f" and on the LAN address {self.lan_ip}:{self.port}" if self.lan_ip else "")
+            + f", relaying to {self.upstream[0]}:{self.upstream[1]} (no TLS key, no TLS termination)",
         )
 
     async def stop(self):
-        if self._server:
-            self._server.close()
+        for srv in (self._server, self._lan_server):
+            if srv:
+                srv.close()
         for conn in list(self._conns.values()):
             for w in conn.writers.values():
                 w.close()
@@ -202,7 +227,53 @@ class NetProxy:
                 "feed": list(self._feed)[-120:],
                 "delay_seconds": self.delay_seconds,
                 "auto_resume": self.auto_resume,
+                "lan": self._lan_view(),
             }
+
+    # ------------------------------------------------------------------ phone / LAN mode
+    def is_remote(self, address) -> bool:
+        """A peer that is neither this Mac's loopback nor its own LAN address."""
+        return bool(self.lan_ip) and address not in ("127.0.0.1", "::1", self.lan_ip)
+
+    def note_lan_peer(self, address, conn=None):
+        with self._lock:
+            first = address not in self.lan_peers
+            self.lan_peers.setdefault(address, time.time())
+        if first:
+            self.event(
+                "info",
+                f"A device on the LAN ({address}) connected to the proxy: it is a victim now",
+                conn,
+            )
+
+    def note_cert_hit(self, address):
+        if not self.is_remote(address):
+            return
+        with self._lock:
+            first = address not in self.cert_hits
+            self.cert_hits.setdefault(address, time.time())
+        if first:
+            self.event(
+                "info", f"{address} opened the certificate page: the phone can reach this Mac"
+            )
+
+    def _lan_view(self):
+        if not self.lan_ip:
+            return None
+        return {
+            "ip": self.lan_ip,
+            "url": f"https://{self.lan_ip}:{self.port}",
+            "cert_url": self.cert_url,
+            "peers": sorted(self.lan_peers),
+            "cert_hits": sorted(self.cert_hits),
+            "unreachable_hint": self.lan_hint and not (self.lan_peers or self.cert_hits),
+        }
+
+    async def _lan_watch(self):
+        await asyncio.sleep(self.lan_hint_seconds)
+        if not (self.lan_peers or self.cert_hits):
+            self.lan_hint = True
+            self.event("warn", LAN_HINT)
 
     def _rec_view(self, r):
         c = self._conns.get(r.conn)
@@ -249,8 +320,13 @@ class NetProxy:
         with self._lock:
             cid = self._next_conn
             self._next_conn += 1
-            conn = Conn(cid, f"Client {cid}", peer[1], time.time())
+            remote = self.is_remote(peer[0])
+            conn = Conn(
+                cid, f"Phone {peer[0]}" if remote else f"Client {cid}", peer[1], time.time()
+            )
             self._conns[cid] = conn
+        if remote:
+            self.note_lan_peer(peer[0], cid)
         try:
             sreader, swriter = await asyncio.wait_for(asyncio.open_connection(*self.upstream), 5)
         except (OSError, asyncio.TimeoutError):
@@ -268,7 +344,7 @@ class NetProxy:
             f"New connection: {conn.label} (:{peer[1]}) ↔ server. Mallory sees only TLS records.",
             cid,
         )
-        if self.identify:
+        if self.identify and not remote:
             self._spawn(self._identify(conn))
         t1 = self._spawn(self._pump(conn, "c2s", creader, swriter))
         t2 = self._spawn(self._pump(conn, "s2c", sreader, cwriter))
