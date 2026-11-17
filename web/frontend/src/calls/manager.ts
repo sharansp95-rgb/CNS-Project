@@ -121,8 +121,16 @@ export class CallManager {
   private cache?: { cfg: IceConfig; at: number };
   private fetching?: Promise<IceConfig>;
   static readonly CACHE_MS = 8 * 60 * 1000;
+  private refresher?: ReturnType<typeof setInterval>;
   prefetch() {
     void this.ice().catch(() => {});
+    // Mint the next credential a few minutes BEFORE the current one expires, so a call
+    // never has to use a brand-new (not yet propagated) credential.
+    clearInterval(this.refresher);
+    this.refresher = setInterval(() => {
+      this.cache = this.cache && { ...this.cache, at: 0 };
+      void this.ice().catch(() => {});
+    }, 5 * 60 * 1000);
   }
   private ice(): Promise<IceConfig> {
     if (this.cache && Date.now() - this.cache.at < CallManager.CACHE_MS) return Promise.resolve(this.cache.cfg);
@@ -137,6 +145,7 @@ export class CallManager {
   }
   /** Drop the cache when the session ends: credentials belong to this login. */
   forgetIce() {
+    clearInterval(this.refresher);
     this.cache = undefined;
   }
   private newInfo(id: string, role: "caller" | "callee", cfg: IceConfig): CallInfo {
