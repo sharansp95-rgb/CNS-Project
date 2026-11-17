@@ -1,9 +1,31 @@
 import * as c from "./crypto";
+import { sniff, stripMetadata, sanitizeFilename, type Kind } from "./attachments/media";
+import { encryptFile, decryptFile, AttachmentError, type FileSecrets } from "./attachments/fileCrypto";
+import { encodeDescriptor, type Descriptor } from "./attachments/descriptor";
+import { makeThumbnail } from "./attachments/thumbnail";
+import { api, putObject, getObject, type Presigned } from "./attachments/transfer";
 export type Envelope = Record<string, any>;
 export interface Message {
   sender: string;
   message: string;
   receipt: Envelope;
+}
+export interface AttachmentLimits {
+  image_max: number;
+  video_max: number;
+  user_quota: number;
+  retention_seconds: number;
+}
+export interface OpenedAttachment {
+  url: string;
+  mime: string;
+  name: string;
+  size: number;
+}
+export type Stage = "Preparing" | "Encrypting" | "Uploading" | "Sending" | "Downloading" | "Decrypting" | "Verifying";
+export interface Progress {
+  stage: Stage;
+  fraction: number;
 }
 export class Session {
   socket: WebSocket;
@@ -34,6 +56,8 @@ export class Session {
   rejectedNonces = new Set<string>();
   chain: Promise<unknown> = Promise.resolve();
   closed = false;
+  opened = new Map<string, OpenedAttachment>();
+  limits?: AttachmentLimits;
   private epoch = 0;
   private stopped = false;
   private reconnecting = false;
@@ -74,6 +98,8 @@ export class Session {
     clearTimeout(this.openTimer);
     this.clearSession();
     this.isAuthenticated = false;
+    for (const o of this.opened.values()) URL.revokeObjectURL(o.url);
+    this.opened.clear();
     this.socket.close();
   }
   private openSocket() {
@@ -526,6 +552,128 @@ export class Session {
       });
       this.changed();
     });
+  }
+  private wireNote(direction: "out" | "in", type: string, fields: Envelope) {
+    this.wire.push({ direction, type, ...fields });
+    this.wire = this.wire.slice(-200);
+    this.changed();
+  }
+  /** Encrypt in the browser, upload ciphertext only, then send the key in a normal E2E message. */
+  async sendAttachment(
+    file: File,
+    opts: {
+      stripMetadata: boolean;
+      onProgress?: (p: Progress) => void;
+      signal?: AbortSignal;
+    },
+  ) {
+    const say = (stage: Stage, fraction = 0) => opts.onProgress?.({ stage, fraction });
+    if (!this.key || !this.apiToken) throw Error("Wait for a verified handshake");
+    const epoch = this.epoch;
+    say("Preparing");
+    this.limits ??= await api<AttachmentLimits>(this.apiToken, "GET", "/api/attachments/config");
+    // Reject before reading whole oversized files into memory.
+    if (file.size === 0) throw Error("That file is empty");
+    if (file.size > this.limits.video_max) throw Error(`File exceeds the ${this.limits.video_max / 2 ** 20} MiB limit`);
+    let bytes = new Uint8Array(await file.arrayBuffer());
+    const type = sniff(bytes);
+    if (!type) throw Error("Unsupported file type. Allowed: JPEG, PNG, WebP, GIF, MP4, WebM");
+    const max = type.kind === "image" ? this.limits.image_max : this.limits.video_max;
+    if (bytes.length > max) throw Error(`${type.kind === "image" ? "Images" : "Videos"} are limited to ${max / 2 ** 20} MiB`);
+    const stripped = opts.stripMetadata && type.kind === "image";
+    if (stripped) bytes = stripMetadata(bytes, type.mime) as Uint8Array<ArrayBuffer>;
+    const thumb = await makeThumbnail(bytes, type.mime, type.kind);
+    const { ciphertext, secrets } = await encryptFile(bytes, {
+      signal: opts.signal,
+      onProgress: (d, t) => say("Encrypting", d / t),
+    });
+    if (epoch !== this.epoch) throw Error("Connection changed; attachment was not sent");
+    const init = await api<{ upload: Presigned }>(this.apiToken, "POST", "/api/attachments", {
+      id: secrets.id,
+      recipient: this.peer,
+      kind: type.kind,
+      ciphertext_size: secrets.ct_size,
+      ciphertext_sha256: secrets.ct_sha256,
+    });
+    this.wireNote("out", "attachment_upload", {
+      note: "Only ciphertext was uploaded (HTTPS PUT straight to object storage)",
+      ciphertext_sha256: secrets.ct_sha256,
+      ciphertext_size: secrets.ct_size,
+      storage_host: new URL(init.upload.url, location.href).host,
+    });
+    try {
+      await putObject(init.upload, ciphertext, (l, t) => say("Uploading", t ? l / t : l / secrets.ct_size), opts.signal);
+      say("Uploading", 1);
+      await api(this.apiToken, "POST", `/api/attachments/${secrets.id}/finalize`);
+    } catch (e) {
+      // Best effort: free the quota of a cancelled or failed upload.
+      api(this.apiToken, "DELETE", `/api/attachments/${secrets.id}`).catch(() => {});
+      throw e;
+    }
+    say("Sending");
+    const descriptor: Descriptor = {
+      v: 1,
+      ...secrets,
+      name: sanitizeFilename(file.name, type.ext),
+      mime: type.mime,
+      kind: type.kind as Kind,
+      ...(thumb ? { thumb: c.b64(thumb) } : {}),
+      ...(stripped ? { stripped: true } : {}),
+    };
+    await this.sendMessage(encodeDescriptor(descriptor));
+    this.opened.set(descriptor.id, {
+      url: URL.createObjectURL(new Blob([bytes as BlobPart], { type: type.mime })),
+      mime: type.mime,
+      name: descriptor.name,
+      size: bytes.length,
+    });
+    this.changed();
+  }
+  /** Download, verify the ciphertext hash, decrypt, verify the plaintext hash and type. */
+  async openAttachment(
+    d: Descriptor,
+    onProgress?: (p: Progress) => void,
+    signal?: AbortSignal,
+  ): Promise<OpenedAttachment> {
+    const have = this.opened.get(d.id);
+    if (have) return have;
+    if (!this.apiToken) throw Error("Log in to download attachments");
+    const say = (stage: Stage, fraction = 0) => onProgress?.({ stage, fraction });
+    say("Downloading");
+    const info = await api<{ url: string; ciphertext_sha256: string; ciphertext_size: number }>(
+      this.apiToken, "GET", `/api/attachments/${d.id}/download`,
+    );
+    this.wireNote("in", "attachment_download", {
+      note: "Downloaded ciphertext only; decrypted locally with the key from the signed message",
+      ciphertext_sha256: info.ciphertext_sha256,
+      ciphertext_size: info.ciphertext_size,
+    });
+    const ciphertext = await getObject(info.url, (l, t) => say("Downloading", t ? l / t : l / d.ct_size), signal);
+    say("Verifying");
+    const secrets: FileSecrets = { id: d.id, key: d.key, chunk: d.chunk, size: d.size, ct_size: d.ct_size, ct_sha256: d.ct_sha256, pt_sha256: d.pt_sha256 };
+    let plain: Uint8Array;
+    try {
+      plain = await decryptFile(ciphertext, secrets, { signal, onProgress: (n, t) => say("Decrypting", n / t) });
+    } catch (e) {
+      if (e instanceof AttachmentError) {
+        this.wireNote("in", "attachment_rejected", { reason: e.code, note: e.message });
+        this.send({ type: "security_alert", alert: "attachment_rejected", reason: e.code, peer: this.peer });
+      }
+      throw e;
+    }
+    // Never trust the sender's declared type: re-check the decrypted bytes.
+    const type = sniff(plain);
+    if (!type || type.mime !== d.mime)
+      throw new AttachmentError("type", "Attachment rejected: content does not match its declared type");
+    const opened = {
+      url: URL.createObjectURL(new Blob([plain as BlobPart], { type: type.mime })),
+      mime: type.mime,
+      name: sanitizeFilename(d.name, type.ext),
+      size: plain.length,
+    };
+    this.opened.set(d.id, opened);
+    this.changed();
+    return opened;
   }
   async evidence(formatVersion = 2) {
     await this.chain;

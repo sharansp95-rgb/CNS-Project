@@ -89,3 +89,56 @@ for (const [action, reason] of attacks)
       "Lab-Password-1234!",
     );
   });
+
+for (const [action, sends] of [
+  ["Tamper stored attachment", 1],
+  ["Swap attachment object", 2],
+] as const)
+  test("real victim detection: " + action, async ({ page }) => {
+    await page.goto("/");
+    const gate = page.getByLabel("Lab access code", { exact: true });
+    if (await gate.isVisible()) {
+      await gate.fill(process.env.LAB_ACCESS_CODE || "Local-test-access-code-ONLY-1234");
+      await page.getByRole("button", { name: "Enter sandbox", exact: true }).click();
+    }
+    await page.getByRole("button", { name: "Start lab session", exact: true }).click();
+    await page.getByRole("button", { name: "Reset lab", exact: true }).click();
+    await expect(page.locator("#status")).toContainText("reseeded");
+    const alice = page.frameLocator("#alice"),
+      bob = page.frameLocator("#bob");
+    await page.getByRole("button", { name: "Connect victims", exact: true }).click();
+    await expect(alice.getByLabel("Message", { exact: true })).toBeEnabled();
+    await expect(bob.getByLabel("Message", { exact: true })).toBeEnabled();
+    for (let i = 1; i <= sends; i++) {
+      await page.getByRole("button", { name: "Alice sends test image", exact: true }).click();
+      await expect(bob.getByTestId("attachment")).toHaveCount(i);
+    }
+    await page.getByRole("button", { name: action, exact: true }).click();
+    await page.getByRole("button", { name: "Bob opens newest attachment", exact: true }).click();
+    await expect(bob.getByRole("alert").filter({ hasText: "tampered or corrupted" })).toBeVisible();
+    await expect(page.locator("#detections")).toContainText("attachment_rejected");
+    await expect(page.locator("#attempts")).toContainText(
+      action.startsWith("Tamper") ? "tamper_attachment" : "swap_attachment",
+    );
+    expect(await page.locator("#wire").innerText()).not.toContain("lab-");
+  });
+
+test("untouched lab attachment opens (control for the attachment attacks)", async ({ page }) => {
+  await page.goto("/");
+  const gate = page.getByLabel("Lab access code", { exact: true });
+  if (await gate.isVisible()) {
+    await gate.fill(process.env.LAB_ACCESS_CODE || "Local-test-access-code-ONLY-1234");
+    await page.getByRole("button", { name: "Enter sandbox", exact: true }).click();
+  }
+  await page.getByRole("button", { name: "Start lab session", exact: true }).click();
+  await page.getByRole("button", { name: "Reset lab", exact: true }).click();
+  await expect(page.locator("#status")).toContainText("reseeded");
+  const bob = page.frameLocator("#bob");
+  await page.getByRole("button", { name: "Connect victims", exact: true }).click();
+  await expect(bob.getByLabel("Message", { exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Alice sends test image", exact: true }).click();
+  await expect(bob.getByTestId("attachment")).toHaveCount(1);
+  await page.getByRole("button", { name: "Bob opens newest attachment", exact: true }).click();
+  await expect(bob.getByRole("dialog", { name: "Image viewer" })).toBeVisible();
+  await expect(page.locator("#detections")).not.toContainText("attachment_rejected");
+});

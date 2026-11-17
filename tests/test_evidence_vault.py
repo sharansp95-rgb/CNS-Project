@@ -177,7 +177,7 @@ def test_schema_upgrade_v1_to_v2_keeps_existing_rows(tmp_path):
         INSERT INTO relayed_envelopes VALUES(1,1,'legacy','bob','chat',10,'YWJj');""")
     database = db.get_database("sqlite:///" + str(target))
     with database.engine.connect() as conn:
-        assert conn.execute(select(db.schema_version.c.version)).scalar_one() == 2
+        assert conn.execute(select(db.schema_version.c.version)).scalar_one() == 3
         assert (
             conn.execute(select(db.users.c.password_hash)).scalar_one()
             == "UNCHANGED_ENCODED_PBKDF2"

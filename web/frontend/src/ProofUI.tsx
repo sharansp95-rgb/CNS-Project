@@ -8,6 +8,7 @@ import {
 } from "./evidenceVault";
 import { verifyEvidence, type Verification } from "./evidenceVerify";
 import { loadBackup, unwrap } from "./keystore";
+import { parseDescriptor, type Descriptor } from "./attachments/descriptor";
 
 export function downloadBytes(
   name: string,
@@ -48,6 +49,61 @@ function Verdict({ report }: { report?: Verification }) {
         Receipt: {report.receipt}. JSON is the authoritative signed evidence; a
         PDF is only a companion.
       </p>
+    </section>
+  );
+}
+function AttachmentCheck({ bytes }: { bytes: Uint8Array }) {
+  const [result, setResult] = useState("");
+  let list: { index: number; d: Descriptor }[] = [];
+  try {
+    const evidence = JSON.parse(new TextDecoder().decode(bytes));
+    list = (Array.isArray(evidence.records) ? evidence.records : [])
+      .map((r: any, i: number) => ({ index: i + 1, d: parseDescriptor(String(r?.message)) }))
+      .filter((x: any) => x.d);
+  } catch {
+    return null;
+  }
+  if (!list.length) return null;
+  async function check(file?: File) {
+    if (!file) return;
+    if (file.size > 80 * 1024 * 1024) return setResult("File is too large to check here");
+    const digest = c.hex(await c.sha(new Uint8Array(await file.arrayBuffer())));
+    const hit = list.flatMap(({ index, d }) =>
+      (["pt_sha256", "ct_sha256"] as const)
+        .filter((k) => d[k] === digest)
+        .map((k) => ({ index, d, k })),
+    );
+    setResult(
+      hit.length
+        ? hit
+            .map(
+              ({ index, d, k }) =>
+                `MATCH: ${file.name} is the ${k === "pt_sha256" ? "original (decrypted) file" : "stored encrypted object"} recorded for message #${index} (${d.name}).`,
+            )
+            .join(" ")
+        : `NO MATCH: ${file.name} does not equal any attachment recorded in this evidence.`,
+    );
+  }
+  return (
+    <section className="proof-card" aria-label="Attachments in this evidence">
+      <h3>Attachments recorded in this evidence</h3>
+      <ul>
+        {list.map(({ index, d }) => (
+          <li key={index}>
+            Message #{index}: {d.name} ({d.mime}, {d.size} bytes) — SHA-256{" "}
+            <code>{d.pt_sha256}</code>
+          </li>
+        ))}
+      </ul>
+      <label>
+        Check a file against these recorded hashes (nothing is uploaded)
+        <input
+          type="file"
+          aria-label="Attachment file to check"
+          onChange={(e) => void check(e.target.files?.[0])}
+        />
+      </label>
+      <p role="status">{result}</p>
     </section>
   );
 }
@@ -182,6 +238,7 @@ export function PublicVerify() {
         </button>
         <p role="alert">{error}</p>
         <Verdict report={report} />
+        {report && bytes && <AttachmentCheck bytes={bytes} />}
         {report && bytes && (
           <button
             onClick={async () => {

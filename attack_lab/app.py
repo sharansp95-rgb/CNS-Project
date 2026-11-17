@@ -16,10 +16,11 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, insert, select, update
 from auth.password_hash import hash_password
-from server.db import metadata, users, PROJECT_ROOT
+from server.db import attachments, metadata, users, PROJECT_ROOT
 from web.app import create_app as product_gateway, STATIC as PRODUCT_STATIC
 from attack_lab.relay import RogueRelay, lab_database
 from attack_lab.access import LabAccessGate
+from server.storage import LocalStorage
 from web.settings import Settings, install_transport
 
 ROOT = Path(__file__).resolve().parent
@@ -144,6 +145,9 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
     if cert is None:
         cert, key = certificates(state / "certs")
     relay = RogueRelay(certfile=cert, keyfile=key, database=database, logger=logger)
+    # Attachments in the sandbox use the local backend only, in the lab's own
+    # state directory; the lab never receives main's S3 credentials.
+    storage = LocalStorage(state / "attachments")
     sessions = {}
     rates = {}
     guard = threading.RLock()
@@ -174,6 +178,7 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
                 relay.pending.clear()
                 relay.held.clear()
                 relay.last.clear()
+            storage.purge()
             with relay.lockout._lock:
                 relay.lockout._by_addr.clear()
             generation = secrets.token_hex(8)
@@ -209,6 +214,7 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
     app.state.relay = relay
     app.state.database = database
     app.state.seed = seed
+    app.state.storage = storage
 
     def authorized(token):
         with guard:
@@ -263,7 +269,7 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
         response = await call_next(request)
         # Only this sandbox permits same-origin victim embedding; production keeps DENY.
         response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'self'"
+            "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; img-src 'self' data: blob:; media-src blob:; font-src 'self'; base-uri 'none'; form-action 'self'"
         )
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -380,6 +386,39 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
         except ValueError as exc:
             raise HTTPException(400, str(exc))
 
+    @app.post("/lab/attachment-attack")
+    async def attachment_attack(request: Request):
+        """Corrupt or swap a stored *ciphertext* object; the victim's own checks must catch it."""
+        session(request, True)
+        data = await body(request)
+        action = data.get("action")
+        if action not in ("tamper_attachment", "swap_attachment"):
+            raise HTTPException(400, "Unknown attachment attack")
+
+        def run():
+            with database.engine.connect() as conn:
+                rows = conn.execute(
+                    select(attachments.c.id, attachments.c.object_key)
+                    .where(attachments.c.finalized_at.is_not(None), attachments.c.deleted_at.is_(None))
+                    .order_by(attachments.c.created_at.desc())
+                ).all()
+            if not rows:
+                raise HTTPException(400, "Send an attachment first")
+            target = rows[0]
+            if action == "tamper_attachment":
+                blob = bytearray(storage.read(target.object_key))
+                blob[len(blob) // 2] ^= 0xFF
+                storage.write(target.object_key, bytes(blob))
+            else:
+                if len(rows) < 2:
+                    raise HTTPException(400, "Send two attachments first")
+                # Replace the newest object with another genuine ciphertext object.
+                storage.write(target.object_key, storage.read(rows[1].object_key))
+            relay.log_event("lab_attack_performed", action=action, target="stored attachment")
+            return dict(performed=True, action=action)
+
+        return await asyncio.to_thread(run)
+
     @app.get("/lab/state")
     async def state_view(request: Request):
         session(request)
@@ -434,6 +473,11 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
         )
     # Reuse the real gateway unchanged, scoped to this relay and origin. The lab
     # disables the unrelated evidence vault; no real receipt keys are touched.
-    app.mount("/", product_gateway(relay, origins=origins, include_vault=False))
+    app.mount(
+        "/",
+        product_gateway(
+            relay, origins=origins, include_vault=False, attachment_storage=storage
+        ),
+    )
     install_transport(app, settings)
     return app

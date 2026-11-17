@@ -45,7 +45,8 @@ from crypto_engine.hash_chain import (  # noqa: E402
 )
 from crypto_engine.signatures import deserialize_public_key, fingerprint, verify  # noqa: E402
 
-from crypto_engine.evidence_tools import V1, V2, valid_hash, verify_receipt
+from crypto_engine.evidence_tools import V1, V2, valid_hash, verify_receipt, sha256
+from crypto_engine.attachment_tools import is_attachment_message, parse_descriptor
 
 FORMAT = V1
 OK_MARK, BAD_MARK = "✔", "✘"
@@ -237,6 +238,23 @@ def verify_evidence(data, expect_fingerprints=()):
             r.bad(f"{name}: claimed final chain head does not match the records "
                   f"(a trailing message was removed or altered)", check="chain head")
 
+    # --- attachments (informational; their messages are signed/chained above) --
+    r.attachments = []
+    for index, rec in enumerate(data.get("records", []), 1):
+        message = rec.get("message") if isinstance(rec, dict) else None
+        if not is_attachment_message(message):
+            continue
+        desc = parse_descriptor(message)
+        if desc is None:
+            r.bad(f"#{index}: malformed attachment descriptor", index=index, check="attachment")
+            continue
+        r.attachments.append((index, desc))
+    if r.attachments:
+        r.heading("Attachments (end-to-end encrypted; file key and hashes are inside signed messages)")
+        for index, d in r.attachments:
+            r.ok(f"#{index} {d['name']} ({d['mime']}, {d['size']} bytes) "
+                 f"plaintext sha256 {d['pt_sha256']}, ciphertext sha256 {d['ct_sha256']}")
+
     # --- exporter signature -------------------------------------------------
     r.heading("Export signature")
     body = {k: v for k, v in data.items() if k != "exporter_signature"}
@@ -263,6 +281,9 @@ def main(argv=None):
     parser.add_argument("--expect-fingerprint", action="append", default=[], metavar="FP",
                         help="a participant fingerprint you trust (repeatable); the file "
                              "is INVALID if no participant has it")
+    parser.add_argument("--check-file", action="append", default=[], metavar="PATH",
+                        help="an attachment file (original or stored ciphertext) to compare "
+                             "against the hashes recorded in the evidence (repeatable)")
     parser.add_argument("--receipt", help="optional timestamp receipt JSON")
     parser.add_argument("--tsa-pubkey", help="trusted TSA Ed25519 public PEM (required with --receipt)")
     args = parser.parse_args(argv)
@@ -292,6 +313,23 @@ def main(argv=None):
         except (OSError, ValueError) as exc:
             print(f"Cannot read receipt/key: {exc}", file=sys.stderr)
             return 2
+    for path in args.check_file:
+        try:
+            with open(path, "rb") as stream:
+                digest = sha256(stream.read())
+        except OSError as exc:
+            print(f"Cannot read attachment file: {exc}", file=sys.stderr)
+            return 2
+        hits = [(i, d, kind) for i, d in report.attachments for kind in ("pt_sha256", "ct_sha256")
+                if d[kind] == digest]
+        report.heading(f"Attachment file check: {os.path.basename(path)}")
+        if hits:
+            for i, d, kind in hits:
+                what = "original (decrypted) file" if kind == "pt_sha256" else "stored encrypted object"
+                report.ok(f"matches the recorded hash of {what} for message #{i} ({d['name']})")
+        else:
+            report.bad("file matches NO attachment hash recorded in this evidence",
+                       check="attachment file")
     print(report.render())
     return 0 if report.valid else 1
 

@@ -5,6 +5,8 @@ import { Session, type Envelope, type Message } from "./session";
 import { wrap, unwrap, loadBackup, saveBackup, type Backup } from "./keystore";
 import "./style.css";
 import { PublicVerify, EvidencePanel } from "./ProofUI";
+import { AttachmentCard, Lightbox, asDescriptor, stageText } from "./AttachmentUI";
+import type { Progress, OpenedAttachment } from "./session";
 
 function download(name: string, body: unknown) {
   const url = URL.createObjectURL(
@@ -38,6 +40,29 @@ function App() {
     localStorage.getItem("securechat-theme") || "dark",
   );
   const notify = () => refresh((n) => n + 1);
+  const [sending, setSending] = useState<{ name: string; progress: Progress }>(),
+    [strip, setStrip] = useState(true),
+    [dragging, setDragging] = useState(false),
+    [zoom, setZoom] = useState<OpenedAttachment>(),
+    sendAbort = useRef<AbortController>(undefined);
+  async function attach(files: FileList | File[] | null | undefined) {
+    const file = files && files[0];
+    if (!file || !session || sending) return;
+    setError("");
+    sendAbort.current = new AbortController();
+    setSending({ name: file.name, progress: { stage: "Preparing", fraction: 0 } });
+    try {
+      await session.sendAttachment(file, {
+        stripMetadata: strip,
+        signal: sendAbort.current.signal,
+        onProgress: (progress) => setSending({ name: file.name, progress }),
+      });
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") setError((e as Error).message);
+    } finally {
+      setSending(undefined);
+    }
+  }
   async function authenticate(mode: "register" | "login") {
     if (
       !username.trim() ||
@@ -309,7 +334,21 @@ function App() {
               <strong>{session.username}</strong>
             </div>
           </aside>
-          <section className="chat">
+          <section
+            className={"chat" + (dragging ? " dragging" : "")}
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes("Files")) {
+                e.preventDefault();
+                setDragging(true);
+              }
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              void attach(e.dataTransfer.files);
+            }}
+          >
             <header className="chat-header">
               <div>
                 <div className="eyebrow">PRIVATE CONVERSATION</div>
@@ -356,31 +395,54 @@ function App() {
                   </p>
                 </div>
               )}
-              {session.messages.map((item: Message, i: number) => (
-                <button
-                  key={i}
-                  className={
-                    "bubble " +
-                    (item.sender === session.username ? "sent" : "received")
-                  }
-                  onClick={() => setReceipt(item.receipt)}
-                  aria-label={"Security receipt: " + item.message}
-                >
-                  <span>{item.message}</span>
-                  <small>
-                    {new Date(item.receipt.timestamp * 1000).toLocaleTimeString(
-                      [],
-                      { hour: "2-digit", minute: "2-digit" },
-                    )}{" "}
-                    · {item.receipt.chain_link === "gap" ? "⚠" : "✓✓"}
-                  </small>
-                </button>
-              ))}
+              {session.messages.map((item: Message, i: number) => {
+                const descriptor = asDescriptor(item.message);
+                if (descriptor)
+                  return (
+                    <AttachmentCard
+                      key={i}
+                      session={session}
+                      descriptor={descriptor}
+                      mine={item.sender === session.username}
+                      onReceipt={() => setReceipt(item.receipt)}
+                      onZoom={setZoom}
+                    />
+                  );
+                return (
+                  <button
+                    key={i}
+                    className={
+                      "bubble " +
+                      (item.sender === session.username ? "sent" : "received")
+                    }
+                    onClick={() => setReceipt(item.receipt)}
+                    aria-label={"Security receipt: " + item.message}
+                  >
+                    <span>{item.message}</span>
+                    <small>
+                      {new Date(item.receipt.timestamp * 1000).toLocaleTimeString(
+                        [],
+                        { hour: "2-digit", minute: "2-digit" },
+                      )}{" "}
+                      · {item.receipt.chain_link === "gap" ? "⚠" : "✓✓"}
+                    </small>
+                  </button>
+                );
+              })}
             </div>
             {error && (
               <p role="alert" className="feedback">
                 {error}
               </p>
+            )}
+            {sending && (
+              <div className="att-sending" role="status">
+                <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(sending.progress.fraction * 100)}>
+                  <span style={{ width: `${sending.progress.fraction * 100}%` }} />
+                </div>
+                <span>{sending.name}: {stageText(sending.progress)}</span>
+                <button onClick={() => sendAbort.current?.abort()}>Cancel</button>
+              </div>
             )}
             <form
               className="composer"
@@ -392,11 +454,30 @@ function App() {
                 }
               }}
             >
+              <label className={"attach" + (!session.key || sending ? " disabled" : "")}>
+                📎
+                <input
+                  type="file"
+                  aria-label="Attach file"
+                  accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"
+                  disabled={!session.key || !!sending}
+                  onChange={(e) => {
+                    void attach(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
               <input
                 aria-label="Message"
                 placeholder="Write something private…"
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
+                onPaste={(e) => {
+                  if (e.clipboardData.files.length) {
+                    e.preventDefault();
+                    void attach(e.clipboardData.files);
+                  }
+                }}
                 disabled={!session.key}
               />
               <button
@@ -407,6 +488,15 @@ function App() {
                 Send ↗
               </button>
             </form>
+            <label className="strip-toggle">
+              <input type="checkbox" checked={strip} onChange={(e) => setStrip(e.target.checked)} />
+              Remove location &amp; camera data (EXIF) from images before encrypting
+              <small>
+                {strip
+                  ? "Location data is removed. Video metadata is not stripped."
+                  : "Metadata, including GPS location, will be sent inside the encrypted file."}
+              </small>
+            </label>
             <footer>
               <span>⌁ Encrypted on your device</span>
               <button
@@ -441,6 +531,7 @@ function App() {
           )}
         </main>
       )}
+      {zoom && <Lightbox item={zoom} close={() => setZoom(undefined)} />}
       {receipt && (
         <div className="modal-backdrop" onClick={() => setReceipt(undefined)}>
           <section

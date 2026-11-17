@@ -6,6 +6,7 @@ import latinUrl from "@fontsource/noto-sans/files/noto-sans-latin-400-normal.wof
 import devanagariUrl from "@fontsource/noto-sans/files/noto-sans-devanagari-400-normal.woff?url";
 import { sha, hex } from "./crypto";
 import type { Verification } from "./evidenceVerify";
+import { parseDescriptor } from "./attachments/descriptor";
 export async function createReport(
   bytes: Uint8Array,
   report: Verification,
@@ -145,9 +146,37 @@ export async function createReport(
           ? "PASSED signature/hash/chain checks"
           : "FAILED or not verified"),
     );
-    paragraph(row.message, 11);
+    const att = parseDescriptor(String(row.message));
+    if (att) {
+      // Never print the file key or thumbnail: the PDF lists identity and hashes only.
+      paragraph(
+        `Attachment: ${att.name} (${att.mime}, ${att.size} bytes)`,
+        11,
+      );
+      paragraph("Plaintext file SHA-256: " + att.pt_sha256, 8);
+      paragraph(
+        `Stored (encrypted) object SHA-256: ${att.ct_sha256} (${att.ct_size} bytes)`,
+        8,
+      );
+    } else paragraph(row.message, 11);
     if (row.envelope_sha256)
       paragraph("Relayed envelope SHA-256: " + row.envelope_sha256, 8);
+  }
+  const attachments = records
+    .map((row: any, i: number) => ({ i, d: parseDescriptor(String(row.message)) }))
+    .filter((x: any) => x.d);
+  paragraph("Attachments", 14);
+  if (!attachments.length) paragraph("No attachments in this conversation.");
+  else {
+    paragraph(
+      "Files are end-to-end encrypted. Each hash below is covered by the sender's signature on its message. Check a file on /verify or with: python tools/verify_transcript.py evidence.json --check-file FILE",
+      9,
+    );
+    for (const { i, d } of attachments) {
+      paragraph(`Message #${i + 1}: ${d.name} (${d.mime}, ${d.size} bytes)`);
+      paragraph("Plaintext SHA-256: " + d.pt_sha256, 8);
+      paragraph("Ciphertext SHA-256: " + d.ct_sha256, 8);
+    }
   }
   paragraph("Timestamp receipt", 14);
   if (receipt) {

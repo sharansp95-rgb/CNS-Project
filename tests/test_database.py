@@ -30,7 +30,7 @@ def test_database_url_override(tmp_path, monkeypatch):
     assert db.get_database().engine.url.database == str(target)
     assert user_store.verify_user("alice", "pw")
     assert user_store.get_public_key("alice") == "public-pem"
-    assert rows(db.schema_version) == [{"version": 2}]
+    assert rows(db.schema_version) == [{"version": 3}]
 
 
 def test_duplicate_username_rejected_by_database():
@@ -218,3 +218,24 @@ def test_postgresql_driver_and_schema_compile_without_sqlite_specific_sql():
             assert str(CreateTable(table).compile(dialect=engine.dialect))
     finally:
         engine.dispose()
+
+
+def test_sqlite_v2_to_v3_upgrade_is_additive_and_atomic(tmp_path):
+    import sqlite3
+    path = tmp_path / "v2.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript("""CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+        INSERT INTO schema_version VALUES(2);
+        CREATE TABLE users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, public_key_pem TEXT, created_at FLOAT NOT NULL);
+        INSERT INTO users VALUES('old','KEEP',NULL,1);""")
+    database = db.Database("sqlite:///" + str(path))
+    with database.engine.connect() as conn:
+        assert conn.execute(select(db.schema_version.c.version)).scalar_one() == 3
+        assert conn.execute(select(db.users.c.password_hash)).scalar_one() == "KEEP"
+        assert conn.execute(select(db.attachments)).all() == []
+    database.engine.dispose()
+    # Reopening is a no-op.
+    again = db.Database("sqlite:///" + str(path))
+    with again.engine.connect() as conn:
+        assert conn.execute(select(db.schema_version.c.version)).scalar_one() == 3
+    again.engine.dispose()

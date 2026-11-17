@@ -781,3 +781,176 @@ dd {
     max-width: 100%;
   }
 }
+
+/* Attachments: blob: previews only; no inline styles beyond progress width. */
+.attach {
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  cursor: pointer;
+  position: relative;
+}
+.attach.disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.attach input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  cursor: pointer;
+}
+.strip-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 4px 30px 0;
+  font-size: 10px;
+  color: var(--muted);
+}
+.strip-toggle input {
+  margin: 0;
+}
+.strip-toggle small {
+  flex-basis: 100%;
+  font-size: 9px;
+}
+.chat.dragging {
+  outline: 2px dashed var(--accent);
+  outline-offset: -8px;
+}
+.bubble.attachment {
+  gap: 8px;
+  white-space: normal;
+  width: min(360px, 80%);
+}
+.bubble.attachment img,
+.bubble.attachment video {
+  max-width: 100%;
+  border-radius: 8px;
+  display: block;
+  background: #0003;
+}
+.att-thumb {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 8px;
+  overflow: hidden;
+  color: inherit;
+}
+.att-thumb img {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+}
+.att-nothumb {
+  min-height: 90px;
+  font-size: 34px;
+  background: #0002;
+}
+.att-badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 3px 9px;
+  border-radius: 99px;
+  background: #000a;
+  color: #fff;
+  font-size: 11px;
+}
+.att-full {
+  cursor: zoom-in;
+}
+.att-meta {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.att-meta span {
+  opacity: 0.75;
+}
+.att-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.att-actions button,
+.att-progress button,
+.att-sending button {
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 7px;
+  border: 1px solid currentColor;
+  background: none;
+  color: inherit;
+}
+.att-error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #b0312a;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+[role="progressbar"] {
+  height: 6px;
+  border-radius: 99px;
+  background: #0003;
+  overflow: hidden;
+  flex: 1;
+}
+[role="progressbar"] span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.att-progress,
+.att-sending {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+}
+.att-sending {
+  padding: 8px 30px 0;
+}
+.lightbox section {
+  position: relative;
+  max-width: min(96vw, 1100px);
+  max-height: 94dvh;
+  text-align: center;
+  color: #fff;
+}
+.lightbox img {
+  max-width: 100%;
+  max-height: 82dvh;
+  border-radius: 8px;
+}
+.lightbox .close {
+  position: fixed;
+  top: 14px;
+  right: 18px;
+  color: #fff;
+  font-size: 30px;
+}
+@media (max-width: 760px) {
+  .strip-toggle,
+  .att-sending {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .bubble.attachment {
+    width: 90%;
+  }
+}

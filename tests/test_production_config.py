@@ -25,6 +25,16 @@ def production_env(monkeypatch, origin="https://chat.example"):
         serialization.NoEncryption(),
     )
     monkeypatch.setenv("TSA_PRIVATE_KEY", base64.b64encode(key).decode())
+    # Phase 6: the production main service requires object storage settings.
+    for name, value in (
+        ("STORAGE_BACKEND", "s3"),
+        ("S3_ENDPOINT", "https://storage.example"),
+        ("S3_BUCKET", "test-bucket"),
+        ("S3_REGION", "ap-southeast-1"),
+        ("S3_ACCESS_KEY_ID", "test-key-id"),
+        ("S3_SECRET_ACCESS_KEY", "test-secret"),
+    ):
+        monkeypatch.setenv(name, value)
     return key
 
 
@@ -338,3 +348,30 @@ def test_print_env_produces_a_key_without_writing_local_state(tmp_path):
     )
     assert isinstance(key, Ed25519PrivateKey)
     assert not (tmp_path / "not-created.key").exists()
+
+
+def test_production_main_requires_s3_storage_and_https_endpoint(monkeypatch):
+    core = RelayCore(logger=lambda *a, **kw: None)
+    production_env(monkeypatch)
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgres://placeholder:placeholder@db.invalid/main"
+    )
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    with pytest.raises(ValueError, match="STORAGE_BACKEND=s3"):
+        create_app(core)
+    monkeypatch.setenv("STORAGE_BACKEND", "s3")
+    monkeypatch.delenv("S3_SECRET_ACCESS_KEY")
+    with pytest.raises(ValueError, match="S3_SECRET_ACCESS_KEY"):
+        create_app(core)
+    monkeypatch.setenv("S3_SECRET_ACCESS_KEY", "x")
+    monkeypatch.setenv("S3_ENDPOINT", "http://storage.example")
+    with pytest.raises(ValueError, match="https"):
+        create_app(core)
+
+
+def test_production_csp_allows_only_blob_media_and_the_bucket_origin(monkeypatch):
+    client = TestClient(main_app(monkeypatch), base_url="https://chat.example")
+    csp = client.get("/healthz").headers["content-security-policy"]
+    assert "connect-src 'self' https://storage.example;" in csp
+    assert "img-src 'self' data: blob:" in csp and "media-src blob:" in csp
+    assert "unsafe" not in csp and "*" not in csp

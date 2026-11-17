@@ -138,6 +138,23 @@ See [evidence.md](evidence.md) for cryptographic formats, limitations and India 
 63 certificate requirements. The database now also stores `evidence_bundles` and
 schema v2 preserves old data transactionally.
 
+## Attachments (schema v3)
+
+`web/attachments_api.py` authorises presigned object URLs; `server/storage.py` has a
+`local` backend (dev/tests/lab, HMAC-signed same-origin URLs) and an `s3` backend
+(stdlib SigV4 against Neon Object Storage; presigned PUT signs `content-length`, so
+the bucket itself rejects a different size). Flow: `POST /api/attachments` (id,
+recipient, kind, ciphertext size/hash → quota, limits, rate limit, presigned PUT) →
+browser PUT of ciphertext → `POST .../finalize` (HEAD size check; otherwise the
+object is discarded) → recipient `GET .../download` (only uploader/recipient; the
+same 404 for strangers, expired and unfinalised ids) → presigned GET. The `attachments`
+table holds id, uploader, recipient, kind, object key, ciphertext size/hash and
+timestamps; never names, MIME types, keys or thumbnails. Expiry is lazy: each
+upload sweeps up to 25 expired/orphaned objects. CSP adds `img-src blob:`,
+`media-src blob:` and the bucket origin to `connect-src`. The attachment descriptor
+is plaintext *inside* the E2E message, so evidence v2 and the hash chain cover it
+unchanged; no evidence format change was needed (v1/v2 files still verify).
+
 ## What the server CAN see
 
 These values now also feed the SQL persistence described under
@@ -151,6 +168,9 @@ These values now also feed the SQL persistence described under
 - Each user's PBKDF2 password *hash* (never the plaintext password — see
   `auth/password_hash.py`) and RSA *public* key (`server/user_store.py`), both
   submitted once at registration.
+- Attachment metadata: uploader, recipient, image/video kind, ciphertext size, ciphertext
+  SHA-256, upload/expiry times, plus the bucket's access logs. Never file names, types,
+  keys, thumbnails or content.
 - Opaque ECDH public keys during the handshake, and opaque AES-GCM ciphertext/tag for
   every chat message — bytes it can relay but not read, since it never holds the
   session key.
@@ -186,7 +206,8 @@ configuration, migration commands and versioning policy.
   `SECURECHAT_ENVELOPE_MAX_ROWS` cap (default 10000), pruned on each insert.
 - `evidence_bundles`: owner-only password-encrypted evidence containers, title, creation
   time, encrypted size, plaintext-file SHA-256 and signed timestamp receipt JSON.
-- `schema_version`: schema version `2`, with an explicit additive 1→2 migration.
+- `attachments`: see above. `schema_version`: schema version `3`, with explicit additive
+  1→2 and 2→3 migrations (run in one transaction/advisory lock).
   Historical relay hashes are NULL; missing nonce/tag fields cannot be backfilled.
   Startup rejects unsupported versions;
   future table alterations require an explicit versioned migration.

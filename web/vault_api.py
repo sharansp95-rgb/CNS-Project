@@ -12,16 +12,16 @@ from sqlalchemy import select, insert, delete, func
 from crypto_engine.evidence_tools import valid_hash
 from server.db import evidence_bundles
 from server.timestamp import TimestampSigner
+from web.tokens import TokenStore
 
 MAX_UPLOAD = 12 * 1024 * 1024
 
 
-class VaultAPI:
+class VaultAPI(TokenStore):
     def __init__(self, app, database):
+        super().__init__()
         self.database = database
         self.signer = None
-        self.tokens = {}
-        self.lock = threading.Lock()
         self.signer_lock = threading.Lock()
 
         @app.get("/api/timestamp-key")
@@ -195,26 +195,3 @@ class VaultAPI:
             if self.signer is None:
                 self.signer = TimestampSigner()
             return self.signer
-
-    def issue(self, owner):
-        token = secrets.token_urlsafe(32)
-        with self.lock:
-            now = time.monotonic()
-            self.tokens = {t: v for t, v in self.tokens.items() if v[1] > now}
-            self.tokens[token] = (owner, now + 3600)
-        return token
-
-    def revoke(self, token):
-        with self.lock:
-            self.tokens.pop(token, None)
-
-    def owner(self, request):
-        header = request.headers.get("authorization", "")
-        token = header[7:] if header.startswith("Bearer ") else ""
-        with self.lock:
-            value = self.tokens.get(token)
-            if value is None or value[1] <= time.monotonic():
-                raise HTTPException(
-                    401, "Log in over WebSocket to access the evidence vault"
-                )
-            return value[0]

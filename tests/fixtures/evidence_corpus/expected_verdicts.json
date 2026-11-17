@@ -41,5 +41,15 @@
     "receipt": "receipt_another_file.json",
     "valid": false,
     "index": null
+  },
+  "valid_v2_attachment": {
+    "file": "valid_v2_attachment.json",
+    "valid": true,
+    "index": null
+  },
+  "edited_attachment_descriptor": {
+    "file": "edited_attachment_descriptor.json",
+    "valid": false,
+    "index": 2
   }
 }

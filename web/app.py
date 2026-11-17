@@ -27,7 +27,7 @@ class WebSocketPeer:
     """
 
     def __init__(self, websocket, vault=None):
-        self.vault = vault
+        self.vault = vault  # any TokenStore: issues HTTP bearer tokens at login
         self.token = None
         self.attempted_username = None
         self.websocket = websocket
@@ -79,6 +79,7 @@ def create_app(
     rate_limit=None,
     idle_timeout=None,
     include_vault=True,
+    attachment_storage=None,
 ):
     settings = Settings.load(
         origins,
@@ -125,6 +126,24 @@ def create_app(
     if vault and signer:
         vault.signer = signer
     app.state.vault = vault
+    # Attachments reuse the login-issued bearer tokens. The Attack Lab runs
+    # without the evidence vault but still gets a (local-storage) attachment API.
+    from web.tokens import TokenStore
+    from web.attachments_api import AttachmentAPI
+    from server.storage import storage_from_env
+
+    tokens = vault or TokenStore()
+    storage = attachment_storage or storage_from_env(production=settings.production and include_vault)
+    app.state.storage = storage
+    AttachmentAPI(app, core.database, storage, tokens)
+    connect_src = "'self'" + (f" {storage.origin}" if storage.kind == "s3" else "")
+    csp = (
+        "default-src 'none'; script-src 'self'; style-src 'self'; "
+        "img-src 'self' data: blob:; media-src blob:; font-src 'self'; "
+        f"connect-src {connect_src}; object-src 'none'; base-uri 'none'; "
+        "form-action 'self'; frame-ancestors 'none'"
+    )
+    app.state.csp = csp
 
     @app.get("/healthz")
     async def health():
@@ -146,7 +165,7 @@ def create_app(
         response = await call_next(request)
         response.headers.update(
             {
-                "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+                "Content-Security-Policy": csp,
                 "X-Content-Type-Options": "nosniff",
                 "Referrer-Policy": "no-referrer",
                 "X-Frame-Options": "DENY",
@@ -162,7 +181,7 @@ def create_app(
             await ws.close(code=1008)
             return
         await ws.accept()
-        peer = WebSocketPeer(ws, vault)
+        peer = WebSocketPeer(ws, tokens)
         app.state.peers.add(peer)
         writer = asyncio.create_task(peer.write_loop())
         addr = (ws.client.host if ws.client else "unknown", 0)
@@ -226,8 +245,7 @@ def create_app(
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
-            if vault:
-                vault.revoke(peer.token)
+            tokens.revoke(peer.token)
             peer.closed.set()
             writer.cancel()
             with suppress(asyncio.CancelledError, RuntimeError, WebSocketDisconnect):

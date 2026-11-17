@@ -106,6 +106,7 @@ def isolated_state(tmp_path, monkeypatch, request):
     if os.environ.get("TEST_DATABASE_URL") and request.node.path.name in {
         "test_database.py", "test_lockout.py", "test_security_events.py",
         "test_web_gateway.py", "test_evidence_vault.py", "test_postgres_upgrade.py",
+        "test_attachments.py",
     }:
         from tools.postgres_test_support import postgres_schema
         database_url = stack.enter_context(postgres_schema(

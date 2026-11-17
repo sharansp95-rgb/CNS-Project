@@ -322,3 +322,35 @@ retrying, and an unauthenticated idle socket does not loop forever to keep Rende
 Before the demo: open both URLs roughly two minutes early, enter the lab code,
 connect victims, and keep key/evidence backups locally. After the demo: close both
 tabs, avoid external uptime pingers, and review free-hour/bandwidth/database usage.
+
+## 9. Attachment storage (Phase 6)
+
+The main service stores encrypted attachments in a **private Neon Object Storage
+bucket** (free plan: 5 GB per project, egress shared with Postgres). The lab uses a
+local directory and receives no S3 settings.
+
+1. Create the bucket on the main Neon branch: `neonctl buckets create cns-attachments
+   --project-id <project> --branch main` (private; the access level cannot be changed
+   later). Create a credential with `neonctl credentials create --scope storage:read
+   --scope storage:write --name cns-render-main -o json` and capture its output
+   directly into Keychain (`cns-s3-access-key-id`, `cns-s3-secret-access-key`;
+   endpoint/bucket/region as `cns-s3-endpoint|bucket|region`). Never print or commit
+   it; `neonctl credentials reveal` can read it again. Use `neonctl env pull -e
+   AWS_ENDPOINT_URL_S3,AWS_REGION` outside the repository for the (non-secret) endpoint.
+2. Set the bucket CORS to the main origin only (S3 `PutBucketCors`; Neon has no CLI for it):
+   `tools/configure_bucket_cors.py https://<main>.onrender.com` with the five `S3_*`
+   variables in the environment.
+3. Main service environment: `STORAGE_BACKEND=s3`, `S3_ENDPOINT`, `S3_BUCKET`,
+   `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. Production start fails
+   if any is missing or the endpoint is not HTTPS. Optional: `ATTACHMENT_IMAGE_MAX_BYTES`
+   (10 MiB), `ATTACHMENT_VIDEO_MAX_BYTES` (50 MiB), `ATTACHMENT_USER_QUOTA_BYTES`
+   (200 MiB), `ATTACHMENT_RETENTION_DAYS` (7), `ATTACHMENT_URL_TTL_SECONDS` (300),
+   `ATTACHMENT_INIT_PER_MINUTE` (20), `ATTACHMENT_URLS_PER_MINUTE` (120).
+4. The first start upgrades schema v2 → v3 transactionally. Test it on the disposable
+   branch (section 3 command; the safety comparison only needs a different placeholder
+   `DATABASE_URL`).
+5. Rotating the credential: create a new one, update the Render variables, redeploy,
+   then `neonctl credentials revoke` the old token.
+
+Free-tier caveat: Neon's free egress (5 GB) is shared by Postgres and the bucket; the
+50 MB video limit and 7-day retention keep demo usage small.

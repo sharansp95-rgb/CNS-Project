@@ -48,6 +48,7 @@ from client.client import (  # noqa: E402
     connect_tls,
 )
 from client.evidence import EvidenceError  # noqa: E402
+from crypto_engine.attachment_tools import display_text
 from crypto_engine.signatures import fingerprint  # noqa: E402
 from crypto_engine.signatures import generate_keypair as generate_rsa_keypair  # noqa: E402
 from crypto_engine.signatures import serialize_public_key  # noqa: E402
@@ -937,6 +938,9 @@ class ChatGUI(tk.Tk):
         if label != self._last_date:
             self._last_date = label
             self._add_item({"kind": "date", "text": label})
+        # Attachments are web-only: show a safe placeholder. The verbatim message
+        # (with its signature and chain position) is untouched in the client's records.
+        text = display_text(text)
         self._add_item({"kind": "bubble", "align": align, "name": name, "text": text,
                         "ts": ts, "receipt": receipt, "gap": gap})
 

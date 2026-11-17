@@ -24,7 +24,9 @@
           ><button id="connect" disabled>Connect victims</button
           ><button id="reset" disabled>Reset lab</button
           ><button id="send" disabled>Send next message</button
-          ><button id="follow" disabled>Send follow-up message</button>
+          ><button id="follow" disabled>Send follow-up message</button
+          ><button id="attach" disabled>Alice sends test image</button
+          ><button id="open" disabled>Bob opens newest attachment</button>
         </div>
         <p id="status" role="status">
           Start a lab session, then connect the victims.
@@ -33,7 +35,9 @@
         <p>
           Drop/reorder need two messages. Replay needs an earlier message. Arm
           MITM before connecting victims. Injection creates an invalid GCM
-          envelope because the rogue relay has no session key.
+          envelope because the rogue relay has no session key. Attachment
+          attacks need a sent test image (two for “swap”); they alter only
+          encrypted bytes at rest in the sandbox store.
         </p>
       </section>
       <section class="victims">

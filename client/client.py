@@ -101,6 +101,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from auth.keystore import load_private_key, save_private_key  # noqa: E402
 from certs.generate_certs import cert_fingerprint  # noqa: E402
+from crypto_engine.attachment_tools import display_text
 from crypto_engine.aes_gcm import DecryptionError, decrypt, encrypt  # noqa: E402
 from crypto_engine.dh_exchange import compute_shared_key  # noqa: E402
 from crypto_engine.dh_exchange import generate_keypair as generate_ecdh_keypair  # noqa: E402
@@ -953,7 +954,7 @@ class SecureChatClient:
             "record_hash": rec_hash, "signature": b64(signature),
             "envelope_sha256": envelope_sha256(envelope),
         })
-        print(f"\r{sender}: {message_text}\n> ", end="", flush=True)
+        print(f"\r{sender}: {display_text(message_text)}\n> ", end="", flush=True)
         self._emit("message_received", sender=sender, message=message_text,
                    timestamp=timestamp, receipt=receipt)
 

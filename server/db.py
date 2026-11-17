@@ -21,7 +21,8 @@ from sqlalchemy.pool import StaticPool
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATABASE_URL = URL.create("sqlite", database=str(PROJECT_ROOT / "data" / "securechat.db"))
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+MAX_STORED_CIPHERTEXT_B64 = 8192
 metadata = MetaData()
 users = Table("users", metadata,
     Column("username", Text, primary_key=True),
@@ -56,6 +57,20 @@ evidence_bundles = Table("evidence_bundles", metadata,
     Column("created_at", Float, nullable=False), Column("title", Text, nullable=False),
     Column("size_bytes", Integer, nullable=False), Column("file_sha256", String(64), nullable=False),
     Column("ciphertext_b64", Text, nullable=False), Column("timestamp_receipt", JSON, nullable=False))
+# Schema v3: metadata for end-to-end encrypted attachments. Object bytes live in
+# object storage and are ciphertext only; no name, MIME type or key is stored here.
+attachments = Table("attachments", metadata,
+    Column("id", String(32), primary_key=True),
+    Column("uploader", Text, nullable=False, index=True),
+    Column("recipient", Text, nullable=False, index=True),
+    Column("kind", String(8), nullable=False),
+    Column("object_key", Text, nullable=False, unique=True),
+    Column("ciphertext_size", Integer, nullable=False),
+    Column("ciphertext_sha256", String(64), nullable=False),
+    Column("created_at", Float, nullable=False),
+    Column("finalized_at", Float),
+    Column("expires_at", Float, nullable=False, index=True),
+    Column("deleted_at", Float))
 schema_version = Table("schema_version", metadata,
     Column("version", Integer, primary_key=True))
 
@@ -96,18 +111,29 @@ class Database:
             versions = conn.execute(select(schema_version.c.version)).scalars().all()
             if not versions:
                 conn.execute(insert(schema_version).values(version=SCHEMA_VERSION))
-            elif versions == [1]:
-                # Explicit additive v1 → v2 migration. Historical rows cannot be
-                # backfilled: v1 did not retain nonce/tag/full envelopes.
-                from sqlalchemy import inspect
-                if 'envelope_sha256' not in {c['name'] for c in inspect(conn).get_columns('relayed_envelopes')}:
-                    conn.exec_driver_sql('ALTER TABLE relayed_envelopes ADD COLUMN envelope_sha256 VARCHAR(64)')
-                metadata.create_all(conn)
-                for index in relayed_envelopes.indexes:
-                    index.create(conn, checkfirst=True)
-                conn.execute(schema_version.update().values(version=SCHEMA_VERSION))
-            elif versions != [SCHEMA_VERSION]:
-                raise RuntimeError(f"Unsupported database schema version: {versions}")
+            else:
+                if versions == [1]:
+                    # Explicit additive v1 → v2 migration. Historical rows cannot be
+                    # backfilled: v1 did not retain nonce/tag/full envelopes.
+                    from sqlalchemy import inspect
+                    if 'envelope_sha256' not in {c['name'] for c in inspect(conn).get_columns('relayed_envelopes')}:
+                        conn.exec_driver_sql('ALTER TABLE relayed_envelopes ADD COLUMN envelope_sha256 VARCHAR(64)')
+                    metadata.create_all(conn)
+                    for index in relayed_envelopes.indexes:
+                        index.create(conn, checkfirst=True)
+                    conn.execute(schema_version.update().values(version=2))
+                    versions = [2]
+                if versions == [2]:
+                    # Additive v2 → v3: only creates the attachments table (and its
+                    # indexes). Runs in this same transaction/advisory lock, so a
+                    # failure rolls back and leaves schema v2 intact.
+                    attachments.create(conn, checkfirst=True)
+                    for index in attachments.indexes:
+                        index.create(conn, checkfirst=True)
+                    conn.execute(schema_version.update().values(version=3))
+                    versions = [3]
+                if versions != [SCHEMA_VERSION]:
+                    raise RuntimeError(f"Unsupported database schema version: {versions}")
             metadata.create_all(conn)
 
     @contextmanager
@@ -165,6 +191,10 @@ def record_relay(envelope, sender, database=None):
     if cap < 1:
         raise ValueError("SECURECHAT_ENVELOPE_MAX_ROWS must be positive")
     ciphertext = envelope.get("ciphertext") if envelope.get("type") == "chat" else None
+    # Attachment descriptors (with thumbnail) make large envelopes; the hash and
+    # size metadata are kept, but the bulky ciphertext is not duplicated in SQL.
+    if isinstance(ciphertext, str) and len(ciphertext) > MAX_STORED_CIPHERTEXT_B64:
+        ciphertext = None
     if ciphertext is not None:
         try:
             base64.b64decode(ciphertext, validate=True)

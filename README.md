@@ -260,6 +260,43 @@ Neon verification uses a separate disposable `TEST_DATABASE_URL`, with per-test
 schemas and a guard against the main database; see the exact command in DEPLOY.md.
 Those external tests are prepared and have not been run without your Neon account.
 
+## Encrypted images and video (Phase 6)
+
+The web client sends JPEG, PNG, WebP, GIF, MP4 and WebM files **end to end
+encrypted**. The relay and the storage provider only ever hold ciphertext.
+
+1. The browser sniffs the file's magic bytes (declared MIME/extension are ignored;
+   SVG/HTML/scripts are refused), optionally strips EXIF/GPS from images, and makes
+   a small thumbnail.
+2. It encrypts the file in 1 MiB chunks with a fresh AES-256-GCM key. Each chunk
+   has its own random nonce and AAD = (file id, chunk index, is-last), so chunks
+   cannot be reordered, dropped, truncated or moved between files.
+3. The ciphertext goes **directly** from the browser to object storage through a
+   short-lived presigned URL (the app server never proxies file bytes). The
+   server records only ciphertext size and SHA-256.
+4. The file key, id, name, type, size, both hashes and the thumbnail travel inside
+   a normal chat message (`securechat-attachment/v1:{...}`), so attachments are
+   signed, AES-GCM encrypted, hash-chained, replay-protected and part of evidence.
+5. The recipient downloads, checks the ciphertext hash, decrypts every chunk,
+   checks the plaintext hash and re-sniffs the type before rendering a `blob:` URL.
+   Any mismatch shows "Attachment tampered or corrupted" and is reported like other
+   client-detected attacks.
+
+Limits (configurable): images 10 MB, videos 50 MB, 200 MB live storage per uploader,
+7-day retention, 20 uploads/min and 120 download URLs/min per user, 5-minute URL
+lifetime. Expired and never-finalised objects are removed lazily on later requests
+(no cron, no pinger). Production uses **Neon Object Storage** (private bucket, CORS
+limited to the main origin); development, tests and the lab use a local directory.
+The desktop client shows `[attachment — open in web client]` and its chain
+verification is unchanged. Details: [docs/media_phase_report.md](docs/media_phase_report.md),
+[architecture](docs/architecture.md) and [DEPLOY.md](docs/DEPLOY.md#9-attachment-storage-phase-6).
+
+Privacy notes: the server learns that an attachment exists, who exchanged it, its
+approximate size and whether it is an image or video. Video metadata is **not**
+stripped. Evidence files contain file keys (they contain message plaintext too), so
+keep them confidential; the companion PDF lists names and hashes only. `/verify`
+can check a file against the hashes in an evidence file, locally.
+
 ## Evidence
 
 Signed evidence is now available as v1 or v2 JSON, with optional server-clock receipts,

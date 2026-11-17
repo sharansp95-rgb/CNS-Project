@@ -9,6 +9,8 @@ const actions = [
   ["inject_next", "Inject forged message"],
   ["mitm_next_handshake", "MITM key substitution"],
   ["brute_force", "Login brute-force / lockout"],
+  ["tamper_attachment", "Tamper stored attachment"],
+  ["swap_attachment", "Swap attachment object"],
 ];
 const status = document.querySelector<HTMLParagraphElement>("#status")!;
 const button = (id: string) =>
@@ -112,6 +114,8 @@ async function bootstrap() {
     }
     button("send").disabled = false;
     button("follow").disabled = false;
+    button("attach").disabled = false;
+    button("open").disabled = false;
     status.textContent =
       "Victims connected using the unchanged production bundle. Their checks decide the outcome.";
   } catch (e) {
@@ -135,6 +139,48 @@ button("start").onclick = async () => {
   }
 };
 button("connect").onclick = () => void bootstrap();
+// Solid-colour PNGs of the same size, so "swap" replaces one genuine ciphertext
+// object with another. Alice's real client encrypts and uploads them.
+function testImage(frame: HTMLIFrameElement, colour: string): Promise<File> {
+  const view = frame.contentWindow as any;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 48;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = colour;
+  ctx.fillRect(0, 0, 48, 48);
+  return new Promise((resolve) =>
+    canvas.toBlob(
+      (blob) => resolve(new view.File([blob!], "lab-" + ++sequence + ".png", { type: "image/png" })),
+      "image/png",
+    ),
+  );
+}
+button("attach").onclick = async () => {
+  try {
+    const colours = ["#c0392b", "#2980b9", "#27ae60"];
+    const file = await testImage(frames[0], colours[sequence % 3]);
+    const view = frames[0].contentWindow as any;
+    const field = frames[0].contentDocument!.querySelector<HTMLInputElement>('input[type="file"][aria-label="Attach file"]');
+    if (!field) throw Error("Victim is not connected yet");
+    const dt = new view.DataTransfer();
+    dt.items.add(file);
+    field.files = dt.files;
+    field.dispatchEvent(new view.Event("change", { bubbles: true }));
+    status.textContent = "Alice is encrypting and uploading a test image (ciphertext only).";
+  } catch (e) {
+    show(e);
+  }
+};
+button("open").onclick = () => {
+  try {
+    const buttons = Array.from(frames[1].contentDocument!.querySelectorAll<HTMLButtonElement>("button.att-thumb"));
+    if (!buttons.length) throw Error("Bob has no attachment yet");
+    buttons[buttons.length - 1].click();
+    status.textContent = "Bob is downloading and verifying the newest attachment.";
+  } catch (e) {
+    show(e);
+  }
+};
 button("reset").onclick = async () => {
   try {
     config = await api("reset", {});
@@ -147,6 +193,8 @@ button("reset").onclick = async () => {
     button("connect").disabled = false;
     button("send").disabled = true;
     button("follow").disabled = true;
+    button("attach").disabled = true;
+    button("open").disabled = true;
     document.querySelector("#detections")!.replaceChildren();
     status.textContent =
       "Lab DB wiped and demo accounts reseeded. Connect victims again.";
@@ -181,6 +229,10 @@ for (const [action, title] of actions) {
         status.textContent = result.locked
           ? "Sandbox account locked by the real login guard. Final attempt rejected before PBKDF2."
           : "No lockout detected";
+      } else if (action.endsWith("_attachment")) {
+        await api("attachment-attack", { action });
+        status.textContent =
+          "Stored ciphertext object modified. Now click “Bob opens newest attachment”: the real client must reject it.";
       } else {
         await api("arm", { action, target: "lab_alice" });
         status.textContent =
