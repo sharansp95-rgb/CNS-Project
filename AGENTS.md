@@ -28,3 +28,8 @@ custom authentication, E2E crypto and separate Attack Lab architecture.
   Never trust *, 0.0.0.0/0, ::/0 or all private ranges.
 - Push the current Git branch without renaming it. Do not rewrite history.
   Scan history and working-tree files for secrets before pushing.
+
+- On 17 November 2026 the owner explicitly approved loopback plus 10.0.0.0/8
+  and both complete official Cloudflare IPv4/IPv6 lists for these two services.
+  Apply this approved configuration without asking again; see DEPLOY.md section 6.
+  Do not add 172.16.0.0/12 or 192.168.0.0/16. Refresh Cloudflare ranges if changed.

@@ -225,4 +225,7 @@ async function poll() {
     }
   setTimeout(poll, 1000);
 }
+// The static HTML may appear before this module loads on a cold connection.
+// Enable the first control only after its handlers have been installed.
+button("start").disabled = false;
 void poll();

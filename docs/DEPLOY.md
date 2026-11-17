@@ -222,6 +222,41 @@ This deliberately favors rejection over accepting forged client IPs or treating
 all visitors as one proxy address. A successful health check alone does not prove
 that public HTTPS/WebSocket proxy configuration is correct.
 
+### Approved live configuration (17 November 2026)
+
+The owner approved loopback plus **10.0.0.0/8**, because observed Render forwarding
+hosts rotated between 10.24.95.43, 10.28.53.189 and 10.28.187.27 across redeploys.
+This is an explicit deployment decision, not a hard-coded application default or
+independent provider confirmation that every address in that range is ingress.
+Do **not** add 172.16.0.0/12 or 192.168.0.0/16. The validator accepts this range;
+it rejects universal IPv4/IPv6 trust (prefix length zero), not individual private
+networks. Direct connections must still come through a trusted socket peer before
+forwarding headers are used.
+
+The **full official Cloudflare IPv4 and IPv6 lists** were fetched on 17 November
+2026 from [ips-v4](https://www.cloudflare.com/ips-v4) and
+[ips-v6](https://www.cloudflare.com/ips-v6), using their trailing-slash variants for
+the successful HTTP fetch. The fetched snapshot contains 15 IPv4 and 7 IPv6 CIDRs.
+Both services use the following combined value:
+
+```text
+127.0.0.1,::1,10.0.0.0/8,173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32
+```
+
+**Refresh both lists if Cloudflare changes them.** Before refreshing, fetch both
+HTTPS endpoints again, validate every entry as a CIDR, retain the approved loopback
+and 10/8 entries, and replace the Cloudflare portion with both complete lists. Set
+the resulting FORWARDED_ALLOW_IPS on each service, redeploy, and repeat the
+forwarding/spoofing and separate-client rate-limit checks. Do not copy IPs from
+visitor-supplied headers into this list or broaden other private networks.
+
+The observed direct socket peer was 127.0.0.1, with additional private and
+Cloudflare forwarding hops. Thus public HTTPS returned 200 under bootstrap trust,
+rather than the anticipated 403; trusting only loopback still resolved the client
+to an intermediary. Diagnostic root requests log the original socket peer and
+IP-only forwarding chain before normalization, without arbitrary header content.
+See [live_deployment_report.md](live_deployment_report.md) for verification status.
+
 ## 7. Your initial verification and Phase 5B handoff
 
 1. Open `https://<main>/healthz` and `https://<lab>/healthz`; both should return
