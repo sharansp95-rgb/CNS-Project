@@ -345,9 +345,9 @@ PYEOF
 
 === Simple Mallory demo is running ===
  Chat           : https://localhost:$PROXY_PORT_WEB   (the real web client, served by the lab relay; logs/demo_mallory.log)
- Mallory window : http://localhost:$MALLORY_PORT      (DROP / TAMPER / REPLAY on each message, Reset)
+ Mallory window : http://localhost:$MALLORY_PORT      (TAMPER / DROP / REPLAY buttons at the top, Reset)
  Alice$( [ -z "$LAN_IP" ] && echo " and Bob" )          : $( [ -z "$LAN_IP" ] && echo "two Chrome windows" || echo "the Chrome window on this Mac (Bob is your phone)" ). Create an identity in each, naming the OTHER as Peer.
- How to attack  : send one normal message first, click DROP / TAMPER / REPLAY on its row, then send the NEXT message.
+ How to attack  : click TAMPER, DROP or REPLAY (one shot), then send the NEXT message from either user.
  Script         : attack_lab/README.md, "Simple Mallory demo".
  When finished  : demo/stop_demo.sh
 MSG
