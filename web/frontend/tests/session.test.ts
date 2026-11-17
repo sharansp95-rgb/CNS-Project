@@ -215,3 +215,41 @@ it("a delayed old handshake cannot restore a discarded key", async () => {
   expect(a.handshake).toBeUndefined();
   spy.mockRestore();
 });
+
+it("keeps only authenticated sockets alive and removes old activity listeners", async () => {
+  vi.useFakeTimers();
+  const target = new EventTarget();
+  const add = vi.spyOn(target, "addEventListener");
+  const remove = vi.spyOn(target, "removeEventListener");
+  vi.stubGlobal("window", target);
+  const { a } = await pair();
+  a.isAuthenticated = true;
+  await a.receive({ type: "session_policy", idle_seconds: 120 });
+  expect(add).toHaveBeenCalledTimes(4);
+  await a.receive({ type: "session_policy", idle_seconds: 120 });
+  expect(remove).toHaveBeenCalledTimes(4);
+  // Peer departure changes the E2E session, not this socket's authenticated login.
+  await a.receive({ type: "user_left", username: "bob" });
+  await vi.advanceTimersByTimeAsync(30000);
+  expect(
+    (a.socket as any).sent.filter((e: any) => e.type === "ping"),
+  ).toHaveLength(1);
+  expect(a.isAuthenticated).toBe(true);
+  a.disconnect();
+  expect(remove).toHaveBeenCalledTimes(8);
+  const count = (a.socket as any).sent.length;
+  await vi.advanceTimersByTimeAsync(60000);
+  expect((a.socket as any).sent).toHaveLength(count);
+});
+
+it("an anonymous session policy cannot start client keepalive", async () => {
+  vi.useFakeTimers();
+  const { a } = await pair();
+  a.isAuthenticated = false;
+  await a.receive({ type: "session_policy", idle_seconds: 120 });
+  await vi.advanceTimersByTimeAsync(60000);
+  expect((a.socket as any).sent.some((e: any) => e.type === "ping")).toBe(
+    false,
+  );
+  a.disconnect();
+});

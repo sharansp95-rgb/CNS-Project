@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Browser } from "@playwright/test";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 const runId = process.env.E2E_RUN_ID || Date.now().toString(36);
 const password = "Browser-test-password-42!";
 const fx = (n: string) =>
@@ -148,6 +149,25 @@ test("video both ways with inline player", async () => {
         .evaluate((v: HTMLVideoElement) => v.videoWidth),
     )
     .toBe(64);
+});
+
+test("QuickTime MOV is encrypted and offers the verified download when the codec is unsupported", async ({
+  browserName: _browserName,
+}, testInfo) => {
+  const i = await send(pa, pb, "unsupported-codec.mov");
+  const item = card(pb).nth(i);
+  await item.getByRole("button", { name: /Open video/ }).click();
+  await expect(item.getByRole("status")).toContainText(
+    "This browser cannot play this video",
+  );
+  const downloaded = pb.waitForEvent("download");
+  await item.getByRole("button", { name: "Save", exact: true }).click();
+  const file = testInfo.outputPath("phone.mov");
+  await (await downloaded).saveAs(file);
+  expect(readFileSync(file)).toEqual(readFileSync(fx("unsupported-codec.mov")));
+  await expect(
+    item.getByRole("button", { name: /Security receipt: attachment/ }),
+  ).toBeVisible();
 });
 
 test("a modified stored object is rejected as tampered", async () => {

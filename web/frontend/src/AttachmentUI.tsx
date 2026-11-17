@@ -59,6 +59,7 @@ export function AttachmentCard({
 }) {
   const [progress, setProgress] = useState<Progress>();
   const [error, setError] = useState("");
+  const [videoError, setVideoError] = useState(false);
   const abort = useRef<AbortController>(undefined);
   const opened = session.opened.get(d.id);
   async function open() {
@@ -96,6 +97,8 @@ export function AttachmentCard({
           playsInline
           preload="metadata"
           aria-label={"Video " + d.name}
+          hidden={videoError}
+          onError={() => setVideoError(true)}
         />
       ) : opened ? (
         <img
@@ -130,6 +133,12 @@ export function AttachmentCard({
           {mb(d.size)} · {d.kind}
         </span>
       </div>
+      {opened && d.kind === "video" && videoError && (
+        <p className="small" role="status">
+          This browser cannot play this video. Use Save to download the verified
+          original and open it in a compatible player.
+        </p>
+      )}
       {progress && (
         <div className="att-progress">
           <div

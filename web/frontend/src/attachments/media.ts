@@ -35,6 +35,8 @@ export function sniff(b: Uint8Array): Sniffed | null {
     return { kind: "image", mime: "image/gif", ext: "gif" };
   if (b.length > 12 && ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 4) === "WEBP")
     return { kind: "image", mime: "image/webp", ext: "webp" };
+  if (b.length > 12 && ascii(b, 4, 4) === "ftyp" && ascii(b, 8, 4) === "qt  ")
+    return { kind: "video", mime: "video/quicktime", ext: "mov" };
   if (
     b.length > 12 &&
     ascii(b, 4, 4) === "ftyp" &&
@@ -56,6 +58,7 @@ export const ALLOWED_MIME = [
   "image/gif",
   "video/mp4",
   "video/webm",
+  "video/quicktime",
 ];
 
 const concatBytes = (parts: Uint8Array[]) => {

@@ -206,6 +206,38 @@ test("microphone error is explained and no call starts (every engine)", async ()
   });
 });
 
+test("simultaneous calls converge on one signed call and still verify fingerprints and audio", async () => {
+  await Promise.all(
+    [pa, pb].map((page) =>
+      page.getByRole("button", { name: "Start voice call" }).click(),
+    ),
+  );
+  // The shared account prefix is identical; alice sorts before bob on both peers.
+  await expect(panel(pa)).toHaveAttribute("data-state", "calling");
+  await expect(panel(pb)).toHaveAttribute("data-state", "ringing");
+  await panel(pb).getByRole("button", { name: "Accept", exact: true }).click();
+  for (const page of [pa, pb]) {
+    await expect(panel(page)).toHaveAttribute("data-state", "active", {
+      timeout: 30000,
+    });
+    await expect(panel(page).getByTestId("call-fp")).toContainText(
+      "matches the fingerprint",
+      { timeout: 15000 },
+    );
+    await expect
+      .poll(() => bytes(page), { timeout: 20000 })
+      .toBeGreaterThan(1000);
+  }
+  expect(await panel(pa).getByTestId("call-words").innerText()).toBe(
+    await panel(pb).getByTestId("call-words").innerText(),
+  );
+  await panel(pa).getByRole("button", { name: "Hang up", exact: true }).click();
+  await expect(panel(pa)).toHaveCount(0);
+  await expect(panel(pb)).toHaveCount(0);
+  for (const page of [pa, pb])
+    await expect(page.getByTestId("call-log").last()).toContainText("Call");
+});
+
 test("an unanswered incoming call times out after 30 seconds", async () => {
   await pb.clock.install();
   await pa.getByRole("button", { name: "Start voice call" }).click();

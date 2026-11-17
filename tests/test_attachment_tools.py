@@ -243,3 +243,13 @@ def test_gui_bubble_shows_placeholder_not_descriptor():
     finally:
         window.update()
         window.destroy()
+
+
+def test_quicktime_descriptor_uses_the_existing_encrypted_format():
+    original = b"\x00\x00\x00\x18ftypqt  " + bytes(12)
+    ciphertext, secrets = encrypt_file(original, chunk=SMALL)
+    descriptor = dict(secrets, v=1, name="phone.mov", mime="video/quicktime", kind="video")
+    encoded = encode_descriptor(descriptor)
+    assert parse_descriptor(encoded) == descriptor
+    assert decrypt_file(ciphertext, descriptor) == original
+    assert ciphertext_size(len(original), SMALL) == len(ciphertext)

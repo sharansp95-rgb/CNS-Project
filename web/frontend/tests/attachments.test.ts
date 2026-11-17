@@ -414,6 +414,19 @@ describe("metadata stripping", () => {
   });
 });
 
+describe("QuickTime content detection", () => {
+  it("accepts the exact QuickTime brand and keeps the existing MP4/WebM rules", () => {
+    expect(sniff(mp4("qt  "))).toEqual({
+      kind: "video",
+      mime: "video/quicktime",
+      ext: "mov",
+    });
+    expect(sniff(mp4("qtXX"))).toBeNull();
+    expect(sniff(mp4("zzzz"))).toBeNull();
+    expect(sniff(text("fake.mov ftyp qt"))).toBeNull();
+  });
+});
+
 describe("filenames and descriptors", () => {
   it("sanitises paths, control and bidi characters and forces the verified extension", () => {
     expect(sanitizeFilename("../../etc/passwd.html", "jpg")).not.toMatch(

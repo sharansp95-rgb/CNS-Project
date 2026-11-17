@@ -84,6 +84,7 @@ export class Session {
   calls: CallManager;
   limits?: AttachmentLimits;
   private pingTimer?: ReturnType<typeof setInterval>;
+  private removeActivityListeners?: () => void;
   private lastActive = Date.now();
   private epoch = 0;
   private stopped = false;
@@ -135,12 +136,17 @@ export class Session {
   /** Authenticated keepalive. Stops after 30 minutes without user input (unless a call is
    * active), so a forgotten tab cannot hold a free-tier instance awake forever. */
   private startKeepalive(idleSeconds: number) {
-    clearInterval(this.pingTimer);
+    this.stopKeepalive();
     const every = Math.max(1000, Math.min(30000, (idleSeconds * 1000) / 3));
     const mark = () => (this.lastActive = Date.now());
-    if (typeof window !== "undefined")
-      for (const ev of ["keydown", "pointerdown", "touchstart", "mousemove"])
+    if (typeof window !== "undefined") {
+      const events = ["keydown", "pointerdown", "touchstart", "mousemove"];
+      for (const ev of events)
         window.addEventListener(ev, mark, { passive: true });
+      this.removeActivityListeners = () => {
+        for (const ev of events) window.removeEventListener(ev, mark);
+      };
+    }
     this.lastActive = Date.now();
     this.pingTimer = setInterval(() => {
       const active =
@@ -153,8 +159,12 @@ export class Session {
         this.socket.send(JSON.stringify({ type: "ping" }));
     }, every);
   }
-  private clearSession() {
+  private stopKeepalive() {
     clearInterval(this.pingTimer);
+    this.removeActivityListeners?.();
+    this.removeActivityListeners = undefined;
+  }
+  private clearSession() {
     this.calls?.teardown("The secure session ended, so the call ended.");
     this.epoch++;
     this.apiToken = "";
@@ -175,6 +185,7 @@ export class Session {
     this.reconnecting = false;
     clearTimeout(this.retryTimer);
     clearTimeout(this.openTimer);
+    this.stopKeepalive();
     this.clearSession();
     this.isAuthenticated = false;
     for (const o of this.opened.values()) URL.revokeObjectURL(o.url);
@@ -202,6 +213,7 @@ export class Session {
     socket.onclose = () => {
       if (this.socket !== socket) return;
       clearTimeout(this.openTimer);
+      this.stopKeepalive();
       const retry =
         !this.stopped && (this.isAuthenticated || this.reconnecting);
       this.closed = true;
@@ -291,6 +303,7 @@ export class Session {
     if (e.type === "pong") return; // keepalive replies stay out of the Wire Log
     if (
       e.type === "session_policy" &&
+      this.isAuthenticated &&
       Number.isFinite(e.idle_seconds) &&
       e.idle_seconds > 0
     ) {
@@ -679,7 +692,7 @@ export class Session {
     const type = sniff(bytes);
     if (!type)
       throw Error(
-        "Unsupported file type. Allowed: JPEG, PNG, WebP, GIF, MP4, WebM",
+        "Unsupported file type. Allowed: JPEG, PNG, WebP, GIF, MP4, WebM, QuickTime (.mov)",
       );
     const max =
       type.kind === "image" ? this.limits.image_max : this.limits.video_max;

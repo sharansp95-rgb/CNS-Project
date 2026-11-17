@@ -193,8 +193,8 @@ export class CallManager {
       outputs: [],
     };
   }
-  private async mic() {
-    this.local = await navigator.mediaDevices.getUserMedia({
+  private async mic(cur: CallInfo): Promise<boolean> {
+    const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
@@ -202,6 +202,14 @@ export class CallManager {
       },
       video: false,
     });
+    // A permission prompt may resolve after glare, cancellation or disconnect.
+    // Never let that old request replace a newer call's microphone stream.
+    if (this.info !== cur) {
+      stream.getTracks().forEach((track) => track.stop());
+      return false;
+    }
+    this.local = stream;
+    return true;
   }
   private connect(cfg: IceConfig) {
     // Open the site as /?relay=1 to force every media path through the TURN relay
@@ -294,28 +302,33 @@ export class CallManager {
       iceServers: [],
       turn: "unavailable",
     });
+    const cur = this.info;
     this.ended = false;
     this.ui();
     try {
-      await this.mic();
+      if (!(await this.mic(cur))) return;
     } catch (e) {
+      if (this.info !== cur) return;
       this.info = undefined;
       this.ui();
       throw Error(micMessage(e), { cause: e });
     }
     try {
       const cfg = await this.ice();
-      this.info.turn = cfg.turn;
+      if (this.info !== cur) return;
+      cur.turn = cfg.turn;
       this.connect(cfg);
       const pc = this.pc!;
-      await pc.setLocalDescription(
-        await pc.createOffer({ offerToReceiveAudio: true }),
-      );
+      const offer = await pc.createOffer({ offerToReceiveAudio: true });
+      if (this.info !== cur) return;
+      await pc.setLocalDescription(offer);
+      if (this.info !== cur) return;
       await gathered(pc);
+      if (this.info !== cur) return;
       const sdp = pc.localDescription!.sdp;
       const err = validateSdp(sdp);
       if (err) throw Error("Could not build a valid call offer: " + err);
-      this.info.localFp = signedFingerprint(sdp)!;
+      cur.localFp = signedFingerprint(sdp)!;
       this.s.note("call_candidates", {
         call: id,
         gathered: candidateSummary(sdp),
@@ -325,12 +338,13 @@ export class CallManager {
       this.signal({ call: id, type: "invite", sdp });
       this.s.note("call_fingerprints", {
         call: id,
-        local_dtls_sha256: this.info.localFp,
+        local_dtls_sha256: cur.localFp,
         note: "Sent inside the signed, encrypted invite",
       });
       this.armRing("no_answer");
       this.ui();
     } catch (e) {
+      if (this.info !== cur) return;
       await this.finish("failed", "setup_failed", false);
       throw e;
     }
@@ -341,7 +355,25 @@ export class CallManager {
     const cur = this.info;
     try {
       if (sig.type === "invite") {
-        if (cur || !this.s.key) {
+        const yieldOutgoing =
+          cur?.role === "caller" &&
+          cur.state === "calling" &&
+          this.s.username > this.s.peer &&
+          !!this.s.key;
+        if (yieldOutgoing) {
+          // Both peers use this same ordering. The smaller username's outgoing
+          // call wins; all signaling still uses existing signed E2E messages.
+          this.signal({
+            call: cur.id,
+            type: "cancel",
+            reason: "simultaneous_call",
+          });
+          await this.finish("canceled", "simultaneous_call", false);
+          this.s.note("call_glare", {
+            call: sig.call,
+            note: "Both called at once; keeping the smaller username's call",
+          });
+        } else if (cur || !this.s.key) {
           this.signal({ call: sig.call, type: "busy" });
           this.s.note("call_busy", {
             call: sig.call,
@@ -416,8 +448,9 @@ export class CallManager {
     cur.state = "connecting";
     this.ui();
     try {
-      await this.mic();
+      if (!(await this.mic(cur))) return;
     } catch (e) {
+      if (this.info !== cur) return;
       cur.note = micMessage(e);
       this.signal({ call: cur.id, type: "decline", reason: "no_microphone" });
       this.lastError = cur.note;
@@ -426,17 +459,24 @@ export class CallManager {
     }
     try {
       const cfg = await this.ice();
+      if (this.info !== cur) return;
       cur.turn = cfg.turn;
       this.connect(cfg);
       const pc = this.pc!;
       await pc.setRemoteDescription({ type: "offer", sdp: this.offer! });
-      await pc.setLocalDescription(await pc.createAnswer());
+      if (this.info !== cur) return;
+      const answer = await pc.createAnswer();
+      if (this.info !== cur) return;
+      await pc.setLocalDescription(answer);
+      if (this.info !== cur) return;
       await gathered(pc);
+      if (this.info !== cur) return;
       const sdp = pc.localDescription!.sdp;
       const err = validateSdp(sdp);
       if (err) throw Error(err);
       cur.localFp = signedFingerprint(sdp)!;
       cur.words = await sas(cur.localFp, cur.remoteFp, cur.id);
+      if (this.info !== cur) return;
       this.s.note("call_candidates", {
         call: cur.id,
         gathered: candidateSummary(sdp),
@@ -451,6 +491,7 @@ export class CallManager {
       });
       this.ui();
     } catch (_e) {
+      if (this.info !== cur) return;
       await this.finish("failed", "setup_failed", true);
     }
   }

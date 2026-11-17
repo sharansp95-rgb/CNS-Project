@@ -492,7 +492,7 @@ function App() {
                 <input
                   type="file"
                   aria-label="Attach file"
-                  accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"
+                  accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime,.mov"
                   disabled={!session.key || !!sending}
                   onChange={(e) => {
                     void attach(e.target.files);

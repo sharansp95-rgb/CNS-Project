@@ -28,7 +28,15 @@ PREFIX = "securechat-attachment/v1:"
 PLACEHOLDER = "[attachment — open in web client]"
 CHUNK = 1024 * 1024
 OVERHEAD = 28
-ALLOWED_MIME = ("image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/webm")
+ALLOWED_MIME = (
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+)
 MAX_THUMB = 12 * 1024
 _HEX32, _HEX64 = re.compile(r"[0-9a-f]{32}"), re.compile(r"[0-9a-f]{64}")
 
