@@ -1,8 +1,11 @@
 # Deploy Team 15 Secure Chat: Phase 5A → your deployment → Phase 5B
 
-The code and Blueprint are prepared locally. No account, GitHub repository, push or
-cloud deployment has been created by the assistant. You perform the steps below.
-Replace every `<placeholder>` before running a command or entering a value.
+The live deployment is provisioned: two Render Free Python services in Singapore,
+a private GitHub repository and Neon Free Postgres in AWS Singapore. Results and
+URLs are in [live_deployment_report.md](live_deployment_report.md). The services
+were created through the Render API using the validated render.yaml settings;
+they are not attached to a managed Blueprint. The steps below also document how to
+reproduce the deployment. Replace every `<placeholder>` when reproducing it.
 
 ## 1. Understand the layout
 
@@ -66,8 +69,9 @@ not publish a raw TCP chat listener. Both deployed sites use HTTPS/WSS.
    rebuilt `web/static/` and `attack_lab/static/`.
 4. On GitHub, click **+ → New repository**. Name it `CNS-Project`, choose **Private**,
    and leave README/.gitignore/license initialization unchecked. Create it.
-5. Copy the repository's SSH or HTTPS remote URL. These commands are for **you**;
-   they have not been run by the assistant:
+5. For a new deployment, copy the repository's SSH or HTTPS remote URL. The current
+   private repository already has origin/main configured and pushed; do not repeat
+   repository/remote creation against the existing checkout. Example commands:
 
    ```sh
    git status --short
@@ -118,7 +122,8 @@ not publish a raw TCP chat listener. Both deployed sites use HTTPS/WSS.
    schema creation and reject main/test equality, role-only differences and pooled
    aliases of the same main database. The test URL must not have custom `options`.
    A missing test URL skips the explicit Postgres upgrade test; it does not claim
-   successful Neon verification. The tests have not been run against Neon yet.
+   successful Neon verification. The current disposable Neon run passed all **68**
+   tests on 17 November 2026; see the live report.
 
 A first main-service start creates schema v2. Existing schema v1 upgrades additively
 inside a transaction/advisory lock. No manual SQL is needed for the app schema.
@@ -200,8 +205,8 @@ disable the duplicate automatic Uvicorn wrapper. Tests prove that a direct visit
 cannot spoof IP/HTTPS and that two real forwarded clients have different rate buckets.
 [Uvicorn's proxy implementation](https://github.com/Kludex/uvicorn/blob/main/uvicorn/middleware/proxy_headers.py).
 
-Render's actual ingress peer addresses have **not** been verified in Phase 5A. Do
-not guess a public IP allowlist or use `*`, `0.0.0.0/0`, `::/0`, or all private ranges.
+Phase 5A did not verify ingress peers. Live observations and the owner's approved
+configuration now appear below. For a new deployment, do not guess an allowlist or use `*`, `0.0.0.0/0`, `::/0`, or all private ranges.
 The application rejects universal trust. Use these fail-closed setup steps:
 
 1. Obtain Render's trusted ingress peer addresses/CIDRs for the service from its

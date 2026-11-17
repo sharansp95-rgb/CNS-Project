@@ -228,8 +228,9 @@ fails to launch a profile on the development Mac; see the deployment report.
 ## Live deployment
 
 Both services are provisioned on Render Free in Singapore, with main storage on
-Neon Free Postgres in the same region. Proxy trust is still under review; the live
-browser verification is pending. Deployment instructions remain in
+Neon Free Postgres in the same region. Live Chromium and WebKit verification passes
+for both sites. Firefox could not launch its local test profile. Results are in
+[the live deployment report](docs/live_deployment_report.md); setup instructions are in
 [docs/DEPLOY.md](docs/DEPLOY.md).
 
 - Main site: [team15-securechat.onrender.com](https://team15-securechat.onrender.com)
@@ -249,7 +250,7 @@ Free services sleep after 15 minutes idle, lose local files on restart and share
 750-hour/month workspace budget. Open both URLs about two minutes before a demo and
 close them afterward. No keep-alive pinger was added. The in-memory roster permits
 **one instance/worker only**. Tkinter remains a local TCP/TLS demo; Render exposes
-only the browser HTTP/WS gateway. Live smoke testing remains pending proxy review.
+only the browser HTTP/WS gateway. Live smoke tests verify HTTPS/WSS, chat, encrypted evidence and sandbox detections.
 
 Browser reconnect discards old session keys and bearer tokens, retries the transport,
 and asks for login plus a fresh signed handshake. It retains no password for silent
@@ -607,11 +608,12 @@ Full evaluator: **120/120**, **0/200 false rejections**, **real data unchanged**
 See [the phase report](docs/attack_lab_phase_report.md) for files, verification limits
 and the estimate-versus-elapsed-time record.
 
-Deployment preparation: **416 pytest passed**, **1 opt-in Postgres test skipped**
-(no external TEST_DATABASE_URL supplied), **32 Vitest passed**; **6 product + 7 lab
-Playwright passed per engine on Chromium and WebKit**. Firefox's test browser
-could not launch its profile on this Mac, so Firefox is unverified. See
-[deployment report](docs/deployment_phase_report.md) and [DEPLOY.md](docs/DEPLOY.md).
+Live deployment: **417 local pytest passed**, **1 local opt-in Postgres skip**;
+**68 passed against disposable Neon Postgres**, **32 Vitest passed**. Live Chromium
+and WebKit each pass **5 main + 7 lab tests**; each skips the local-only TCP interop
+case because Render exposes HTTPS/WSS. Firefox could not launch its profile on this
+Mac and remains unverified. See [the live report](docs/live_deployment_report.md),
+[preparation report](docs/deployment_phase_report.md) and [DEPLOY.md](docs/DEPLOY.md).
 
 The WebSocket suite covers admission, persistent lockout before PBKDF2, origin/frame/
 rate/idle/type policies, security headers, a DB plaintext scan after encrypted chat,

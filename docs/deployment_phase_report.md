@@ -1,5 +1,8 @@
 # Phase 5A: deployment preparation report
 
+Historical preparation report. Live provisioning and verification are now recorded
+in [live_deployment_report.md](live_deployment_report.md).
+
 Prepared locally on **17 November 2026 (IST)**. Target: separate Render Free Python
 web services plus Neon for main. No GitHub repository was created, no push was run,
 no cloud account was changed and neither service was deployed. The next steps are

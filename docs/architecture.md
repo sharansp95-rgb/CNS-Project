@@ -16,6 +16,16 @@ checks DB connectivity. Proxy headers are accepted only from configured ingress
 addresses/networks, and direct insecure requests are denied. Localhost HTTP
 is for development. Browser keys/crypto run in the frontend, never in the gateway.
 
+The live main and lab services run separately on Render Free in Singapore, with
+main state in Neon Free Postgres (AWS Singapore) and lab state in its own ephemeral
+SQLite database. Forwarding trust uses owner-approved loopback, 10.0.0.0/8 and the
+complete Cloudflare IPv4/IPv6 lists fetched on 17 November 2026; other private
+ranges are excluded. [DEPLOY.md section 6](DEPLOY.md#6-verify-the-trusted-proxy-boundary-before-using-logins)
+records the exact configuration, authoritative sources and refresh requirement.
+The direct socket peer is loopback, with additional Render/private and Cloudflare
+hops in the forwarding chain. Live Mac/phone checks confirm distinct normalized
+client IPs and rejection of a client-supplied spoofed X-Forwarded-For value.
+
 ![Python TLS and browser WebSocket clients share the transport-independent relay and SQL store; end-to-end keys and plaintext remain in clients.](architecture_diagram.png)
 
 A high-resolution version is also at [`architecture_diagram.png`](architecture_diagram.png)
