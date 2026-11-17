@@ -18,6 +18,8 @@ async function pair(browser: Browser, tag: string) {
   await expect(pb.getByLabel("Message", { exact: true })).toBeEnabled();
   return { pa, pb, close: () => Promise.all([a.close(), b.close()]) };
 }
+// Local signed URL, or a presigned URL straight to the bucket in production.
+const OBJECT_URL = /\/api\/attachments\/object\/|X-Amz-Signature=/;
 const card = (p: Page) => p.getByTestId("attachment");
 // One shared pair for the whole file: the relay allows 20 register/login attempts per
 // address per minute, and the other suites share this server.
@@ -43,9 +45,14 @@ test.afterAll(async () => closeAll?.());
 test("images both ways: encrypted upload, GPS stripped, verified render, wire log", async () => {
   const errors: string[] = [];
   for (const p of [pa, pb]) p.on("pageerror", (e) => errors.push(e.message));
-  const uploads: Buffer[] = [];
+  const uploads: Buffer[] = [],
+    uploadHosts: string[] = [];
   pa.on("request", (r) => {
-    if (r.method() === "PUT" && r.url().includes("/api/attachments/object/")) uploads.push(r.postDataBuffer()!);
+    // Local backend: same-origin signed URL. Production: a presigned URL straight to the bucket.
+    if (r.method() === "PUT" && (r.url().includes("/api/attachments/object/") || r.url().includes("X-Amz-Signature="))) {
+      uploads.push(r.postDataBuffer()!);
+      uploadHosts.push(new URL(r.url()).host);
+    }
   });
   const i = await send(pa, pb, "photo_gps.jpg");
   await expect(card(pb).nth(i)).toContainText("photo_gps.jpg");
@@ -65,6 +72,8 @@ test("images both ways: encrypted upload, GPS stripped, verified render, wire lo
   expect(bytes.slice(0, 3)).toEqual([0xff, 0xd8, 0xff]);
   // What reached storage was ciphertext only.
   expect(uploads).toHaveLength(1);
+  // With object storage configured, bytes never pass through the app server.
+  if (process.env.BASE_URL) expect(uploadHosts[0]).not.toBe(new URL(process.env.BASE_URL).host);
   expect(src(Array.from(uploads[0]))).not.toContain("JFIF");
   expect(uploads[0].subarray(0, 3)).not.toEqual(Buffer.from([0xff, 0xd8, 0xff]));
   // Wire log: ciphertext hash and the "only ciphertext" note, never the file name or key.
@@ -97,7 +106,7 @@ test("video both ways with inline player", async () => {
 });
 
 test("a modified stored object is rejected as tampered", async () => {
-  await pb.route("**/api/attachments/object/**", async (route) => {
+  await pb.route(OBJECT_URL, async (route) => {
     if (route.request().method() !== "GET") return route.continue();
     const r = await route.fetch();
     const body = Buffer.from(await r.body());
@@ -108,7 +117,7 @@ test("a modified stored object is rejected as tampered", async () => {
   await card(pb).nth(i).getByRole("button", { name: /Open image/ }).click();
   await expect(card(pb).nth(i).getByRole("alert")).toContainText("tampered or corrupted");
   await expect(pb.getByRole("dialog", { name: "Image viewer" })).toHaveCount(0);
-  await pb.unroute("**/api/attachments/object/**");
+  await pb.unroute(OBJECT_URL);
 });
 
 test("a swapped object (another valid ciphertext) is rejected", async () => {
@@ -116,7 +125,7 @@ test("a swapped object (another valid ciphertext) is rejected", async () => {
   const second = await send(pa, pb, "photo_gps.jpg");
   // Serve the first attachment's ciphertext when the second one is requested.
   let firstBody: Buffer | undefined;
-  await pb.route("**/api/attachments/object/**", async (route) => {
+  await pb.route(OBJECT_URL, async (route) => {
     const r = await route.fetch();
     const body = Buffer.from(await r.body());
     if (!firstBody) firstBody = body;
@@ -127,7 +136,7 @@ test("a swapped object (another valid ciphertext) is rejected", async () => {
   await pb.keyboard.press("Escape");
   await card(pb).nth(second).getByRole("button", { name: /Open image/ }).click();
   await expect(card(pb).nth(second).getByRole("alert")).toContainText("tampered or corrupted");
-  await pb.unroute("**/api/attachments/object/**");
+  await pb.unroute(OBJECT_URL);
 });
 
 test("unsupported and disguised files are refused; paste and drop work", async () => {

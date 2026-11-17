@@ -133,8 +133,10 @@ test("untouched lab attachment opens (control for the attachment attacks)", asyn
   await page.getByRole("button", { name: "Start lab session", exact: true }).click();
   await page.getByRole("button", { name: "Reset lab", exact: true }).click();
   await expect(page.locator("#status")).toContainText("reseeded");
-  const bob = page.frameLocator("#bob");
+  const alice = page.frameLocator("#alice"),
+    bob = page.frameLocator("#bob");
   await page.getByRole("button", { name: "Connect victims", exact: true }).click();
+  await expect(alice.getByLabel("Message", { exact: true })).toBeEnabled();
   await expect(bob.getByLabel("Message", { exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Alice sends test image", exact: true }).click();
   await expect(bob.getByTestId("attachment")).toHaveCount(1);
