@@ -215,6 +215,16 @@ def create_app(
                 except (ValueError, RecursionError):
                     await ws.close(code=1008)
                     break
+                # Authenticated keepalive: receiving any frame already reset the idle
+                # timer. Unauthenticated pings fall through to the unknown-type path
+                # below, so an idle or pinging anonymous socket is still closed.
+                if (
+                    name is not None
+                    and isinstance(envelope, dict)
+                    and envelope.get("type") == "ping"
+                ):
+                    peer.send_envelope({"type": "pong"})
+                    continue
                 if (
                     not isinstance(envelope, dict)
                     or not isinstance(envelope.get("type"), str)
@@ -240,6 +250,9 @@ def create_app(
                     name = await asyncio.to_thread(
                         core.authenticate, peer, addr, envelope
                     )
+                    if name is not None:
+                        # Tells the client how often it must ping to stay logged in.
+                        peer.send_envelope({"type": "session_policy", "idle_seconds": idle})
                 else:
                     await asyncio.to_thread(
                         core.handle_authenticated, peer, addr, name, envelope

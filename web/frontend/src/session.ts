@@ -61,6 +61,8 @@ export class Session {
   opened = new Map<string, OpenedAttachment>();
   calls: CallManager;
   limits?: AttachmentLimits;
+  private pingTimer?: ReturnType<typeof setInterval>;
+  private lastActive = Date.now();
   private epoch = 0;
   private stopped = false;
   private reconnecting = false;
@@ -97,7 +99,24 @@ export class Session {
       },
     };
   }
+  /** Authenticated keepalive. Stops after 30 minutes without user input (unless a call is
+   * active), so a forgotten tab cannot hold a free-tier instance awake forever. */
+  private startKeepalive(idleSeconds: number) {
+    clearInterval(this.pingTimer);
+    const every = Math.max(1000, Math.min(30000, (idleSeconds * 1000) / 3));
+    const mark = () => (this.lastActive = Date.now());
+    if (typeof window !== "undefined")
+      for (const ev of ["keydown", "pointerdown", "touchstart", "mousemove"])
+        window.addEventListener(ev, mark, { passive: true });
+    this.lastActive = Date.now();
+    this.pingTimer = setInterval(() => {
+      const active = Date.now() - this.lastActive < 30 * 60 * 1000 || this.calls.busy;
+      if (this.socket.readyState === WebSocket.OPEN && this.isAuthenticated && active)
+        this.socket.send(JSON.stringify({ type: "ping" }));
+    }, every);
+  }
   private clearSession() {
+    clearInterval(this.pingTimer);
     this.calls?.teardown("The secure session ended, so the call ended.");
     this.epoch++;
     this.apiToken = "";
@@ -231,6 +250,11 @@ export class Session {
     this.changed();
   }
   async receive(e: Envelope) {
+    if (e.type === "pong") return; // keepalive replies stay out of the Wire Log
+    if (e.type === "session_policy" && Number.isFinite(e.idle_seconds) && e.idle_seconds > 0) {
+      this.startKeepalive(e.idle_seconds);
+      return;
+    }
     this.wire.push({
       direction: "in",
       ...e,
