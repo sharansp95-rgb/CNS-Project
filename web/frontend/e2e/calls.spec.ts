@@ -160,7 +160,7 @@ test("an unanswered incoming call times out after 30 seconds", async () => {
 
 // Live only: with TURN configured, a relay-only call must connect and report "via relay".
 test("relay-only call goes through TURN (live, when TURN is available)", async ({ browser, browserName }) => {
-  test.skip(!process.env.BASE_URL || browserName !== "chromium", "needs live TURN and a fake microphone");
+  test.skip(!process.env.BASE_URL || !process.env.LIVE_TURN || browserName !== "chromium", "needs live TURN (set LIVE_TURN=1) and a fake microphone");
   const prefix = `${browserName}_${runId}_relay_`;
   const make = async (me: string, peer: string) => {
     const ctx = await browser.newContext({ permissions: ["microphone"] });
