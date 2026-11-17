@@ -49,20 +49,27 @@ def build_chat_envelope(sender_name, rsa_private_key, session_key, text, timesta
     the way SecureChatClient._encrypt_and_send does (including the Stage A
     seq/prev_hash chain fields), so these tests exercise the real
     receive-side logic against realistic input."""
-    chain = _SENDER_CHAINS.setdefault(
-        id(rsa_private_key), OutgoingChain(sender_name, TEST_GENESIS))
+    chain = _SENDER_CHAINS.setdefault(id(rsa_private_key), OutgoingChain(sender_name, TEST_GENESIS))
     seq, prev_hash = chain.next_fields()
     signable = canonical_record(sender_name, "bob", seq, timestamp, text, prev_hash)
     chain.commit(signable)
     signature = sign(rsa_private_key, signable)
-    inner = json.dumps({
-        "message": text, "timestamp": timestamp, "seq": seq, "prev_hash": prev_hash,
-        "signature": b64(signature),
-    }).encode("utf-8")
+    inner = json.dumps(
+        {
+            "message": text,
+            "timestamp": timestamp,
+            "seq": seq,
+            "prev_hash": prev_hash,
+            "signature": b64(signature),
+        }
+    ).encode("utf-8")
     box = encrypt(session_key, inner)
     return {
-        "type": "chat", "from": sender_name,
-        "nonce": b64(box["nonce"]), "ciphertext": b64(box["ciphertext"]), "tag": b64(box["tag"]),
+        "type": "chat",
+        "from": sender_name,
+        "nonce": b64(box["nonce"]),
+        "ciphertext": b64(box["ciphertext"]),
+        "tag": b64(box["tag"]),
     }
 
 
@@ -81,12 +88,15 @@ def receiver():
 
 def _receive_and_capture(client, envelope, monkeypatch):
     outputs = []
-    monkeypatch.setattr("builtins.print", lambda *a, **k: outputs.append(" ".join(str(x) for x in a)))
+    monkeypatch.setattr(
+        "builtins.print", lambda *a, **k: outputs.append(" ".join(str(x) for x in a))
+    )
     client._handle_chat(envelope)
     return "\n".join(outputs)
 
 
 # --- is_timestamp_fresh() unit checks --------------------------------------
+
 
 def test_is_timestamp_fresh_accepts_current_time():
     assert is_timestamp_fresh(time.time()) is True
@@ -105,6 +115,7 @@ def test_is_timestamp_fresh_accepts_small_clock_skew():
 
 
 # --- full receive-path checks ----------------------------------------------
+
 
 def test_fresh_message_is_accepted(receiver, monkeypatch):
     client, priv_a, session_key = receiver
@@ -125,7 +136,9 @@ def test_stale_timestamp_is_rejected(receiver, monkeypatch):
 def test_future_timestamp_beyond_skew_is_rejected(receiver, monkeypatch):
     client, priv_a, session_key = receiver
     future_timestamp = int(time.time()) + CLOCK_SKEW_SECONDS + 20
-    envelope = build_chat_envelope("alice", priv_a, session_key, "from the future", future_timestamp)
+    envelope = build_chat_envelope(
+        "alice", priv_a, session_key, "from the future", future_timestamp
+    )
     output = _receive_and_capture(client, envelope, monkeypatch)
     assert "from the future" not in output
     assert "stale or future timestamp" in output
@@ -133,8 +146,9 @@ def test_future_timestamp_beyond_skew_is_rejected(receiver, monkeypatch):
 
 def test_replayed_envelope_is_rejected_on_second_delivery(receiver, monkeypatch):
     client, priv_a, session_key = receiver
-    envelope = build_chat_envelope("alice", priv_a, session_key, "pay mallory 100 btc",
-                                    int(time.time()))
+    envelope = build_chat_envelope(
+        "alice", priv_a, session_key, "pay mallory 100 btc", int(time.time())
+    )
 
     first = _receive_and_capture(client, envelope, monkeypatch)
     assert "pay mallory 100 btc" in first
@@ -168,26 +182,34 @@ def test_tampering_with_timestamp_after_signing_is_caught_by_signature(receiver,
     the freshness check must invalidate the signature instead."""
     client, priv_a, session_key = receiver
     old_timestamp = int(time.time()) - REPLAY_WINDOW_SECONDS - 10
-    envelope = build_chat_envelope("alice", priv_a, session_key, "old but forge-updated",
-                                    old_timestamp)
+    _envelope = build_chat_envelope(
+        "alice", priv_a, session_key, "old but forge-updated", old_timestamp
+    )
 
     # An attacker can't re-sign without alice's private key, but let's prove
     # that simply re-encrypting a "corrected" timestamp (without a valid new
     # signature) is caught by the signature check -- simulate by building a
     # fresh inner payload with a bumped timestamp but the OLD signature.
-    old_signable = canonical_record("alice", "bob", 1, old_timestamp,
-                                     "old but forge-updated", TEST_GENESIS)
+    old_signable = canonical_record(
+        "alice", "bob", 1, old_timestamp, "old but forge-updated", TEST_GENESIS
+    )
     old_signature = sign(priv_a, old_signable)
-    forged_inner = json.dumps({
-        "message": "old but forge-updated",
-        "timestamp": int(time.time()),  # bumped to look fresh
-        "seq": 1, "prev_hash": TEST_GENESIS,
-        "signature": b64(old_signature),  # but signature still covers the OLD timestamp
-    }).encode("utf-8")
+    forged_inner = json.dumps(
+        {
+            "message": "old but forge-updated",
+            "timestamp": int(time.time()),  # bumped to look fresh
+            "seq": 1,
+            "prev_hash": TEST_GENESIS,
+            "signature": b64(old_signature),  # but signature still covers the OLD timestamp
+        }
+    ).encode("utf-8")
     box = encrypt(session_key, forged_inner)
     forged_envelope = {
-        "type": "chat", "from": "alice",
-        "nonce": b64(box["nonce"]), "ciphertext": b64(box["ciphertext"]), "tag": b64(box["tag"]),
+        "type": "chat",
+        "from": "alice",
+        "nonce": b64(box["nonce"]),
+        "ciphertext": b64(box["ciphertext"]),
+        "tag": b64(box["tag"]),
     }
 
     output = _receive_and_capture(client, forged_envelope, monkeypatch)

@@ -4,22 +4,23 @@ import base64
 import copy
 import hashlib
 import json
-from pathlib import Path
 import sqlite3
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import MetaData, select
-from client.evidence_vault import encrypt_evidence, decrypt_evidence
-from client.evidence import build_evidence
-from crypto_engine.evidence_tools import verify_receipt, envelope_sha256
-from server import db
-from server.timestamp import TimestampSigner
-from server.relay_core import RelayCore
+
 import server.server as sm
+from client.evidence import build_evidence
+from client.evidence_vault import decrypt_evidence, encrypt_evidence
+from crypto_engine.evidence_tools import verify_receipt
+from server import db
+from server.relay_core import RelayCore
+from server.timestamp import TimestampSigner
 from tools import verify_transcript
 from web.app import create_app
 
@@ -53,18 +54,18 @@ def app():
 def test_owner_isolation_and_no_plaintext_in_any_database_column():
     marker = "Approve transfer 500"
     raw = (CORPUS / "valid_v2.json").read_bytes()
-    with TestClient(app()) as client, client.websocket_connect(
-        "/ws", headers={"origin": ORIGIN}
-    ) as alice, client.websocket_connect("/ws", headers={"origin": ORIGIN}) as bob:
+    with (
+        TestClient(app()) as client,
+        client.websocket_connect("/ws", headers={"origin": ORIGIN}) as alice,
+        client.websocket_connect("/ws", headers={"origin": ORIGIN}) as bob,
+    ):
         a, b = authed(alice, "alice"), authed(bob, "bob")
         saved = client.post("/api/evidence", headers=a, json=request_body(raw)).json()
         identifier = saved["id"]
         assert len(client.get("/api/evidence", headers=a).json()) == 1
         assert client.get("/api/evidence", headers=b).json() == []
         assert client.get("/api/evidence/" + identifier, headers=b).status_code == 404
-        assert (
-            client.delete("/api/evidence/" + identifier, headers=b).status_code == 404
-        )
+        assert client.delete("/api/evidence/" + identifier, headers=b).status_code == 404
         result = client.get("/api/evidence/" + identifier, headers=a).json()
         package = json.loads(base64.b64decode(result["ciphertext_b64"]))
         assert decrypt_evidence(package, "vault-password") == raw
@@ -76,9 +77,7 @@ def test_owner_isolation_and_no_plaintext_in_any_database_column():
                     for value in row:
                         assert marker not in str(value)
                         assert "vault-password" not in str(value)
-        assert (
-            client.delete("/api/evidence/" + identifier, headers=a).status_code == 200
-        )
+        assert client.delete("/api/evidence/" + identifier, headers=a).status_code == 200
         assert client.get("/api/evidence", headers=a).json() == []
 
 
@@ -94,9 +93,10 @@ def test_api_requires_auth_and_revokes_on_disconnect():
 
 def test_receipt_signature_tamper_exact_file_and_v1_unavailable():
     raw = (CORPUS / "valid_v1.json").read_bytes()
-    with TestClient(app()) as client, client.websocket_connect(
-        "/ws", headers={"origin": ORIGIN}
-    ) as ws:
+    with (
+        TestClient(app()) as client,
+        client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws,
+    ):
         headers = authed(ws, "alice")
         saved = client.post(
             "/api/evidence", headers=headers, json=request_body(raw, version=1)
@@ -153,15 +153,13 @@ def test_v2_real_session_corroboration(net):
         )
         assert receipt["corroborated"] == receipt["total"] == 1
         assert (
-            signer.receipt(conn, "unrelated", receipt["file_sha256"], 2, hashes, 1)[
-                "corroborated"
-            ]
+            signer.receipt(conn, "unrelated", receipt["file_sha256"], 2, hashes, 1)["corroborated"]
             == 0
         )
         assert (
-            signer.receipt(
-                conn, "proof_bob", receipt["file_sha256"], 2, hashes * 500, 500
-            )["corroborated"]
+            signer.receipt(conn, "proof_bob", receipt["file_sha256"], 2, hashes * 500, 500)[
+                "corroborated"
+            ]
             == 1
         )
 
@@ -182,10 +180,7 @@ def test_schema_upgrade_v1_to_v2_keeps_existing_rows(tmp_path):
             conn.execute(select(db.users.c.password_hash)).scalar_one()
             == "UNCHANGED_ENCODED_PBKDF2"
         )
-        assert (
-            conn.execute(select(db.relayed_envelopes.c.envelope_sha256)).scalar_one()
-            is None
-        )
+        assert conn.execute(select(db.relayed_envelopes.c.envelope_sha256)).scalar_one() is None
         assert conn.execute(select(db.evidence_bundles)).all() == []
     db.dispose_databases()
     assert db.get_database("sqlite:///" + str(target))
@@ -207,9 +202,7 @@ def test_corpus_verdicts_and_receipt_cli(tmp_path):
                 str(CORPUS / "tsa_public.pem"),
             ]
         result = subprocess.run(command, capture_output=True, text=True)
-        assert result.returncode == (0 if case["valid"] else 1), (
-            result.stdout + result.stderr
-        )
+        assert result.returncode == (0 if case["valid"] else 1), result.stdout + result.stderr
     result = subprocess.run(
         [
             sys.executable,
@@ -227,13 +220,12 @@ def test_corpus_verdicts_and_receipt_cli(tmp_path):
 
 
 def test_invalid_upload_rejected_without_storage():
-    with TestClient(app()) as client, client.websocket_connect(
-        "/ws", headers={"origin": ORIGIN}
-    ) as ws:
+    with (
+        TestClient(app()) as client,
+        client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws,
+    ):
         headers = authed(ws, "alice")
-        response = client.post(
-            "/api/evidence", headers=headers, json={"plaintext": "DO_NOT_STORE"}
-        )
+        response = client.post("/api/evidence", headers=headers, json={"plaintext": "DO_NOT_STORE"})
         assert response.status_code == 400
         assert client.get("/api/evidence", headers=headers).json() == []
 
@@ -262,26 +254,21 @@ def test_v2_missing_envelope_hash_is_invalid_and_v1_still_verifies():
 
 
 def test_vault_manifest_and_frame_validation():
-    with TestClient(app()) as client, client.websocket_connect(
-        "/ws", headers={"origin": ORIGIN}
-    ) as ws:
+    with (
+        TestClient(app()) as client,
+        client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws,
+    ):
         headers = authed(ws, "validator")
         body = request_body(b"private file")
         body["envelope_hashes"] = ["not a hash"]
         body["total"] = 1
-        assert (
-            client.post("/api/evidence", headers=headers, json=body).status_code == 400
-        )
+        assert client.post("/api/evidence", headers=headers, json=body).status_code == 400
         body = request_body(b"private file")
         body["ciphertext_b64"] = "not base64"
-        assert (
-            client.post("/api/evidence", headers=headers, json=body).status_code == 400
-        )
+        assert client.post("/api/evidence", headers=headers, json=body).status_code == 400
 
 
-def test_concurrent_key_creation_publishes_one_complete_private_key(
-    tmp_path, monkeypatch
-):
+def test_concurrent_key_creation_publishes_one_complete_private_key(tmp_path, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
 
     path = tmp_path / "concurrent.key"

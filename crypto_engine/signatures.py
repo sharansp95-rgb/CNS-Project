@@ -27,6 +27,7 @@ import hashlib
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.asymmetric.types import PrivateKeyTypes, PublicKeyTypes
 
 __all__ = [
     "KEY_SIZE",
@@ -44,27 +45,25 @@ KEY_SIZE = 2048
 _PUBLIC_EXPONENT = 65537  # standard choice; small, known-safe exponent
 
 
-def generate_keypair():
+def generate_keypair() -> tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:
     """Generate a fresh RSA-2048 private/public keypair.
 
     Returns (private_key, public_key) as cryptography library key objects.
     """
-    private_key = rsa.generate_private_key(
-        public_exponent=_PUBLIC_EXPONENT, key_size=KEY_SIZE
-    )
+    private_key = rsa.generate_private_key(public_exponent=_PUBLIC_EXPONENT, key_size=KEY_SIZE)
     return private_key, private_key.public_key()
 
 
 def _pss_padding():
-    # MAX_LENGTH is the conventional salt-length choice for PSS; matches the
-    # digest size and is what OpenSSL/most libraries default to.
+    # Preserve the protocol salt: MAX_LENGTH is 222 bytes for RSA-2048/SHA-256,
+    # rather than the 32-byte digest length.
     return padding.PSS(
         mgf=padding.MGF1(hashes.SHA256()),
         salt_length=padding.PSS.MAX_LENGTH,
     )
 
 
-def sign(private_key, message: bytes) -> bytes:
+def sign(private_key: rsa.RSAPrivateKey, message: bytes) -> bytes:
     """Sign `message` (SHA-256 + RSA-PSS) with `private_key`.
 
     Returns the raw signature bytes.
@@ -74,15 +73,13 @@ def sign(private_key, message: bytes) -> bytes:
     return private_key.sign(bytes(message), _pss_padding(), hashes.SHA256())
 
 
-def verify(public_key, message: bytes, signature: bytes) -> bool:
+def verify(public_key: rsa.RSAPublicKey, message: bytes, signature: bytes) -> bool:
     """Verify `signature` over `message` under `public_key`.
 
     Returns True/False -- never raises for a bad, tampered, or
     wrong-key signature. Callers can treat False as an ordinary rejection.
     """
-    if not isinstance(message, (bytes, bytearray)) or not isinstance(
-        signature, (bytes, bytearray)
-    ):
+    if not isinstance(message, (bytes, bytearray)) or not isinstance(signature, (bytes, bytearray)):
         return False
     try:
         public_key.verify(bytes(signature), bytes(message), _pss_padding(), hashes.SHA256())
@@ -100,7 +97,8 @@ def verify(public_key, message: bytes, signature: bytes) -> bool:
 # Public keys additionally move over the wire (get_pubkey envelopes), so both
 # need clean bytes <-> key-object conversions.
 
-def serialize_private_key(private_key, password: bytes = None) -> bytes:
+
+def serialize_private_key(private_key: PrivateKeyTypes, password: bytes | None = None) -> bytes:
     """Encode a private key as PEM. If `password` is given, the PEM is
     encrypted with it; otherwise it is written unencrypted (see the
     at-rest-encryption note in auth/keystore.py)."""
@@ -116,22 +114,26 @@ def serialize_private_key(private_key, password: bytes = None) -> bytes:
     )
 
 
-def deserialize_private_key(pem_bytes: bytes, password: bytes = None):
+def deserialize_private_key(pem_bytes: bytes, password: bytes | None = None) -> PrivateKeyTypes:
+    """Load a PKCS8 identity PEM using the existing library validation."""
     return serialization.load_pem_private_key(pem_bytes, password=password)
 
 
-def serialize_public_key(public_key) -> bytes:
+def serialize_public_key(public_key: PublicKeyTypes) -> bytes:
+    """Return the existing SubjectPublicKeyInfo PEM encoding."""
     return public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
 
 
-def deserialize_public_key(pem_bytes: bytes):
+def deserialize_public_key(pem_bytes: bytes) -> PublicKeyTypes:
+    """Load a public PEM using the existing library validation."""
     return serialization.load_pem_public_key(pem_bytes)
 
 
 # --- fingerprint (Phase 7: human-verifiable MITM check) --------------------
+
 
 def fingerprint(public_key_pem: bytes, length: int = 16) -> str:
     """Return a short, human-readable fingerprint of an RSA public key: the
@@ -152,4 +154,4 @@ def fingerprint(public_key_pem: bytes, length: int = 16) -> str:
     if isinstance(public_key_pem, str):
         public_key_pem = public_key_pem.encode("utf-8")
     digest = hashlib.sha256(public_key_pem).hexdigest().upper()[:length]
-    return " ".join(digest[i:i + 4] for i in range(0, len(digest), 4))
+    return " ".join(digest[i : i + 4] for i in range(0, len(digest), 4))

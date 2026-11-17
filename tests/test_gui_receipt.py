@@ -3,8 +3,8 @@ FULL value, and a plain-English verdict. The wording comes from gui/explain.py (
 receipt data was produced by the client's real checks before the message was ever shown.
 Skipped where Tk has no display."""
 
-import tkinter as tk
 import time
+import tkinter as tk
 
 import pytest
 
@@ -13,16 +13,32 @@ from gui.explain import receipt_details, receipt_rows, receipt_summary, shorten
 from gui.theme import is_no_display_error
 
 FULL_HASH = "48564a5d663e0cbc9219" + "ab" * 22
-RECEIVED = {"direction": "received", "sender": "bob", "sender_fingerprint": "8860 7244 2628 167C",
-            "timestamp": time.time() - 3, "age_seconds": 3, "seq": 4, "prev_hash": FULL_HASH,
-            "chain_link": "ok", "record_hash": "5a272dd5f346a49abb63" + "cd" * 22,
-            "nonce": "5tOzW6a7fjDqbr7AAAAAAAAA"}
-SENT = {"direction": "sent", "sender": "alice", "sender_fingerprint": "6B7A C666 FCF7 6CF5",
-        "timestamp": time.time(), "seq": 1, "prev_hash": FULL_HASH, "record_hash": "ab" * 32,
-        "nonce": "NNNN"}
+RECEIVED = {
+    "direction": "received",
+    "sender": "bob",
+    "sender_fingerprint": "8860 7244 2628 167C",
+    "timestamp": time.time() - 3,
+    "age_seconds": 3,
+    "seq": 4,
+    "prev_hash": FULL_HASH,
+    "chain_link": "ok",
+    "record_hash": "5a272dd5f346a49abb63" + "cd" * 22,
+    "nonce": "5tOzW6a7fjDqbr7AAAAAAAAA",
+}
+SENT = {
+    "direction": "sent",
+    "sender": "alice",
+    "sender_fingerprint": "6B7A C666 FCF7 6CF5",
+    "timestamp": time.time(),
+    "seq": 1,
+    "prev_hash": FULL_HASH,
+    "record_hash": "ab" * 32,
+    "nonce": "NNNN",
+}
 
 
 # ---- pure wording -----------------------------------------------------------------------
+
 
 def test_received_receipt_has_four_green_rows_and_the_spec_sentence():
     rows = receipt_rows(RECEIVED)
@@ -32,7 +48,9 @@ def test_received_receipt_has_four_green_rows_and_the_spec_sentence():
     assert "authentication tag" in rows[0][2] and "RSA signature" in rows[1][2]
     assert "3 s" in rows[2][2] and "#4" in rows[3][2]
     assert receipt_summary(RECEIVED) == (
-        "ok", "This message is authentic, unmodified, fresh, and in order.")
+        "ok",
+        "This message is authentic, unmodified, fresh, and in order.",
+    )
 
 
 def test_a_chain_gap_is_amber_and_the_sentence_does_not_say_in_order():
@@ -59,6 +77,7 @@ def test_details_carry_the_full_values_and_shorten_truncates_for_display():
 
 
 # ---- the window -----------------------------------------------------------------------
+
 
 @pytest.fixture()
 def app():
@@ -87,6 +106,7 @@ def texts(win):
             if isinstance(child, tk.Label):
                 out.append(str(child.cget("text")))
             walk(child)
+
     walk(win)
     return "\n".join(out)
 
@@ -99,6 +119,7 @@ def copy_buttons(win):
             if isinstance(child, tk.Label) and str(child.cget("text")) == "Copy":
                 found.append(child)
             walk(child)
+
     walk(win)
     return found
 
@@ -107,9 +128,15 @@ def test_receipt_window_shows_rows_values_and_verdict(app):
     win = app._show_receipt(RECEIVED)
     app.update()
     text = texts(win)
-    for needle in ("Security receipt", "Message you received from bob", "Not tampered with",
-                   "Really from bob", "Fresh", "In order",
-                   "This message is authentic, unmodified, fresh, and in order."):
+    for needle in (
+        "Security receipt",
+        "Message you received from bob",
+        "Not tampered with",
+        "Really from bob",
+        "Fresh",
+        "In order",
+        "This message is authentic, unmodified, fresh, and in order.",
+    ):
         assert needle in text, needle
     assert FULL_HASH not in text, "long hashes are truncated on screen"
     assert shorten(FULL_HASH) in text
@@ -149,7 +176,9 @@ def test_receipt_fits_the_screen_and_escape_closes_it(app):
     win = app._show_receipt(RECEIVED)
     app.update()
     assert win.winfo_reqheight() <= 640 and win.winfo_reqwidth() <= 560, (
-        win.winfo_reqwidth(), win.winfo_reqheight())
+        win.winfo_reqwidth(),
+        win.winfo_reqheight(),
+    )
     # Tk only dispatches synthetic key events to the focused window.
     win.focus_force()
     app.update()
@@ -160,15 +189,30 @@ def test_receipt_fits_the_screen_and_escape_closes_it(app):
 
 def test_clicking_a_bubble_opens_the_receipt(app):
     app.username, app.peer = "alice", "bob"
-    app._handle_event("auth_success", {"username": "alice", "peer": "bob", "lab_mode": False,
-                                       "own_fingerprint": None, "peer_key_found": True})
+    app._handle_event(
+        "auth_success",
+        {
+            "username": "alice",
+            "peer": "bob",
+            "lab_mode": False,
+            "own_fingerprint": None,
+            "peer_key_found": True,
+        },
+    )
     app._handoff_to_chat()
-    app._handle_event("message_received", {"sender": "bob", "message": "hi", "timestamp": time.time(),
-                                          "receipt": RECEIVED})
+    app._handle_event(
+        "message_received",
+        {"sender": "bob", "message": "hi", "timestamp": time.time(), "receipt": RECEIVED},
+    )
     app.update()
-    bubble = [c for r in app.bubble_list.winfo_children() for c in r.winfo_children()
-              if isinstance(c, tk.Canvas) and c.bind("<Button-1>")][0]
+    bubble = [
+        c
+        for r in app.bubble_list.winfo_children()
+        for c in r.winfo_children()
+        if isinstance(c, tk.Canvas) and c.bind("<Button-1>")
+    ][0]
     bubble.event_generate("<Button-1>", x=8, y=8)
     app.update()
-    assert any(isinstance(c, tk.Toplevel) and c.title() == "Security receipt"
-               for c in app.winfo_children())
+    assert any(
+        isinstance(c, tk.Toplevel) and c.title() == "Security receipt" for c in app.winfo_children()
+    )

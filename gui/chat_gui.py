@@ -49,12 +49,12 @@ from client.client import (  # noqa: E402
 )
 from client.evidence import EvidenceError  # noqa: E402
 from crypto_engine.attachment_tools import display_text
-from crypto_engine.signatures import fingerprint  # noqa: E402
+from crypto_engine.signatures import (
+    fingerprint,  # noqa: E402
+    serialize_public_key,  # noqa: E402
+)
 from crypto_engine.signatures import generate_keypair as generate_rsa_keypair  # noqa: E402
-from crypto_engine.signatures import serialize_public_key  # noqa: E402
 from gui import widgets  # noqa: E402
-from gui.macos import set_app_name  # noqa: E402
-from server.security_log import DEFAULT_LOG_PATH, read_events  # noqa: E402
 from gui.explain import (  # noqa: E402
     banner_for,
     describe_rejection,
@@ -63,16 +63,23 @@ from gui.explain import (  # noqa: E402
     receipt_summary,
     shorten,
 )
+from gui.macos import set_app_name  # noqa: E402
 from gui.theme import THEME_LABELS, Theme, hand_cursor, save_theme_preference  # noqa: E402
+from server.security_log import DEFAULT_LOG_PATH  # noqa: E402
 
 POLL_INTERVAL_MS = 50
-BANNER_OK_SECONDS = 20     # "ok" banners fade after this long; warnings/blocks stay
+BANNER_OK_SECONDS = 20  # "ok" banners fade after this long; warnings/blocks stay
 TAGLINE = "Accountable end-to-end encrypted messaging for hospitals"
-NETWORK_MIN_WIDTH = 700       # narrower windows start with the network view hidden
-HANDOFF_WAIT_MS = 2500        # how long the login screen waits for the handshake to finish
+NETWORK_MIN_WIDTH = 700  # narrower windows start with the network view hidden
+HANDOFF_WAIT_MS = 2500  # how long the login screen waits for the handshake to finish
 HANDOFF_PEER_OFFLINE_MS = 1300
-LOGIN_STEP_KINDS = ("tls_connected", "tls_cert_fingerprint", "handshake_started",
-                    "handshake_established", "handshake_waiting")
+LOGIN_STEP_KINDS = (
+    "tls_connected",
+    "tls_cert_fingerprint",
+    "handshake_started",
+    "handshake_established",
+    "handshake_waiting",
+)
 WIRE_LOG_TRUNCATE = 32
 
 # Envelope fields that are genuinely sensitive if shown in the clear in a
@@ -88,8 +95,14 @@ _REDACT_FIELDS = {"password"}
 
 def WIRE_COLORS(theme):
     """Colour of each kind of line in the network view."""
-    return {"TLS": theme.wire_tls, "HANDSHAKE": theme.wire_handshake, "CHAT": theme.wire_chat,
-            "ALERT": theme.wire_alert, "AUTH": theme.wire_auth, "INFO": theme.wire_info}
+    return {
+        "TLS": theme.wire_tls,
+        "HANDSHAKE": theme.wire_handshake,
+        "CHAT": theme.wire_chat,
+        "ALERT": theme.wire_alert,
+        "AUTH": theme.wire_auth,
+        "INFO": theme.wire_info,
+    }
 
 
 def wire_kind(envelope):
@@ -129,8 +142,10 @@ def _truncate(s, n=WIRE_LOG_TRUNCATE):
 
 
 def _redact_envelope(envelope):
-    return {k: ("***redacted (protected by TLS in transit)***" if k in _REDACT_FIELDS else v)
-            for k, v in envelope.items()}
+    return {
+        k: ("***redacted (protected by TLS in transit)***" if k in _REDACT_FIELDS else v)
+        for k, v in envelope.items()
+    }
 
 
 def format_envelope_line(direction, envelope):
@@ -164,8 +179,7 @@ def format_envelope_line(direction, envelope):
 
     if etype == "pubkey_result":
         return (
-            f"{direction} pubkey_result: username={e.get('username')} "
-            f"success={e.get('success')}",
+            f"{direction} pubkey_result: username={e.get('username')} success={e.get('success')}",
             not e.get("success", True),
         )
 
@@ -179,15 +193,16 @@ def format_envelope_line(direction, envelope):
         )
 
     if etype == "security_alert":
-        return (f"{direction} security_alert: alert={e.get('alert')} "
-                f"reason={_truncate(str(e.get('reason')), 36)} peer={e.get('peer')}"), False
+        return (
+            f"{direction} security_alert: alert={e.get('alert')} "
+            f"reason={_truncate(str(e.get('reason')), 36)} peer={e.get('peer')}"
+        ), False
 
     if etype == "system":
         return f"{direction} system: {e.get('text', '')}", False
 
     if etype == "roster":
         return f"{direction} roster: users={e.get('users')}", False
-
 
     if etype == "user_joined":
         return f"{direction} user_joined: {e.get('username')}", False
@@ -203,7 +218,7 @@ class ChatGUI(tk.Tk):
         self.geometry("1040x660")
         self.minsize(680, 460)
 
-        self.theme = Theme(self, theme)        # "dark" / "light"; default: the remembered choice
+        self.theme = Theme(self, theme)  # "dark" / "light"; default: the remembered choice
         self.configure(background=self.theme.bg_app)
         style = ttk.Style(self)
         self.theme.apply_ttk(style)
@@ -213,19 +228,19 @@ class ChatGUI(tk.Tk):
         # actual widget updates happen in _poll_events, on the main thread.
         self.event_queue = queue.Queue()
 
-        self.client = None       # SecureChatClient, once connected
+        self.client = None  # SecureChatClient, once connected
         self.sock = None
         self.username = None
         self.peer = None
-        self._auth_data = None       # auth_success payload, while the login screen waits
-        self._held_events = []       # events that arrived during that wait (replayed in order)
+        self._auth_data = None  # auth_success payload, while the login screen waits
+        self._held_events = []  # events that arrived during that wait (replayed in order)
         self._holding = False
-        self._chat_ready = False     # the chat screen has been shown (events are applied live)
+        self._chat_ready = False  # the chat screen has been shown (events are applied live)
         self._handshake_done = False
         self._tls_fingerprint = None
         self._login_mode = "login"
 
-        self.presentation_var = tk.BooleanVar(value=False)   # View menu: Presentation mode
+        self.presentation_var = tk.BooleanVar(value=False)  # View menu: Presentation mode
         self.theme_var = tk.StringVar(value=self.theme.mode)  # View menu: Dark / Light
         self._build_login_screen()
         self._build_chat_screen()
@@ -253,8 +268,9 @@ class ChatGUI(tk.Tk):
         self.login_backdrop = widgets.Backdrop(outer, t)
         self.login_backdrop.place(x=0, y=0, relwidth=1, relheight=1)
         self.login_backdrop.tk.call("lower", self.login_backdrop._w)
-        self.login_theme_button = widgets.flat_button(outer, t, self._theme_button_text(),
-                                                      self.toggle_theme, background=t.bg_app)
+        self.login_theme_button = widgets.flat_button(
+            outer, t, self._theme_button_text(), self.toggle_theme, background=t.bg_app
+        )
         self.login_theme_button.place(relx=1.0, x=-t.sp("lg"), y=t.sp("lg"), anchor="ne")
 
         # -- brand row: drawn logo + name + tagline --
@@ -264,11 +280,24 @@ class ChatGUI(tk.Tk):
         self.login_logo.pack(side="left", padx=(0, t.sp("md")))
         names = tk.Frame(brand, background=bg)
         names.pack(side="left", fill="x", expand=True)
-        tk.Label(names, text="Secure Chat", background=bg, foreground=t.fg_primary,
-                 font=t.font("title"), anchor="w").pack(anchor="w")
-        self.tagline_label = tk.Label(names, text=TAGLINE, background=bg,
-                                      foreground=t.fg_secondary, font=t.font("caption"),
-                                      wraplength=300, justify="left", anchor="w")
+        tk.Label(
+            names,
+            text="Secure Chat",
+            background=bg,
+            foreground=t.fg_primary,
+            font=t.font("title"),
+            anchor="w",
+        ).pack(anchor="w")
+        self.tagline_label = tk.Label(
+            names,
+            text=TAGLINE,
+            background=bg,
+            foreground=t.fg_secondary,
+            font=t.font("caption"),
+            wraplength=300,
+            justify="left",
+            anchor="w",
+        )
         self.tagline_label.pack(anchor="w", pady=(2, 0))
 
         self.host_var = tk.StringVar(value=DEFAULT_HOST)
@@ -278,7 +307,7 @@ class ChatGUI(tk.Tk):
         self.password_var = tk.StringVar()
 
         self._fields, self._field_errors = {}, {}
-        self._form_groups = []     # widgets hidden while connecting (see _set_login_busy)
+        self._form_groups = []  # widgets hidden while connecting (see _set_login_busy)
         self._login_row = 1
 
         def add_field(key, label, var, hint="", show="", trailing=None):
@@ -286,16 +315,24 @@ class ChatGUI(tk.Tk):
             # error when validation fails (so errors never change the card's height).
             row = tk.Frame(card, background=bg)
             row.grid(row=self._login_row, column=0, sticky="ew")
-            tk.Label(row, text=label, background=bg, foreground=t.fg_secondary,
-                     font=t.font("caption_bold")).pack(side="left")
-            hint_lbl = tk.Label(row, text=hint, background=bg, foreground=t.fg_hint,
-                                font=t.font("caption"))
+            tk.Label(
+                row,
+                text=label,
+                background=bg,
+                foreground=t.fg_secondary,
+                font=t.font("caption_bold"),
+            ).pack(side="left")
+            hint_lbl = tk.Label(
+                row, text=hint, background=bg, foreground=t.fg_hint, font=t.font("caption")
+            )
             hint_lbl.pack(side="right")
-            err = tk.Label(row, text="", background=bg, foreground=t.danger,
-                           font=t.font("caption_bold"))
+            err = tk.Label(
+                row, text="", background=bg, foreground=t.danger, font=t.font("caption_bold")
+            )
             field = widgets.Field(card, t, var, show=show, width=32, trailing=trailing)
-            field.grid(row=self._login_row + 1, column=0, sticky="ew",
-                       pady=(t.sp("xs") + 2, t.sp("md")))
+            field.grid(
+                row=self._login_row + 1, column=0, sticky="ew", pady=(t.sp("xs") + 2, t.sp("md"))
+            )
             self._form_groups += [row, field]
             err._hint = hint_lbl
             self._fields[key], self._field_errors[key] = field, err
@@ -306,36 +343,65 @@ class ChatGUI(tk.Tk):
         add_field("peer", "Peer username", self.peer_var, "the other window's user")
 
         def toggle(parent):
-            self._pw_toggle = tk.Label(parent, text="Show", background=t.bg_input,
-                                       foreground=t.accent, font=t.font("caption_bold"),
-                                       cursor=hand_cursor())
+            self._pw_toggle = tk.Label(
+                parent,
+                text="Show",
+                background=t.bg_input,
+                foreground=t.accent,
+                font=t.font("caption_bold"),
+                cursor=hand_cursor(),
+            )
             self._pw_toggle.bind("<Button-1>", lambda _e: self._toggle_password())
             return self._pw_toggle
+
         add_field("password", "Password", self.password_var, show="•", trailing=toggle)
 
         # Server settings stay out of the way (they are set once by the launcher) but are
         # one click away, and open by themselves if the port is invalid.
         self._server_open = False
-        self.server_toggle = tk.Label(card, text="", background=bg, foreground=t.fg_hint,
-                                      font=t.font("caption"), cursor=hand_cursor(), anchor="w")
+        self.server_toggle = tk.Label(
+            card,
+            text="",
+            background=bg,
+            foreground=t.fg_hint,
+            font=t.font("caption"),
+            cursor=hand_cursor(),
+            anchor="w",
+        )
         self.server_toggle.grid(row=self._login_row, column=0, sticky="w", pady=(t.sp("xs"), 0))
         self.server_toggle.bind("<Button-1>", lambda _e: self._toggle_server_settings())
         self._form_groups.append(self.server_toggle)
         self._login_row += 1
         self.server_box = tk.Frame(card, background=bg)
         self.server_box.grid(row=self._login_row, column=0, sticky="ew", pady=(t.sp("sm"), 0))
-        tk.Label(self.server_box, text="Host", background=bg, foreground=t.fg_secondary,
-                 font=t.font("caption_bold")).grid(row=0, column=0, sticky="w")
-        tk.Label(self.server_box, text="Port", background=bg, foreground=t.fg_secondary,
-                 font=t.font("caption_bold")).grid(row=0, column=1, sticky="w", padx=(t.sp("sm"), 0))
+        tk.Label(
+            self.server_box,
+            text="Host",
+            background=bg,
+            foreground=t.fg_secondary,
+            font=t.font("caption_bold"),
+        ).grid(row=0, column=0, sticky="w")
+        tk.Label(
+            self.server_box,
+            text="Port",
+            background=bg,
+            foreground=t.fg_secondary,
+            font=t.font("caption_bold"),
+        ).grid(row=0, column=1, sticky="w", padx=(t.sp("sm"), 0))
         host_field = widgets.Field(self.server_box, t, self.host_var, width=18)
         host_field.grid(row=1, column=0, sticky="ew", pady=(t.sp("xs"), 0))
         port_field = widgets.Field(self.server_box, t, self.port_var, width=6)
         port_field.grid(row=1, column=1, padx=(t.sp("sm"), 0), pady=(t.sp("xs"), 0))
         self.server_box.columnconfigure(0, weight=1)
         self._fields["port"] = port_field
-        port_err = tk.Label(self.server_box, text="", background=bg,
-                            foreground=t.danger, font=t.font("caption_bold"), anchor="w")
+        port_err = tk.Label(
+            self.server_box,
+            text="",
+            background=bg,
+            foreground=t.danger,
+            font=t.font("caption_bold"),
+            anchor="w",
+        )
         port_err._hint = None
         self._field_errors["port"] = port_err
         self.server_box.grid_remove()
@@ -352,15 +418,25 @@ class ChatGUI(tk.Tk):
 
         button_frame = tk.Frame(card, background=bg)
         button_frame.grid(row=self._login_row, column=0, sticky="ew", pady=(t.sp("lg"), 0))
-        self.register_button = ttk.Button(button_frame, text="Register", style="Secondary.TButton",
-                                           command=lambda: self._start_auth("register"))
+        self.register_button = ttk.Button(
+            button_frame,
+            text="Register",
+            style="Secondary.TButton",
+            command=lambda: self._start_auth("register"),
+        )
         self.register_button.pack(side="left", expand=True, fill="x", padx=(0, t.sp("xs")))
-        self.login_button = ttk.Button(button_frame, text="Log in",
-                                        command=lambda: self._start_auth("login"))
+        self.login_button = ttk.Button(
+            button_frame, text="Log in", command=lambda: self._start_auth("login")
+        )
         self.login_button.pack(side="left", expand=True, fill="x", padx=(t.sp("xs"), 0))
         self._login_row += 1
-        first_time = tk.Label(card, text="First time here? Register once, then log in.",
-                              background=bg, foreground=t.fg_hint, font=t.font("caption"))
+        first_time = tk.Label(
+            card,
+            text="First time here? Register once, then log in.",
+            background=bg,
+            foreground=t.fg_hint,
+            font=t.font("caption"),
+        )
         first_time.grid(row=self._login_row, column=0, pady=(t.sp("sm"), 0))
         self._login_row += 1
         # The security stack, as a quiet footer: what protects this session.
@@ -369,12 +445,20 @@ class ChatGUI(tk.Tk):
         tk.Frame(trust, background=t.border, height=1).pack(fill="x", pady=(0, t.sp("md")))
         stack = tk.Frame(trust, background=bg)
         stack.pack()
-        for i, item in enumerate(("TLS 1.3", "ECDH", "AES-256-GCM", "RSA signatures", "Hash chain")):
+        for i, item in enumerate(
+            ("TLS 1.3", "ECDH", "AES-256-GCM", "RSA signatures", "Hash chain")
+        ):
             if i:
-                tk.Label(stack, text="·", background=bg, foreground=t.border_strong,
-                         font=t.font("caption_bold")).pack(side="left", padx=t.sp("xs"))
-            tk.Label(stack, text=item, background=bg, foreground=t.fg_hint,
-                     font=t.font("caption")).pack(side="left")
+                tk.Label(
+                    stack,
+                    text="·",
+                    background=bg,
+                    foreground=t.border_strong,
+                    font=t.font("caption_bold"),
+                ).pack(side="left", padx=t.sp("xs"))
+            tk.Label(
+                stack, text=item, background=bg, foreground=t.fg_hint, font=t.font("caption")
+            ).pack(side="left")
         self._form_groups += [button_frame, first_time, trust]
         self._login_row += 1
 
@@ -383,8 +467,9 @@ class ChatGUI(tk.Tk):
         self.steps.grid(row=self._login_row, column=0, sticky="ew", pady=(t.sp("md"), 0))
         self.steps.grid_remove()
         self._login_row += 1
-        self.back_button = ttk.Button(card, text="Back", style="Secondary.TButton",
-                                      command=self._login_back)
+        self.back_button = ttk.Button(
+            card, text="Back", style="Secondary.TButton", command=self._login_back
+        )
         self.back_button.grid(row=self._login_row, column=0, sticky="e", pady=(t.sp("sm"), 0))
         self.back_button.grid_remove()
         self._login_row += 1
@@ -401,7 +486,8 @@ class ChatGUI(tk.Tk):
         arrow = "▾" if self._server_open else "▸"
         self.server_toggle.config(
             text=f"{arrow} Server: {self.host_var.get().strip() or DEFAULT_HOST}:"
-                 f"{self.port_var.get().strip() or DEFAULT_PORT}")
+            f"{self.port_var.get().strip() or DEFAULT_PORT}"
+        )
 
     def _toggle_server_settings(self, open_=None):
         self._server_open = (not self._server_open) if open_ is None else open_
@@ -466,12 +552,12 @@ class ChatGUI(tk.Tk):
         t = self.theme
         frame = tk.Frame(self, background=t.bg_app)
         self.chat_frame = frame
-        self._items = []             # everything shown in the conversation (re-rendered on rescale)
-        self._wrappables = []        # (label, margin): re-wrapped when the pane is resized
+        self._items = []  # everything shown in the conversation (re-rendered on rescale)
+        self._wrappables = []  # (label, margin): re-wrapped when the pane is resized
         self._last_date = None
         self._session_ready = False
         self._network_visible = True
-        self.explain_var = tk.BooleanVar(value=True)     # settings menu: "Explain events"
+        self.explain_var = tk.BooleanVar(value=True)  # settings menu: "Explain events"
         self._tls_text = "TLS 1.3"
         self._peer_fingerprint = None
 
@@ -485,45 +571,67 @@ class ChatGUI(tk.Tk):
         self.header_var = tk.StringVar(value="")
         # Actions, packed FIRST (right-to-left): Tk gives space in packing order, so a long
         # Keep actions reachable even with a long peer name.
-        self.export_button = ttk.Button(row1, text="Export evidence", style="Secondary.TButton",
-                                        command=self._on_export_evidence)
-        self.network_button = ttk.Button(row1, text="Network", style="Ghost.TButton",
-                                         command=self._toggle_network)
+        self.export_button = ttk.Button(
+            row1,
+            text="Export evidence",
+            style="Secondary.TButton",
+            command=self._on_export_evidence,
+        )
+        self.network_button = ttk.Button(
+            row1, text="Network", style="Ghost.TButton", command=self._toggle_network
+        )
         for button in (self.export_button, self.network_button):
             button.pack(side="right", padx=(t.sp("sm"), 0))
-        self.settings_button = ttk.Button(row1, text="⚙", style="Ghost.TButton", width=2,
-                                          command=self._popup_settings)
+        self.settings_button = ttk.Button(
+            row1, text="⚙", style="Ghost.TButton", width=2, command=self._popup_settings
+        )
         self.settings_menu = tk.Menu(self, tearoff=0)
-        self.settings_menu.add_checkbutton(label="Explain events", variable=self.explain_var,
-                                           command=self._on_explain_toggled)
-        self.settings_menu.add_command(label="Show / hide network view",
-                                       command=self._toggle_network)
+        self.settings_menu.add_checkbutton(
+            label="Explain events", variable=self.explain_var, command=self._on_explain_toggled
+        )
+        self.settings_menu.add_command(
+            label="Show / hide network view", command=self._toggle_network
+        )
         self.settings_menu.add_checkbutton(
             label=f"Presentation mode  ({widgets.presentation_accelerator()})",
-            variable=self.presentation_var, command=self._on_presentation_menu)
+            variable=self.presentation_var,
+            command=self._on_presentation_menu,
+        )
         for mode in ("dark", "light"):
             self.settings_menu.add_radiobutton(
                 label=f"{THEME_LABELS[mode]} theme  ({widgets.theme_accelerator()})",
-                value=mode, variable=self.theme_var, command=self._on_theme_menu)
+                value=mode,
+                variable=self.theme_var,
+                command=self._on_theme_menu,
+            )
         self.settings_button.pack(side="right", padx=(t.sp("sm"), 0))
-        self.theme_button = ttk.Button(row1, text="◐", style="Ghost.TButton", width=2,
-                                       command=self.toggle_theme)
+        self.theme_button = ttk.Button(
+            row1, text="◐", style="Ghost.TButton", width=2, command=self.toggle_theme
+        )
         self.theme_button.pack(side="right", padx=(t.sp("sm"), 0))
 
         self.avatar = widgets.Avatar(row1, t, "?", size=t.sp(44))
         self.avatar.pack(side="left", padx=(0, t.sp("md")))
         ident = tk.Frame(row1, background=t.bg_panel)
         ident.pack(side="left")
-        self.peer_label = tk.Label(ident, text="", background=t.bg_panel,
-                                   foreground=t.fg_primary, font=t.font("heading"), anchor="w")
+        self.peer_label = tk.Label(
+            ident,
+            text="",
+            background=t.bg_panel,
+            foreground=t.fg_primary,
+            font=t.font("heading"),
+            anchor="w",
+        )
         self.peer_label.pack(anchor="w")
         sub = tk.Frame(ident, background=t.bg_panel)
         sub.pack(anchor="w")
-        self.me_label = tk.Label(sub, text="", background=t.bg_panel, foreground=t.fg_secondary,
-                                 font=t.font("caption"))
+        self.me_label = tk.Label(
+            sub, text="", background=t.bg_panel, foreground=t.fg_secondary, font=t.font("caption")
+        )
         self.me_label.pack(side="left")
-        self.session_status = tk.Label(sub, text="", background=t.bg_panel,
-                                       font=t.font("caption_bold"))
+        self.session_status = tk.Label(
+            sub, text="", background=t.bg_panel, font=t.font("caption_bold")
+        )
         self.session_status.pack(side="left", padx=(t.sp("sm"), 0))
         self._status_hidden = False
         row1.bind("<Configure>", lambda _e: self._fit_header())
@@ -541,8 +649,9 @@ class ChatGUI(tk.Tk):
         self.chip_tls = widgets.Chip(chips, t, "TLS 1.3", "off")
         self.chip_e2e = widgets.Chip(chips, t, "End-to-end encrypted", "off")
         self.chip_signed = widgets.Chip(chips, t, "Signed", "off")
-        self.fp_chip = self.fp_label = widgets.Chip(chips, t, "Fingerprint pending", "warn",
-                                                    mono=True, command=self._copy_fingerprint)
+        self.fp_chip = self.fp_label = widgets.Chip(
+            chips, t, "Fingerprint pending", "warn", mono=True, command=self._copy_fingerprint
+        )
         for chip in (self.chip_tls, self.chip_e2e, self.chip_signed, self.fp_chip):
             chip.pack(side="left", padx=(0, t.sp("sm")))
 
@@ -552,22 +661,36 @@ class ChatGUI(tk.Tk):
         entry_frame = tk.Frame(frame, background=t.bg_app)
         entry_frame.pack(side="bottom", fill="x", padx=t.sp("md"), pady=(0, t.sp("md")))
         self.entry_frame = entry_frame
-        self.send_button = ttk.Button(entry_frame, text="Send", style="App.TButton",
-                                      command=self._on_send, state="disabled")
+        self.send_button = ttk.Button(
+            entry_frame, text="Send", style="App.TButton", command=self._on_send, state="disabled"
+        )
         self.send_button.pack(side="right", padx=(t.sp("sm"), 0), fill="y")
-        self.composer = widgets.RoundedFrame(entry_frame, t, fill=t.bg_panel,
-                                             outline=t.border_strong, radius="md",
-                                             padx=t.sp("sm"), pady=2)
+        self.composer = widgets.RoundedFrame(
+            entry_frame,
+            t,
+            fill=t.bg_panel,
+            outline=t.border_strong,
+            radius="md",
+            padx=t.sp("sm"),
+            pady=2,
+        )
         self.composer.pack(side="left", fill="both", expand=True)
         self.message_entry = widgets.PlaceholderText(
-            self.composer, t, placeholder="Waiting for the secure session...", max_lines=4,
-            background=t.bg_panel)
+            self.composer,
+            t,
+            placeholder="Waiting for the secure session...",
+            max_lines=4,
+            background=t.bg_panel,
+        )
         self.message_entry.pack(side="left", fill="x", expand=True)
         self.message_entry.bind("<<Send>>", lambda _e: self._on_send())
         self.message_entry.bind("<KeyRelease>", lambda _e: self._update_send_state(), add="+")
-        self.message_entry.bind("<FocusIn>", lambda _e: self.composer.set_outline(t.accent), add="+")
-        self.message_entry.bind("<FocusOut>", lambda _e: self.composer.set_outline(t.border_strong),
-                                add="+")
+        self.message_entry.bind(
+            "<FocusIn>", lambda _e: self.composer.set_outline(t.accent), add="+"
+        )
+        self.message_entry.bind(
+            "<FocusOut>", lambda _e: self.composer.set_outline(t.border_strong), add="+"
+        )
         self.composer.bind("<Button-1>", lambda _e: self.message_entry.focus_set())
 
         # -- body: conversation (left) / network view (right) -------------------------
@@ -575,54 +698,107 @@ class ChatGUI(tk.Tk):
         paned.pack(side="top", fill="both", expand=True, padx=t.sp("md"), pady=t.sp("md"))
         self.paned = paned
 
-        chat_pane = widgets.RoundedFrame(paned, t, fill=t.bg_panel, outline=t.border,
-                                         surface=t.bg_app, padx=t.sp("xs"), pady=t.sp("xs"))
+        chat_pane = widgets.RoundedFrame(
+            paned,
+            t,
+            fill=t.bg_panel,
+            outline=t.border,
+            surface=t.bg_app,
+            padx=t.sp("xs"),
+            pady=t.sp("xs"),
+        )
         chat_head = tk.Frame(chat_pane, background=t.bg_panel)
         chat_head.pack(side="top", fill="x", padx=t.sp("md"), pady=(t.sp("sm"), t.sp("xs")))
-        tk.Label(chat_head, text="CONVERSATION", background=t.bg_panel,
-                 foreground=t.fg_hint, font=t.font("overline")).pack(side="left")
-        tk.Label(chat_head, text="Click a message to see its security receipt",
-                 background=t.bg_panel, foreground=t.fg_hint,
-                 font=t.font("caption")).pack(side="right")
+        tk.Label(
+            chat_head,
+            text="CONVERSATION",
+            background=t.bg_panel,
+            foreground=t.fg_hint,
+            font=t.font("overline"),
+        ).pack(side="left")
+        tk.Label(
+            chat_head,
+            text="Click a message to see its security receipt",
+            background=t.bg_panel,
+            foreground=t.fg_hint,
+            font=t.font("caption"),
+        ).pack(side="right")
         self._build_bubble_panel(chat_pane)
         paned.add(chat_pane, weight=3)
         self.chat_pane = chat_pane
 
         alt = t.bg_panel_alt
-        wire_pane = widgets.RoundedFrame(paned, t, fill=alt, outline=t.border, surface=t.bg_app,
-                                         padx=t.sp("xs"), pady=t.sp("xs"))
+        wire_pane = widgets.RoundedFrame(
+            paned, t, fill=alt, outline=t.border, surface=t.bg_app, padx=t.sp("xs"), pady=t.sp("xs")
+        )
         wire_head = tk.Frame(wire_pane, background=alt)
         wire_head.pack(side="top", fill="x", padx=t.sp("md"), pady=(t.sp("sm"), 0))
-        tk.Label(wire_head, text="NETWORK VIEW", background=alt,
-                 foreground=t.fg_hint, font=t.font("overline")).pack(side="left")
-        tk.Label(wire_head, text="values shortened", background=alt,
-                 foreground=t.fg_hint, font=t.font("caption")).pack(side="right")
+        tk.Label(
+            wire_head,
+            text="NETWORK VIEW",
+            background=alt,
+            foreground=t.fg_hint,
+            font=t.font("overline"),
+        ).pack(side="left")
+        tk.Label(
+            wire_head,
+            text="values shortened",
+            background=alt,
+            foreground=t.fg_hint,
+            font=t.font("caption"),
+        ).pack(side="right")
         legend = tk.Frame(wire_pane, background=alt)
         legend.pack(side="top", fill="x", padx=t.sp("md"), pady=(t.sp("xs"), t.sp("sm")))
-        for label, color in (("TLS", t.wire_tls), ("HANDSHAKE", t.wire_handshake),
-                             ("CHAT", t.wire_chat), ("ALERT", t.wire_alert)):
-            tk.Label(legend, text=label, background=alt, foreground=color,
-                     font=t.font("caption_bold")).pack(side="left", padx=(0, t.sp("md")))
-        tk.Frame(wire_pane, background=t.border, height=1).pack(side="top", fill="x",
-                                                                padx=t.sp("md"))
+        for label, color in (
+            ("TLS", t.wire_tls),
+            ("HANDSHAKE", t.wire_handshake),
+            ("CHAT", t.wire_chat),
+            ("ALERT", t.wire_alert),
+        ):
+            tk.Label(
+                legend, text=label, background=alt, foreground=color, font=t.font("caption_bold")
+            ).pack(side="left", padx=(0, t.sp("md")))
+        tk.Frame(wire_pane, background=t.border, height=1).pack(
+            side="top", fill="x", padx=t.sp("md")
+        )
         # width=40 keeps the Text's *requested* width small, so the Panedwindow's weights
         # (not this widget's 80-char default) decide how the width is split.
-        self.wire_text = tk.Text(wire_pane, wrap="word", state="disabled", width=40,
-                                 font=t.font("mono_small"), background=alt,
-                                 foreground=t.fg_secondary, insertbackground=t.fg_primary,
-                                 borderwidth=0, highlightthickness=0, padx=t.sp("md"),
-                                 pady=t.sp("sm"), spacing1=3, spacing3=3,
-                                 selectbackground=t.bg_raised)
-        wire_scroll = ttk.Scrollbar(wire_pane, orient="vertical", command=self.wire_text.yview,
-                                    style="Alt.Vertical.TScrollbar")
+        self.wire_text = tk.Text(
+            wire_pane,
+            wrap="word",
+            state="disabled",
+            width=40,
+            font=t.font("mono_small"),
+            background=alt,
+            foreground=t.fg_secondary,
+            insertbackground=t.fg_primary,
+            borderwidth=0,
+            highlightthickness=0,
+            padx=t.sp("md"),
+            pady=t.sp("sm"),
+            spacing1=3,
+            spacing3=3,
+            selectbackground=t.bg_raised,
+        )
+        wire_scroll = ttk.Scrollbar(
+            wire_pane,
+            orient="vertical",
+            command=self.wire_text.yview,
+            style="Alt.Vertical.TScrollbar",
+        )
         self.wire_text.configure(yscrollcommand=wire_scroll.set)
         wire_scroll.pack(side="right", fill="y", pady=t.sp("sm"))
         self.wire_text.pack(side="left", fill="both", expand=True, pady=(0, t.sp("sm")))
         self.wire_text.tag_config("ts", foreground=t.fg_hint)
         for kind, color in WIRE_COLORS(t).items():
-            self.wire_text.tag_config(f"badge_{kind}", foreground=color, font=t.font("mono_small_bold"))
-            self.wire_text.tag_config(f"body_{kind}", foreground=color if kind == "ALERT"
-                                      else t.fg_secondary, lmargin2=t.sp("md"))
+            self.wire_text.tag_config(
+                f"badge_{kind}", foreground=color, font=t.font("mono_small_bold")
+            )
+            self.wire_text.tag_config(
+                f"body_{kind}",
+                foreground=color if kind == "ALERT" else t.fg_secondary,
+                lmargin2=t.sp("md"),
+            )
         paned.add(wire_pane, weight=2)
         self.wire_pane = wire_pane
 
@@ -633,8 +809,9 @@ class ChatGUI(tk.Tk):
         "error" (red, shows `detail`)."""
         t = self.theme
         if state == "pending":
-            self.session_status.config(text=f"·  ● Waiting for {peer} to come online...",
-                                       foreground=t.warning)
+            self.session_status.config(
+                text=f"·  ● Waiting for {peer} to come online...", foreground=t.warning
+            )
             for chip in (self.chip_tls, self.chip_e2e, self.chip_signed):
                 chip.set("off")
             self.chip_tls.set("off", self._tls_text)
@@ -653,7 +830,9 @@ class ChatGUI(tk.Tk):
 
     def _popup_settings(self):
         button = self.settings_button
-        self.settings_menu.tk_popup(button.winfo_rootx(), button.winfo_rooty() + button.winfo_height())
+        self.settings_menu.tk_popup(
+            button.winfo_rootx(), button.winfo_rooty() + button.winfo_height()
+        )
 
     # --- Presentation mode (bigger fonts and padding for a projector) ------------------------
 
@@ -661,15 +840,24 @@ class ChatGUI(tk.Tk):
         """A real menu-bar "View" menu, so Presentation mode is also reachable by menu."""
         menubar = tk.Menu(self)
         view = tk.Menu(menubar, tearoff=0)
-        view.add_checkbutton(label="Presentation mode", accelerator=widgets.presentation_accelerator(),
-                             variable=self.presentation_var, command=self._on_presentation_menu)
-        view.add_checkbutton(label="Explain events", variable=self.explain_var,
-                             command=self._on_explain_toggled)
+        view.add_checkbutton(
+            label="Presentation mode",
+            accelerator=widgets.presentation_accelerator(),
+            variable=self.presentation_var,
+            command=self._on_presentation_menu,
+        )
+        view.add_checkbutton(
+            label="Explain events", variable=self.explain_var, command=self._on_explain_toggled
+        )
         view.add_command(label="Show / hide network view", command=self._toggle_network)
         for mode in ("dark", "light"):
-            view.add_radiobutton(label=f"{THEME_LABELS[mode]} theme",
-                                 accelerator=widgets.theme_accelerator() if mode == "light" else "",
-                                 value=mode, variable=self.theme_var, command=self._on_theme_menu)
+            view.add_radiobutton(
+                label=f"{THEME_LABELS[mode]} theme",
+                accelerator=widgets.theme_accelerator() if mode == "light" else "",
+                value=mode,
+                variable=self.theme_var,
+                command=self._on_theme_menu,
+            )
         menubar.add_cascade(label="View", menu=view)
         self.config(menu=menubar)
         self.view_menu = view
@@ -696,11 +884,11 @@ class ChatGUI(tk.Tk):
         self.theme_var.set(self.theme.mode)
         if not mapping:
             return
-        for child in list(self.winfo_children()):        # Receipts are rebuilt on open
+        for child in list(self.winfo_children()):  # Receipts are rebuilt on open
             if isinstance(child, tk.Toplevel):
                 child.destroy()
         widgets.recolor_tree(self, mapping)
-        if self._banner is not None:                       # its icon is an image: redraw it
+        if self._banner is not None:  # its icon is an image: redraw it
             self._show_banner(*self._banner_args)
         self.login_theme_button.configure(text=self._theme_button_text())
         if self._chat_ready:
@@ -718,7 +906,7 @@ class ChatGUI(tk.Tk):
         self.presentation_var.set(on)
         if on == self.theme.presentation:
             return
-        for child in list(self.winfo_children()):        # Receipts are rebuilt on open
+        for child in list(self.winfo_children()):  # Receipts are rebuilt on open
             if isinstance(child, tk.Toplevel):
                 child.destroy()
         ratio = self.theme.set_presentation(on)
@@ -751,15 +939,33 @@ class ChatGUI(tk.Tk):
         t = self.theme
         self._dismiss_banner()
         color = {"ok": t.success, "bad": t.danger, "warn": t.warning, "info": t.accent}[severity]
-        bg = {"ok": t.bg_success_soft, "bad": t.bg_danger_soft, "warn": t.bg_warning_soft,
-              "info": t.bg_accent_soft}[severity]
+        bg = {
+            "ok": t.bg_success_soft,
+            "bad": t.bg_danger_soft,
+            "warn": t.bg_warning_soft,
+            "info": t.bg_accent_soft,
+        }[severity]
         glyph = {"ok": "✓", "bad": "✕", "warn": "!", "info": "i"}[severity]
-        banner = widgets.RoundedFrame(self.banner_holder, t, fill=bg, outline=color,
-                                      radius="md", surface=t.bg_app,
-                                      padx=t.sp("md"), pady=t.sp("sm"))
+        banner = widgets.RoundedFrame(
+            self.banner_holder,
+            t,
+            fill=bg,
+            outline=color,
+            radius="md",
+            surface=t.bg_app,
+            padx=t.sp("md"),
+            pady=t.sp("sm"),
+        )
         banner.pack(fill="x", padx=t.sp("md"), pady=(t.sp("md"), 0))
-        close = tk.Label(banner, text="✕", background=bg, foreground=t.fg_secondary,
-                         font=t.font("body_bold"), cursor=hand_cursor(), padx=t.sp("xs"))
+        close = tk.Label(
+            banner,
+            text="✕",
+            background=bg,
+            foreground=t.fg_secondary,
+            font=t.font("body_bold"),
+            cursor=hand_cursor(),
+            padx=t.sp("xs"),
+        )
         close.pack(side="right", anchor="n")
         close.bind("<Button-1>", lambda _e: self._dismiss_banner())
         close.bind("<Enter>", lambda _e: close.config(foreground=t.fg_primary))
@@ -771,18 +977,32 @@ class ChatGUI(tk.Tk):
         icon.pack(side="left", anchor="n", padx=(0, t.sp("md")), pady=(2, 0))
         body = tk.Frame(banner, background=bg)
         body.pack(side="left", fill="x", expand=True)
-        tk.Label(body, text="WHAT JUST HAPPENED", background=bg, foreground=color,
-                 font=t.font("overline"), anchor="w").pack(anchor="w")
-        label = tk.Label(body, text=text, background=bg, foreground=t.fg_primary,
-                         font=t.font("body"), justify="left", anchor="w",
-                         wraplength=max(self.winfo_width() - 150, 240))
+        tk.Label(
+            body,
+            text="WHAT JUST HAPPENED",
+            background=bg,
+            foreground=color,
+            font=t.font("overline"),
+            anchor="w",
+        ).pack(anchor="w")
+        label = tk.Label(
+            body,
+            text=text,
+            background=bg,
+            foreground=t.fg_primary,
+            font=t.font("body"),
+            justify="left",
+            anchor="w",
+            wraplength=max(self.winfo_width() - 150, 240),
+        )
         label.pack(anchor="w", fill="x", pady=(2, 0))
         self._banner = (banner, label)
         self._banner_args = (severity, text)
         self.banner_label = label
-        if severity == "ok":     # good news fades after a while; warnings stay until dismissed
-            self._banner_job = self.after(BANNER_OK_SECONDS * 1000,
-                                          lambda b=banner: self._dismiss_if_current(b))
+        if severity == "ok":  # good news fades after a while; warnings stay until dismissed
+            self._banner_job = self.after(
+                BANNER_OK_SECONDS * 1000, lambda b=banner: self._dismiss_if_current(b)
+            )
 
     def _dismiss_banner(self):
         job = getattr(self, "_banner_job", None)
@@ -819,8 +1039,9 @@ class ChatGUI(tk.Tk):
             self._status_hidden = True
 
     def _fingerprint_chip_text(self):
-        return f"Key  {self._peer_fingerprint}  ⧉" if self._peer_fingerprint \
-            else "Fingerprint pending"
+        return (
+            f"Key  {self._peer_fingerprint}  ⧉" if self._peer_fingerprint else "Fingerprint pending"
+        )
 
     def _copy_fingerprint(self):
         if not self._peer_fingerprint:
@@ -841,7 +1062,7 @@ class ChatGUI(tk.Tk):
         else:
             self.paned.forget(self.wire_pane)
         self.network_button.config(style="Ghost.TButton" if show else "Secondary.TButton")
-        self._rerender_items()   # the conversation just got wider/narrower
+        self._rerender_items()  # the conversation just got wider/narrower
 
     def _update_send_state(self):
         ready = self._session_ready and bool(self.message_entry.get_text().strip())
@@ -859,18 +1080,26 @@ class ChatGUI(tk.Tk):
     def _build_bubble_panel(self, parent):
         t = self.theme
         container = tk.Frame(parent, background=t.bg_panel)
-        container.pack(side="top", fill="both", expand=True, padx=(t.sp("xs"), t.sp("xs")),
-                       pady=(0, t.sp("sm")))
+        container.pack(
+            side="top",
+            fill="both",
+            expand=True,
+            padx=(t.sp("xs"), t.sp("xs")),
+            pady=(0, t.sp("sm")),
+        )
         # width=360: a small requested width so the Panedwindow weights decide the split.
-        self.bubble_canvas = tk.Canvas(container, background=t.bg_panel, width=360,
-                                       borderwidth=0, highlightthickness=0)
+        self.bubble_canvas = tk.Canvas(
+            container, background=t.bg_panel, width=360, borderwidth=0, highlightthickness=0
+        )
         scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.bubble_canvas.yview)
         self.bubble_list = tk.Frame(self.bubble_canvas, background=t.bg_panel)
         self.bubble_list.bind(
             "<Configure>",
-            lambda _e: self.bubble_canvas.configure(scrollregion=self.bubble_canvas.bbox("all")))
+            lambda _e: self.bubble_canvas.configure(scrollregion=self.bubble_canvas.bbox("all")),
+        )
         self._bubble_window = self.bubble_canvas.create_window(
-            (0, 0), window=self.bubble_list, anchor="nw")
+            (0, 0), window=self.bubble_list, anchor="nw"
+        )
         self.bubble_canvas.bind("<Configure>", self._on_bubble_canvas_resize)
         self.bubble_canvas.configure(yscrollcommand=scrollbar.set)
         self.bubble_canvas.pack(side="left", fill="both", expand=True)
@@ -941,8 +1170,17 @@ class ChatGUI(tk.Tk):
         # Attachments are web-only: show a safe placeholder. The verbatim message
         # (with its signature and chain position) is untouched in the client's records.
         text = display_text(text)
-        self._add_item({"kind": "bubble", "align": align, "name": name, "text": text,
-                        "ts": ts, "receipt": receipt, "gap": gap})
+        self._add_item(
+            {
+                "kind": "bubble",
+                "align": align,
+                "name": name,
+                "text": text,
+                "ts": ts,
+                "receipt": receipt,
+                "gap": gap,
+            }
+        )
 
     def _add_bubble(self, text, align, bg, fg, timestamp_str, sender=None, receipt=None):
         """Compatibility wrapper (older call sites): colours now come from the theme."""
@@ -953,15 +1191,22 @@ class ChatGUI(tk.Tk):
         self._add_item({"kind": "notice", "text": text, "warning": warning})
 
     def _add_blocked_card(self, info, sender=None, ts=None):
-        self._add_item({"kind": "blocked", "info": info, "sender": sender,
-                        "ts": ts or time.time()})
+        self._add_item({"kind": "blocked", "info": info, "sender": sender, "ts": ts or time.time()})
 
     def _draw_date(self, item):
         t = self.theme
         row = tk.Frame(self.bubble_list, background=t.bg_panel)
         row.pack(side="top", fill="x", pady=(t.sp("md"), t.sp("sm")))
-        widgets.Pill(row, t, text=item["text"], fill=t.bg_raised, foreground=t.fg_secondary,
-                     font=t.font("caption_bold"), padx=t.sp("md"), pady=3).pack()
+        widgets.Pill(
+            row,
+            t,
+            text=item["text"],
+            fill=t.bg_raised,
+            foreground=t.fg_secondary,
+            font=t.font("caption_bold"),
+            padx=t.sp("md"),
+            pady=3,
+        ).pack()
 
     def _draw_notice(self, item):
         t = self.theme
@@ -969,10 +1214,15 @@ class ChatGUI(tk.Tk):
         row.pack(side="top", fill="x", pady=t.sp("sm"), padx=t.sp("lg"))
         warning = item["warning"]
         wrap = max(self.bubble_canvas.winfo_width() - 60, 120)
-        label = tk.Label(row, text=item["text"], background=t.bg_panel,
-                         foreground=t.danger if warning else t.fg_hint,
-                         font=t.font("caption_bold" if warning else "caption"),
-                         wraplength=wrap, justify="center")
+        label = tk.Label(
+            row,
+            text=item["text"],
+            background=t.bg_panel,
+            foreground=t.danger if warning else t.fg_hint,
+            font=t.font("caption_bold" if warning else "caption"),
+            wraplength=wrap,
+            justify="center",
+        )
         label.pack(anchor="center")
         self._wrappables.append((label, 60))
 
@@ -985,8 +1235,9 @@ class ChatGUI(tk.Tk):
         color, bg = (t.danger, t.bg_danger_soft) if bad else (t.warning, t.bg_warning_soft)
         row = tk.Frame(self.bubble_list, background=t.bg_panel)
         row.pack(side="top", fill="x", pady=t.sp("sm"), padx=t.sp("md"))
-        card = widgets.RoundedFrame(row, t, fill=bg, outline=color, radius="md",
-                                    padx=t.sp("md"), pady=t.sp("md"))
+        card = widgets.RoundedFrame(
+            row, t, fill=bg, outline=color, radius="md", padx=t.sp("md"), pady=t.sp("md")
+        )
         card.pack(fill="x")
         body = tk.Frame(card, background=bg)
         body.pack(side="left", fill="x", expand=True)
@@ -997,34 +1248,64 @@ class ChatGUI(tk.Tk):
         size = t.sp(24)
         badge = tk.Canvas(head, width=size, height=size, background=bg, highlightthickness=0)
         badge.create_image(0, 0, image=t.images.get(size, size, size / 2, color), anchor="nw")
-        badge.create_text(size / 2, size / 2, text="✕" if bad else "!", fill=bg,
-                          font=t.font("caption_bold"))
+        badge.create_text(
+            size / 2, size / 2, text="✕" if bad else "!", fill=bg, font=t.font("caption_bold")
+        )
         badge.pack(side="left", padx=(0, t.sp("sm")))
-        if item.get("sender"):      # packed before the headline so a long headline never hides it
-            tk.Label(head, text=time.strftime("%H:%M", time.localtime(item["ts"])),
-                     background=bg, foreground=t.fg_secondary,
-                     font=t.font("caption")).pack(side="right", padx=(t.sp("sm"), 0))
-        headline = tk.Label(head, text=info["headline"], background=bg, foreground=color,
-                            font=t.font("body_bold"), anchor="w", justify="left")
+        if item.get("sender"):  # packed before the headline so a long headline never hides it
+            tk.Label(
+                head,
+                text=time.strftime("%H:%M", time.localtime(item["ts"])),
+                background=bg,
+                foreground=t.fg_secondary,
+                font=t.font("caption"),
+            ).pack(side="right", padx=(t.sp("sm"), 0))
+        headline = tk.Label(
+            head,
+            text=info["headline"],
+            background=bg,
+            foreground=color,
+            font=t.font("body_bold"),
+            anchor="w",
+            justify="left",
+        )
         headline.pack(side="left", fill="x", expand=True)
         self._wrappables.append((headline, 150))
 
-        explain = tk.Label(body, text=info["explain"], background=bg, foreground=t.fg_primary,
-                           font=t.font("body"), justify="left", anchor="w")
+        explain = tk.Label(
+            body,
+            text=info["explain"],
+            background=bg,
+            foreground=t.fg_primary,
+            font=t.font("body"),
+            justify="left",
+            anchor="w",
+        )
         explain.pack(fill="x", pady=(t.sp("sm"), t.sp("sm")))
         self._wrappables.append((explain, 90))
         caught = tk.Frame(body, background=bg)
         caught.pack(fill="x")
-        tk.Label(caught, text="Caught by", background=bg, foreground=t.fg_secondary,
-                 font=t.font("caption")).pack(side="left", padx=(0, t.sp("sm")))
+        tk.Label(
+            caught,
+            text="Caught by",
+            background=bg,
+            foreground=t.fg_secondary,
+            font=t.font("caption"),
+        ).pack(side="left", padx=(0, t.sp("sm")))
         check_chip = widgets.Chip(caught, t, info["check"], "bad_dark" if bad else "warn_dark")
         check_chip.configure(justify="left", anchor="w")
         check_chip.pack(side="left", fill="x", expand=True)
-        self._wrappables.append((check_chip, 230))     # a long check name wraps instead of clipping
+        self._wrappables.append((check_chip, 230))  # a long check name wraps instead of clipping
         if info.get("detail"):
-            detail = tk.Label(body, text=str(info["detail"]), background=bg,
-                              foreground=t.fg_secondary, font=t.font("mono_small"),
-                              justify="left", anchor="w")
+            detail = tk.Label(
+                body,
+                text=str(info["detail"]),
+                background=bg,
+                foreground=t.fg_secondary,
+                font=t.font("mono_small"),
+                justify="left",
+                anchor="w",
+            )
             detail.pack(fill="x", pady=(t.sp("sm"), 0))
             self._wrappables.append((detail, 90))
         w = self.bubble_canvas.winfo_width()
@@ -1039,9 +1320,32 @@ class ChatGUI(tk.Tk):
         tl = small if tail == "w" else r
         tr = small if tail == "e" else r
         bl = br = r
-        return [x1 + tl, y1, x2 - tr, y1, x2, y1, x2, y1 + tr,
-                x2, y2 - br, x2, y2, x2 - br, y2, x1 + bl, y2,
-                x1, y2, x1, y2 - bl, x1, y1 + tl, x1, y1]
+        return [
+            x1 + tl,
+            y1,
+            x2 - tr,
+            y1,
+            x2,
+            y1,
+            x2,
+            y1 + tr,
+            x2,
+            y2 - br,
+            x2,
+            y2,
+            x2 - br,
+            y2,
+            x1 + bl,
+            y2,
+            x1,
+            y2,
+            x1,
+            y2 - bl,
+            x1,
+            y1 + tl,
+            x1,
+            y1,
+        ]
 
     def _draw_bubble(self, item):
         t = self.theme
@@ -1050,14 +1354,17 @@ class ChatGUI(tk.Tk):
         row = tk.Frame(self.bubble_list, background=t.bg_panel)
         row.pack(side="top", fill="x", pady=(t.sp("xs"), t.sp("xs")), padx=t.sp("md"))
         avatar_size = t.sp(30)
-        if not own:     # only the peer gets an avatar; your own messages sit on the right
+        if not own:  # only the peer gets an avatar; your own messages sit on the right
             widgets.Avatar(row, t, item["name"], size=avatar_size).pack(
-                side="left", anchor="n", padx=(0, t.sp("sm")))
+                side="left", anchor="n", padx=(0, t.sp("sm"))
+            )
 
         pad_x, pad_y, line_gap = t.sp("md") + 2, t.sp("sm") + 2, t.sp("xs")
         pane_w = max(self.bubble_canvas.winfo_width(), 320)
-        max_text = max(150, min(480, int(pane_w * 0.74) - avatar_size - t.sp("sm") - pad_x * 2
-                                - t.sp("md") * 2))
+        max_text = max(
+            150,
+            min(480, int(pane_w * 0.74) - avatar_size - t.sp("sm") - pad_x * 2 - t.sp("md") * 2),
+        )
         fonts = {"body": t.font("body"), "name": t.font("caption_bold"), "time": t.font("caption")}
         bg = t.bg_bubble_sent if own else t.bg_bubble_recv
         fg = t.fg_on_sent if own else t.fg_on_recv
@@ -1083,12 +1390,25 @@ class ChatGUI(tk.Tk):
         bubble_h = pad_y + name_h + line_gap + text_h + pad_y
         canvas.configure(width=bubble_w, height=bubble_h)
 
-        canvas.create_polygon(self._bubble_points(0, 0, bubble_w - 1, bubble_h - 1, t.radius("lg"),
-                                                  "e" if own else "w"),
-                              smooth=True, fill=bg, outline=bg, tags=("shape",))
+        canvas.create_polygon(
+            self._bubble_points(
+                0, 0, bubble_w - 1, bubble_h - 1, t.radius("lg"), "e" if own else "w"
+            ),
+            smooth=True,
+            fill=bg,
+            outline=bg,
+            tags=("shape",),
+        )
         canvas.create_text(pad_x, pad_y, text=name, font=fonts["name"], fill=name_fg, anchor="nw")
-        canvas.create_text(pad_x, pad_y + name_h + line_gap, text=item["text"],
-                           font=fonts["body"], fill=fg, width=max_text, anchor="nw")
+        canvas.create_text(
+            pad_x,
+            pad_y + name_h + line_gap,
+            text=item["text"],
+            font=fonts["body"],
+            fill=fg,
+            width=max_text,
+            anchor="nw",
+        )
         # time and the verified shield share the name line, on the right
         meta_y = pad_y + name_h / 2
         right = bubble_w - pad_x
@@ -1096,13 +1416,14 @@ class ChatGUI(tk.Tk):
             # A shield on every message that passed ALL the client's checks (a gap in the
             # hash chain is shown amber with "!": the message is authentic but flagged).
             sx, sy = right - shield / 2, meta_y
-            fill = (t.warning if gap else ("#ccfbf1" if own else t.success))
+            fill = t.warning if gap else ("#ccfbf1" if own else t.success)
             widgets.draw_shield(canvas, sx, sy, shield, fill=fill)
             if gap:
                 canvas.create_text(sx, sy, text="!", fill=t.on_signal, font=fonts["name"])
             else:
-                widgets.draw_check(canvas, sx, sy + 1, shield * 0.8,
-                                   "#065f46" if own else t.on_signal, width=2)
+                widgets.draw_check(
+                    canvas, sx, sy + 1, shield * 0.8, "#065f46" if own else t.on_signal, width=2
+                )
             right -= shield + t.sp("xs")
         canvas.create_text(right, meta_y, text=stamp, font=fonts["time"], fill=meta_fg, anchor="e")
 
@@ -1111,7 +1432,9 @@ class ChatGUI(tk.Tk):
             canvas.configure(cursor=hand_cursor())
             canvas.bind("<Button-1>", lambda _e, r=item["receipt"]: self._show_receipt(r))
             hover = t.bg_raised_hover if not own else "#0d6b64"
-            canvas.bind("<Enter>", lambda _e: canvas.itemconfigure("shape", fill=hover, outline=hover))
+            canvas.bind(
+                "<Enter>", lambda _e: canvas.itemconfigure("shape", fill=hover, outline=hover)
+            )
             canvas.bind("<Leave>", lambda _e: canvas.itemconfigure("shape", fill=bg, outline=bg))
         canvas.pack(side="right" if own else "left")
 
@@ -1148,8 +1471,13 @@ class ChatGUI(tk.Tk):
         if str(self.register_button.cget("state")) == "disabled":
             return  # an attempt is already in flight (e.g. Enter pressed twice)
         host = self.host_var.get().strip() or DEFAULT_HOST
-        errors = validate_login_form(host, self.port_var.get(), self.username_var.get(),
-                                     self.peer_var.get(), self.password_var.get())
+        errors = validate_login_form(
+            host,
+            self.port_var.get(),
+            self.username_var.get(),
+            self.peer_var.get(),
+            self.password_var.get(),
+        )
         self._show_field_errors(errors)
         if errors:
             return
@@ -1163,18 +1491,21 @@ class ChatGUI(tk.Tk):
         self._handshake_done, self._tls_fingerprint = False, None
         self.register_button.config(state="disabled")
         self.login_button.config(state="disabled")
-        self.steps.set_steps([
-            "Connecting over TLS 1.3",
-            "Verifying the server certificate",
-            "Registering your account" if mode == "register" else "Logging in",
-            f"Exchanging keys with {peer}",
-            "Verifying the handshake signature",
-        ])
+        self.steps.set_steps(
+            [
+                "Connecting over TLS 1.3",
+                "Verifying the server certificate",
+                "Registering your account" if mode == "register" else "Logging in",
+                f"Exchanging keys with {peer}",
+                "Verifying the handshake signature",
+            ]
+        )
         self._set_login_busy(True)
         self.steps.set(0, "active")
 
         threading.Thread(
-            target=self._auth_worker, args=(mode, host, port, username, peer, password),
+            target=self._auth_worker,
+            args=(mode, host, port, username, peer, password),
             daemon=True,
         ).start()
 
@@ -1185,7 +1516,8 @@ class ChatGUI(tk.Tk):
         the terminal client, just without any input()/print()."""
         try:
             sock = connect_tls(
-                host, port,
+                host,
+                port,
                 on_cert_fingerprint=lambda fp: self.event_queue.put(
                     ("tls_cert_fingerprint", {"fingerprint": fp})
                 ),
@@ -1201,8 +1533,9 @@ class ChatGUI(tk.Tk):
             tls_version = None
         self.event_queue.put(("tls_connected", {"version": tls_version}))
 
-        client = SecureChatClient(sock, username=username, peer=peer,
-                                   event_callback=self._on_client_event)
+        client = SecureChatClient(
+            sock, username=username, peer=peer, event_callback=self._on_client_event
+        )
         threading.Thread(target=client.receive_loop, daemon=True).start()
 
         rsa_private_key = None
@@ -1223,7 +1556,6 @@ class ChatGUI(tk.Tk):
                 pass
             return
 
-
         if mode == "register":
             save_private_key(username, rsa_private_key)
             client.rsa_private_key = rsa_private_key
@@ -1241,10 +1573,17 @@ class ChatGUI(tk.Tk):
         self.sock = sock
         self.username = username
         self.peer = peer
-        self.event_queue.put(("auth_success", {
-            "username": username, "peer": peer,
-            "own_fingerprint": own_fingerprint, "peer_key_found": peer_key_found,
-        }))
+        self.event_queue.put(
+            (
+                "auth_success",
+                {
+                    "username": username,
+                    "peer": peer,
+                    "own_fingerprint": own_fingerprint,
+                    "peer_key_found": peer_key_found,
+                },
+            )
+        )
 
     # --- login progress (ticked off by real events) ----------------------------------
 
@@ -1258,12 +1597,15 @@ class ChatGUI(tk.Tk):
             version = (data.get("version") or "TLSv1.3").replace("TLSv", "TLS ")
             s.set(0, "done", f"Connected over {version}")
             fp = self._tls_fingerprint
-            s.set(1, "done", "Server certificate verified"
-                  + (f" (fingerprint {fp})" if fp else ""))
+            s.set(1, "done", "Server certificate verified" + (f" (fingerprint {fp})" if fp else ""))
             s.set(2, "active")
         elif kind == "auth_success":
             who = data["username"]
-            s.set(2, "done", f"{'Registered' if self._login_mode == 'register' else 'Logged in'} as {who}")
+            s.set(
+                2,
+                "done",
+                f"{'Registered' if self._login_mode == 'register' else 'Logged in'} as {who}",
+            )
             if self._handshake_done:
                 return
             if data.get("peer_key_found"):
@@ -1284,12 +1626,14 @@ class ChatGUI(tk.Tk):
         step = 0 if data.get("stage") == "tls" else 2
         self.steps.grid()
         self.steps.set(step, "error", f"{self.steps._rows[step][2].cget('text')}: {detail}")
-        self.back_button.grid()      # the form stays hidden; Back restores it for another try
+        self.back_button.grid()  # the form stays hidden; Back restores it for another try
 
     def _login_progress(self, kind, data):
         """Map a (possibly early) real event onto the progress list."""
         if kind == "envelope_received" and data["envelope"].get("type") in (
-                "handshake_init", "handshake_response"):
+            "handshake_init",
+            "handshake_response",
+        ):
             kind, data = "handshake_started", {"peer": self.peer}
         if kind in LOGIN_STEP_KINDS:
             self._login_step_event(kind, data)
@@ -1302,7 +1646,7 @@ class ChatGUI(tk.Tk):
         data, held = self._auth_data, self._held_events
         self._auth_data, self._held_events = None, []
         self._apply_auth_success(data)
-        for kind, payload in held:       # replay what arrived meanwhile, in order
+        for kind, payload in held:  # replay what arrived meanwhile, in order
             self._handle_event(kind, payload)
 
     def _apply_auth_success(self, data):
@@ -1321,7 +1665,8 @@ class ChatGUI(tk.Tk):
             # once the peer joins and starts the handshake (see "handshake_waiting").
             self._add_system_notice(
                 f"{data['peer']} isn't registered or online yet -- the secure "
-                f"session will start automatically when they log in.")
+                f"session will start automatically when they log in."
+            )
 
     # --- per-message security receipt (Stage E) -------------------------------
     #
@@ -1344,18 +1689,30 @@ class ChatGUI(tk.Tk):
         sent = receipt.get("direction") == "sent"
         head = tk.Frame(body, background=t.bg_app)
         head.pack(fill="x", pady=(0, t.sp("md")))
-        mark = tk.Canvas(head, width=t.sp(36), height=t.sp(40), background=t.bg_app,
-                         highlightthickness=0)
+        mark = tk.Canvas(
+            head, width=t.sp(36), height=t.sp(40), background=t.bg_app, highlightthickness=0
+        )
         widgets.draw_shield(mark, t.sp(18), t.sp(20), t.sp(36), fill=t.bg_accent, outline=t.accent)
         widgets.draw_check(mark, t.sp(18), t.sp(21), t.sp(28), t.fg_on_accent, width=3)
         mark.pack(side="left", padx=(0, t.sp("md")))
         titles = tk.Frame(head, background=t.bg_app)
         titles.pack(side="left")
-        tk.Label(titles, text="Security receipt", background=t.bg_app, foreground=t.fg_primary,
-                 font=t.font("title")).pack(anchor="w")
-        tk.Label(titles, text="Message you sent" if sent else f"Message you received from "
-                 f"{receipt.get('sender')}", background=t.bg_app, foreground=t.fg_secondary,
-                 font=t.font("caption")).pack(anchor="w")
+        tk.Label(
+            titles,
+            text="Security receipt",
+            background=t.bg_app,
+            foreground=t.fg_primary,
+            font=t.font("title"),
+        ).pack(anchor="w")
+        tk.Label(
+            titles,
+            text="Message you sent"
+            if sent
+            else f"Message you received from {receipt.get('sender')}",
+            background=t.bg_app,
+            foreground=t.fg_secondary,
+            font=t.font("caption"),
+        ).pack(anchor="w")
 
         # -- the checks this message passed (green), or was flagged on (amber) --
         checks = widgets.make_card(body, t, padx="md", pady="sm")
@@ -1365,51 +1722,86 @@ class ChatGUI(tk.Tk):
             row = tk.Frame(checks, background=t.bg_panel)
             row.pack(fill="x", pady=t.sp("xs"))
             size = t.sp(22)
-            badge = tk.Canvas(row, width=size, height=size, background=t.bg_panel,
-                              highlightthickness=0)
+            badge = tk.Canvas(
+                row, width=size, height=size, background=t.bg_panel, highlightthickness=0
+            )
             badge.create_oval(1, 1, size - 1, size - 1, fill=color, outline="")
             if kind == "ok":
                 widgets.draw_check(badge, size / 2, size / 2 + 1, size * 0.8, t.on_signal, width=2)
             else:
-                badge.create_text(size / 2, size / 2, text="!", fill=t.on_signal,
-                                  font=t.font("caption_bold"))
+                badge.create_text(
+                    size / 2, size / 2, text="!", fill=t.on_signal, font=t.font("caption_bold")
+                )
             badge.pack(side="left", anchor="n", padx=(0, t.sp("md")))
             text = tk.Frame(row, background=t.bg_panel)
             text.pack(side="left", fill="x", expand=True)
-            tk.Label(text, text=title, background=t.bg_panel, foreground=color,
-                     font=t.font("body_bold"), anchor="w").pack(anchor="w")
-            tk.Label(text, text=detail, background=t.bg_panel, foreground=t.fg_secondary,
-                     font=t.font("caption"), anchor="w", justify="left",
-                     wraplength=t.sp(380)).pack(anchor="w")
+            tk.Label(
+                text,
+                text=title,
+                background=t.bg_panel,
+                foreground=color,
+                font=t.font("body_bold"),
+                anchor="w",
+            ).pack(anchor="w")
+            tk.Label(
+                text,
+                text=detail,
+                background=t.bg_panel,
+                foreground=t.fg_secondary,
+                font=t.font("caption"),
+                anchor="w",
+                justify="left",
+                wraplength=t.sp(380),
+            ).pack(anchor="w")
 
         # -- technical values: truncated, with a Copy button for the full value --
         details = widgets.make_card(body, t, padx="md", pady="sm")
         details.pack(fill="x", pady=(t.sp("md"), 0))
         details.columnconfigure(1, weight=1)
         for r, (label, value, mono) in enumerate(receipt_details(receipt)):
-            tk.Label(details, text=label, background=t.bg_panel, foreground=t.fg_hint,
-                     font=t.font("caption"), anchor="w").grid(row=r, column=0, sticky="w",
-                                                              padx=(0, t.sp("md")), pady=t.sp("xs"))
-            tk.Label(details, text=shorten(value) if mono else value, background=t.bg_panel,
-                     foreground=t.fg_primary, font=t.font("mono_small" if mono else "caption"),
-                     anchor="w", justify="left", wraplength=t.sp(300)).grid(
-                row=r, column=1, sticky="w", pady=t.sp("xs"))
+            tk.Label(
+                details,
+                text=label,
+                background=t.bg_panel,
+                foreground=t.fg_hint,
+                font=t.font("caption"),
+                anchor="w",
+            ).grid(row=r, column=0, sticky="w", padx=(0, t.sp("md")), pady=t.sp("xs"))
+            tk.Label(
+                details,
+                text=shorten(value) if mono else value,
+                background=t.bg_panel,
+                foreground=t.fg_primary,
+                font=t.font("mono_small" if mono else "caption"),
+                anchor="w",
+                justify="left",
+                wraplength=t.sp(300),
+            ).grid(row=r, column=1, sticky="w", pady=t.sp("xs"))
             if mono and value != "-":
-                copy = widgets.flat_button(details, t, "Copy", lambda: None,
-                                           background=t.bg_panel)
+                copy = widgets.flat_button(details, t, "Copy", lambda: None, background=t.bg_panel)
                 # re-bind (replaces flat_button's click) so the label itself can show "Copied"
                 copy.bind("<Button-1>", lambda _e, v=value, w=copy: self._copy_value(w, v))
                 copy.grid(row=r, column=2, sticky="e", padx=(t.sp("sm"), 0))
 
         # -- the plain-English verdict --
         kind, sentence = receipt_summary(receipt)
-        color, bg = (t.success, t.bg_success_soft) if kind == "ok" else (t.warning, t.bg_warning_soft)
-        verdict = widgets.RoundedFrame(body, t, fill=bg, outline=color, radius="md",
-                                       padx=t.sp("md"), pady=t.sp("sm") + 2)
+        color, bg = (
+            (t.success, t.bg_success_soft) if kind == "ok" else (t.warning, t.bg_warning_soft)
+        )
+        verdict = widgets.RoundedFrame(
+            body, t, fill=bg, outline=color, radius="md", padx=t.sp("md"), pady=t.sp("sm") + 2
+        )
         verdict.pack(fill="x", pady=(t.sp("md"), 0))
-        tk.Label(verdict, text=sentence, background=bg, foreground=t.fg_primary,
-                 font=t.font("body_bold"), anchor="w", justify="left",
-                 wraplength=t.sp(430)).pack(anchor="w")
+        tk.Label(
+            verdict,
+            text=sentence,
+            background=bg,
+            foreground=t.fg_primary,
+            font=t.font("body_bold"),
+            anchor="w",
+            justify="left",
+            wraplength=t.sp(430),
+        ).pack(anchor="w")
 
         win.update_idletasks()
         x = self.winfo_rootx() + max((self.winfo_width() - win.winfo_width()) // 2, 0)
@@ -1437,12 +1829,13 @@ class ChatGUI(tk.Tk):
             self._add_system_notice(f"Could not write the evidence file: {exc}", warning=True)
             return
         rel = os.path.relpath(path, os.getcwd())
-        if rel.startswith(".."):           # outside the project: the full path is the runnable one
+        if rel.startswith(".."):  # outside the project: the full path is the runnable one
             rel = path
         shown = rel if len(rel) <= 60 else "…/" + "/".join(path.split(os.sep)[-2:])
         self._add_system_notice(
             f"Evidence exported: {shown}\nVerify it independently with:\n"
-            f"python tools/verify_transcript.py \"{rel}\"")
+            f'python tools/verify_transcript.py "{rel}"'
+        )
         self._append_wire(f"signed evidence file written: {shown}", "INFO")
         self._maybe_banner("evidence_exported", {})
 
@@ -1456,8 +1849,9 @@ class ChatGUI(tk.Tk):
             return
         self.message_entry.set_text("")
         self._update_send_state()
-        threading.Thread(target=self.client.send_message, args=(text.rstrip("\n"),),
-                         daemon=True).start()
+        threading.Thread(
+            target=self.client.send_message, args=(text.rstrip("\n"),), daemon=True
+        ).start()
 
     # --- SecureChatClient event hook (background thread!) ---------------
 
@@ -1480,14 +1874,17 @@ class ChatGUI(tk.Tk):
 
     def _handle_event(self, kind, data):
         self._handle_event_inner(kind, data)
-        if self._chat_ready and kind in ("handshake_established", "message_rejected",
-                                         "chain_warning", "handshake_aborted"):
+        if self._chat_ready and kind in (
+            "handshake_established",
+            "message_rejected",
+            "chain_warning",
+            "handshake_aborted",
+        ):
             self._maybe_banner(kind, data)
 
     def _handle_event_inner(self, kind, data):
         if kind == "tls_cert_fingerprint":
-            self._append_wire(
-                f"trusting server cert fingerprint: {data['fingerprint']}", "TLS")
+            self._append_wire(f"trusting server cert fingerprint: {data['fingerprint']}", "TLS")
             self._login_step_event(kind, data)
             return
 
@@ -1503,8 +1900,11 @@ class ChatGUI(tk.Tk):
         if kind == "auth_success":
             self._login_step_event(kind, data)
             self._auth_data, self._holding = data, True
-            delay = (HANDOFF_PEER_OFFLINE_MS if not data.get("peer_key_found")
-                     else (900 if self._handshake_done else HANDOFF_WAIT_MS))
+            delay = (
+                HANDOFF_PEER_OFFLINE_MS
+                if not data.get("peer_key_found")
+                else (900 if self._handshake_done else HANDOFF_WAIT_MS)
+            )
             self.after(delay, self._handoff_to_chat)
             return
 
@@ -1533,16 +1933,22 @@ class ChatGUI(tk.Tk):
         if kind == "handshake_waiting":
             self._append_wire(
                 f"waiting on {data['peer']}'s RSA public key to verify an incoming "
-                f"handshake message...", "HANDSHAKE")
+                f"handshake message...",
+                "HANDSHAKE",
+            )
             return
 
         if kind == "handshake_established":
-            self._append_wire(f"session key established with {data['peer']} "
-                              f"(ECDH, authenticated by RSA signature)", "HANDSHAKE")
+            self._append_wire(
+                f"session key established with {data['peer']} "
+                f"(ECDH, authenticated by RSA signature)",
+                "HANDSHAKE",
+            )
             self._add_system_notice(f"Secure session established with {data['peer']}.")
             self._session_ready = True
             self.message_entry.set_placeholder(
-                "Type a message  (Enter sends, Shift+Enter for a new line)")
+                "Type a message  (Enter sends, Shift+Enter for a new line)"
+            )
             self._set_session_state("secure", data["peer"])
             return
 
@@ -1557,26 +1963,40 @@ class ChatGUI(tk.Tk):
 
         if kind == "peer_fingerprint":
             self._peer_fingerprint = data["fingerprint"]
-            self.fp_chip.set("info" if self._session_ready else "warn",
-                             self._fingerprint_chip_text())
-            self._append_wire(f"{data['peer']}'s RSA key fingerprint: {data['fingerprint']}",
-                              "HANDSHAKE")
+            self.fp_chip.set(
+                "info" if self._session_ready else "warn", self._fingerprint_chip_text()
+            )
+            self._append_wire(
+                f"{data['peer']}'s RSA key fingerprint: {data['fingerprint']}", "HANDSHAKE"
+            )
             return
 
         if kind == "message_sent":
-            self._add_message(data["message"], "e", self.username, data.get("timestamp"),
-                              receipt=data.get("receipt"))
+            self._add_message(
+                data["message"],
+                "e",
+                self.username,
+                data.get("timestamp"),
+                receipt=data.get("receipt"),
+            )
             return
 
         if kind == "message_queued":
             self._add_system_notice(
-                f"Message queued until the secure session is ready: {data['message']}")
+                f"Message queued until the secure session is ready: {data['message']}"
+            )
             return
 
         if kind == "message_received":
             receipt = data.get("receipt") or {}
-            self._add_message(data["message"], "w", data["sender"], data.get("timestamp"),
-                              receipt=data.get("receipt"), gap=receipt.get("chain_link") == "gap")
+            self._add_message(
+                data["message"],
+                "w",
+                data["sender"],
+                data.get("timestamp"),
+                receipt=data.get("receipt"),
+                gap=receipt.get("chain_link") == "gap",
+            )
             return
 
         if kind in ("message_rejected", "chain_warning"):
@@ -1584,8 +2004,9 @@ class ChatGUI(tk.Tk):
             # NOT displayed; a chain warning (gap) accompanies a message that was.
             info = describe_rejection(kind, data.get("reason"), data.get("detail"), data)
             self._add_blocked_card(info, sender=data.get("sender"))
-            self._append_wire(f"{info['headline']} (from {data.get('sender')}): "
-                              f"{data.get('detail')}", "ALERT")
+            self._append_wire(
+                f"{info['headline']} (from {data.get('sender')}): {data.get('detail')}", "ALERT"
+            )
             return
 
         if kind == "system_message":
@@ -1595,8 +2016,9 @@ class ChatGUI(tk.Tk):
         if kind == "disconnected":
             reason = data.get("reason", "")
             self._session_ready = False
-            self._set_session_state("error", self.peer,
-                                    f"Disconnected from server ({reason}) -- restart to reconnect")
+            self._set_session_state(
+                "error", self.peer, f"Disconnected from server ({reason}) -- restart to reconnect"
+            )
             self._add_system_notice("Disconnected from server.", warning=True)
             self.message_entry.set_placeholder("Disconnected")
             self.send_button.config(state="disabled")
@@ -1639,20 +2061,33 @@ class ChatGUI(tk.Tk):
 
 def main():
     import argparse
+
     parser = argparse.ArgumentParser(description="Secure Chat GUI client")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
-                        help="server port to pre-fill on the login screen "
-                             f"(default {DEFAULT_PORT})")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help=f"server port to pre-fill on the login screen (default {DEFAULT_PORT})",
+    )
     parser.add_argument("--geometry", help="initial window size/position, e.g. 780x560+10+40")
-    parser.add_argument("--presentation", action="store_true",
-                        help="start in Presentation mode (~25% larger text and padding, for a projector)")
-    parser.add_argument("--log-path", default=None,
-                        help="security event log path "
-                             "(default: the server's logs/security_events.jsonl)")
-    parser.add_argument("--theme", choices=("dark", "light"), default=None,
-                        help="colour theme (default: the last one chosen, else dark)")
+    parser.add_argument(
+        "--presentation",
+        action="store_true",
+        help="start in Presentation mode (~25% larger text and padding, for a projector)",
+    )
+    parser.add_argument(
+        "--log-path",
+        default=None,
+        help="security event log path (default: the server's logs/security_events.jsonl)",
+    )
+    parser.add_argument(
+        "--theme",
+        choices=("dark", "light"),
+        default=None,
+        help="colour theme (default: the last one chosen, else dark)",
+    )
     args = parser.parse_args()
-    set_app_name("Secure Chat")      # macOS menu bar says "Secure Chat", not "python"
+    set_app_name("Secure Chat")  # macOS menu bar says "Secure Chat", not "python"
     app = ChatGUI(log_path=args.log_path, theme=args.theme)
     app.port_var.set(str(args.port))
     if args.presentation:

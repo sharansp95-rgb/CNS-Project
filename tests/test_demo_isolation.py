@@ -10,7 +10,6 @@ import subprocess
 import sys
 
 import pytest
-
 from conftest import ROOT
 
 REAL_FOLDERS = ("data", "logs", "exports")
@@ -31,8 +30,13 @@ def tree_hash(root):
 
 
 def run_demo(script):
-    return subprocess.run([sys.executable, os.path.join("demo", script)], cwd=ROOT,
-                          capture_output=True, text=True, timeout=180)
+    return subprocess.run(
+        [sys.executable, os.path.join("demo", script)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
 
 
 @pytest.mark.parametrize("script", ["run_tamper_demo.py", "run_evidence_demo.py"])
@@ -50,14 +54,15 @@ def test_the_isolation_helper_redirects_everything_and_cleans_up(tmp_path):
         "import _demo_common as dc, server.server as sm, client.evidence as ev;"
         "root = dc.isolate_demo_state();"
         "assert root and os.path.isdir(root), root;"
-        "assert dc.isolate_demo_state() == root;"                       # idempotent
+        "assert dc.isolate_demo_state() == root;"  # idempotent
         "assert ev.DEFAULT_EXPORT_DIR.startswith(root), ev.DEFAULT_EXPORT_DIR;"
         "assert sm.register_user.keywords['path'].startswith(root);"
         "assert dc.save_private_key.keywords['keys_dir'].startswith(root);"
         "print(root)"
     )
-    proc = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True,
-                          timeout=60)
+    proc = subprocess.run(
+        [sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, timeout=60
+    )
     assert proc.returncode == 0, proc.stderr
     assert not os.path.exists(proc.stdout.strip()), "the temp directory is removed at exit"
 

@@ -1,5 +1,7 @@
 """Lab-only control labels and interpretation of real client reports."""
-from gui.explain import REJECTIONS, HANDSHAKE_SIGNATURE
+
+from gui.explain import HANDSHAKE_SIGNATURE as HANDSHAKE_SIGNATURE
+from gui.explain import REJECTIONS
 
 # --- Attack Lab cards -----------------------------------------------------------------
 #
@@ -10,21 +12,39 @@ from gui.explain import REJECTIONS, HANDSHAKE_SIGNATURE
 # that record -- it never decides anything itself.
 
 LAB_ATTACKS = [
-    {"action": "tamper_next", "label": "Tamper next message", "title": "Tamper", "glyph": "✂",
-     "desc": "The relay flips one byte of your next message in transit.",
-     "check": REJECTIONS["decryption_failed"]["check"],
-     "alert": "message_rejected", "reason": "decryption_failed",
-     "armed": "Armed: send a message now"},
-    {"action": "replay_last", "label": "Replay last message", "title": "Replay", "glyph": "↻",
-     "desc": "The relay immediately resends your most recent message a second time.",
-     "check": REJECTIONS["replay_duplicate"]["check"],
-     "alert": "message_rejected", "reason": "replay_duplicate",
-     "armed": "Armed: replaying now"},
-    {"action": "drop_next", "label": "Drop next message", "title": "Drop", "glyph": "⊘",
-     "desc": "The relay silently discards your next message; it never reaches your peer.",
-     "check": REJECTIONS["chain_gap"]["check"],
-     "alert": "chain_warning", "reason": "chain_gap",
-     "armed": "Armed: send two messages (the gap shows on the second)"},
+    {
+        "action": "tamper_next",
+        "label": "Tamper next message",
+        "title": "Tamper",
+        "glyph": "✂",
+        "desc": "The relay flips one byte of your next message in transit.",
+        "check": REJECTIONS["decryption_failed"]["check"],
+        "alert": "message_rejected",
+        "reason": "decryption_failed",
+        "armed": "Armed: send a message now",
+    },
+    {
+        "action": "replay_last",
+        "label": "Replay last message",
+        "title": "Replay",
+        "glyph": "↻",
+        "desc": "The relay immediately resends your most recent message a second time.",
+        "check": REJECTIONS["replay_duplicate"]["check"],
+        "alert": "message_rejected",
+        "reason": "replay_duplicate",
+        "armed": "Armed: replaying now",
+    },
+    {
+        "action": "drop_next",
+        "label": "Drop next message",
+        "title": "Drop",
+        "glyph": "⊘",
+        "desc": "The relay silently discards your next message; it never reaches your peer.",
+        "check": REJECTIONS["chain_gap"]["check"],
+        "alert": "chain_warning",
+        "reason": "chain_gap",
+        "armed": "Armed: send two messages (the gap shows on the second)",
+    },
 ]
 LAB_BY_ACTION = {a["action"]: a for a in LAB_ATTACKS}
 LAB_SILENT_AFTER_SECONDS = 10
@@ -38,9 +58,13 @@ def find_lab_detection(action, events, victim, since):
     attack has one) that this attack should trigger."""
     attack = LAB_BY_ACTION[action]
     for event in events:
-        if (event.get("event") == "security_alert" and event.get("reported_by") == victim
-                and float(event.get("ts", 0)) >= since and event.get("alert") == attack["alert"]
-                and (attack["reason"] is None or event.get("reason") == attack["reason"])):
+        if (
+            event.get("event") == "security_alert"
+            and event.get("reported_by") == victim
+            and float(event.get("ts", 0)) >= since
+            and event.get("alert") == attack["alert"]
+            and (attack["reason"] is None or event.get("reason") == attack["reason"])
+        ):
             return event
     return None
 

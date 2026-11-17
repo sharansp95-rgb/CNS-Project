@@ -159,15 +159,20 @@ class S3Storage:
             f"{_uri_encode(k)}={_uri_encode(v)}" for k, v in sorted(query.items())
         )
         canonical = "\n".join(
-            [method, self._canonical_uri(key), canon_query, canon_headers, signed_names, payload_hash]
+            [
+                method,
+                self._canonical_uri(key),
+                canon_query,
+                canon_headers,
+                signed_names,
+                payload_hash,
+            ]
         )
         scope = f"{date}/{self.region}/s3/aws4_request"
         to_sign = "\n".join(
             ["AWS4-HMAC-SHA256", stamp, scope, hashlib.sha256(canonical.encode()).hexdigest()]
         )
-        signature = hmac.new(
-            self._signing_key(date), to_sign.encode(), hashlib.sha256
-        ).hexdigest()
+        signature = hmac.new(self._signing_key(date), to_sign.encode(), hashlib.sha256).hexdigest()
         return signature, signed_names, scope, canon_query, stamp
 
     def _presign(self, method, key, expires_in, extra_headers=None):
@@ -186,7 +191,9 @@ class S3Storage:
         signature, _, _, canon_query, _ = self._sign(
             method, key, query, headers, "UNSIGNED-PAYLOAD", now
         )
-        return f"{self.endpoint}{self._canonical_uri(key)}?{canon_query}&X-Amz-Signature={signature}"
+        return (
+            f"{self.endpoint}{self._canonical_uri(key)}?{canon_query}&X-Amz-Signature={signature}"
+        )
 
     def presign_put(self, key, size, expires_in=300):
         # Content-Length is a signed header, so the bucket itself rejects any
@@ -221,7 +228,9 @@ class S3Storage:
         )
         send = {k: v for k, v in headers.items() if k != "host"}
         send["Authorization"] = auth
-        url = f"{self.endpoint}{self._canonical_uri(key)}" + (f"?{canon_query}" if canon_query else "")
+        url = f"{self.endpoint}{self._canonical_uri(key)}" + (
+            f"?{canon_query}" if canon_query else ""
+        )
         try:
             return httpx.request(method, url, headers=send, content=body, timeout=self.timeout)
         except httpx.HTTPError as exc:  # network failure: never echo the URL
@@ -269,7 +278,10 @@ class S3Storage:
             root = ET.fromstring(r.content)
             ns = {"s": root.tag.split("}")[0].strip("{")} if "}" in root.tag else {}
             find = (lambda n: root.findall(f"s:{n}", ns)) if ns else root.findall
-            out += [e.findtext("s:Key" if ns else "Key", namespaces=ns or None) for e in find("Contents")]
+            out += [
+                e.findtext("s:Key" if ns else "Key", namespaces=ns or None)
+                for e in find("Contents")
+            ]
             trunc = root.findtext("s:IsTruncated" if ns else "IsTruncated", namespaces=ns or None)
             if trunc != "true":
                 return out
@@ -319,6 +331,9 @@ def storage_from_env(env=None, *, production=False):
     if missing:
         raise ValueError("Missing S3 settings: " + ", ".join(missing))
     return S3Storage(
-        env["S3_ENDPOINT"], env["S3_BUCKET"], env["S3_REGION"],
-        env["S3_ACCESS_KEY_ID"], env["S3_SECRET_ACCESS_KEY"],
+        env["S3_ENDPOINT"],
+        env["S3_BUCKET"],
+        env["S3_REGION"],
+        env["S3_ACCESS_KEY_ID"],
+        env["S3_SECRET_ACCESS_KEY"],
     )

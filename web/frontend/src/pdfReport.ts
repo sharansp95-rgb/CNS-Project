@@ -150,10 +150,7 @@ export async function createReport(
     const att = parseDescriptor(String(row.message));
     if (att) {
       // Never print the file key or thumbnail: the PDF lists identity and hashes only.
-      paragraph(
-        `Attachment: ${att.name} (${att.mime}, ${att.size} bytes)`,
-        11,
-      );
+      paragraph(`Attachment: ${att.name} (${att.mime}, ${att.size} bytes)`, 11);
       paragraph("Plaintext file SHA-256: " + att.pt_sha256, 8);
       paragraph(
         `Stored (encrypted) object SHA-256: ${att.ct_sha256} (${att.ct_size} bytes)`,
@@ -176,7 +173,10 @@ export async function createReport(
       paragraph("Relayed envelope SHA-256: " + row.envelope_sha256, 8);
   }
   const attachments = records
-    .map((row: any, i: number) => ({ i, d: parseDescriptor(String(row.message)) }))
+    .map((row: any, i: number) => ({
+      i,
+      d: parseDescriptor(String(row.message)),
+    }))
     .filter((x: any) => x.d);
   paragraph("Attachments", 14);
   if (!attachments.length) paragraph("No attachments in this conversation.");
@@ -192,7 +192,11 @@ export async function createReport(
     }
   }
   const calls = records
-    .map((row: any, i: number) => ({ i, who: row.sender, sig: parseSignal(String(row.message)) }))
+    .map((row: any, i: number) => ({
+      i,
+      who: row.sender,
+      sig: parseSignal(String(row.message)),
+    }))
     .filter((x: any) => x.sig?.type === "record");
   paragraph("Voice calls", 14);
   if (!calls.length) paragraph("No voice call records in this conversation.");

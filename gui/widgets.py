@@ -36,12 +36,14 @@ def rescale_tree(widget, ratio):
     try:
         if manager == "pack":
             info = widget.pack_info()
-            widget.pack_configure(**{k: _scale_pad(info[k], ratio)
-                                     for k in ("padx", "pady", "ipadx", "ipady")})
+            widget.pack_configure(
+                **{k: _scale_pad(info[k], ratio) for k in ("padx", "pady", "ipadx", "ipady")}
+            )
         elif manager == "grid":
             info = widget.grid_info()
-            widget.grid_configure(**{k: _scale_pad(info[k], ratio)
-                                     for k in ("padx", "pady", "ipadx", "ipady")})
+            widget.grid_configure(
+                **{k: _scale_pad(info[k], ratio) for k in ("padx", "pady", "ipadx", "ipady")}
+            )
     except (tk.TclError, KeyError):
         pass
     if hasattr(widget, "on_rescale"):
@@ -54,9 +56,19 @@ def rescale_tree(widget, ratio):
                 pass
 
 
-_COLOR_OPTIONS = ("background", "foreground", "highlightbackground", "highlightcolor",
-                  "insertbackground", "selectbackground", "disabledbackground",
-                  "activebackground", "activeforeground", "disabledforeground", "troughcolor")
+_COLOR_OPTIONS = (
+    "background",
+    "foreground",
+    "highlightbackground",
+    "highlightcolor",
+    "insertbackground",
+    "selectbackground",
+    "disabledbackground",
+    "activebackground",
+    "activeforeground",
+    "disabledforeground",
+    "troughcolor",
+)
 
 
 def recolor_tree(widget, mapping):
@@ -115,6 +127,7 @@ def focus_when_mapped(window):
     keeps Escape-ready dialogs consistent on Linux; the immediate path handles
     an already-visible window, such as a reopened panel.
     """
+
     def request_focus(_event=None):
         if window.winfo_ismapped():
             window.lift()
@@ -134,9 +147,30 @@ def focus_when_mapped(window):
 def rounded_rect_points(x1, y1, x2, y2, r):
     r = min(r, (x2 - x1) / 2, (y2 - y1) / 2)
     return [
-        x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
-        x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
-        x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
+        x1 + r,
+        y1,
+        x2 - r,
+        y1,
+        x2,
+        y1,
+        x2,
+        y1 + r,
+        x2,
+        y2 - r,
+        x2,
+        y2,
+        x2 - r,
+        y2,
+        x1 + r,
+        y2,
+        x1,
+        y2,
+        x1,
+        y2 - r,
+        x1,
+        y1 + r,
+        x1,
+        y1,
     ]
 
 
@@ -144,17 +178,49 @@ def draw_shield(canvas, cx, cy, size, fill, outline="", tags=()):
     """A heraldic shield centred on (cx, cy), `size` px tall."""
     w, h = size * 0.82, size
     x1, y1 = cx - w / 2, cy - h / 2
-    pts = [x1, y1 + h * 0.12, cx, y1, x1 + w, y1 + h * 0.12,
-           x1 + w, y1 + h * 0.52, cx, y1 + h, x1, y1 + h * 0.52]
-    return [canvas.create_polygon(pts, fill=fill, outline=outline, width=1,
-                                  tags=tuple(tags) + ("shield",), joinstyle="round")]
+    pts = [
+        x1,
+        y1 + h * 0.12,
+        cx,
+        y1,
+        x1 + w,
+        y1 + h * 0.12,
+        x1 + w,
+        y1 + h * 0.52,
+        cx,
+        y1 + h,
+        x1,
+        y1 + h * 0.52,
+    ]
+    return [
+        canvas.create_polygon(
+            pts,
+            fill=fill,
+            outline=outline,
+            width=1,
+            tags=tuple(tags) + ("shield",),
+            joinstyle="round",
+        )
+    ]
 
 
 def draw_check(canvas, cx, cy, size, color, width=2, tags=()):
     s = size
-    return [canvas.create_line(cx - s * 0.30, cy + s * 0.02, cx - s * 0.08, cy + s * 0.24,
-                               cx + s * 0.32, cy - s * 0.22, fill=color, width=width,
-                               capstyle="round", joinstyle="round", tags=tags)]
+    return [
+        canvas.create_line(
+            cx - s * 0.30,
+            cy + s * 0.02,
+            cx - s * 0.08,
+            cy + s * 0.24,
+            cx + s * 0.32,
+            cy - s * 0.22,
+            fill=color,
+            width=width,
+            capstyle="round",
+            joinstyle="round",
+            tags=tags,
+        )
+    ]
 
 
 def draw_lock(canvas, cx, cy, size, color, bg, tags=()):
@@ -162,13 +228,32 @@ def draw_lock(canvas, cx, cy, size, color, bg, tags=()):
     s = size
     bw, bh = s * 0.56, s * 0.40
     top = cy - s * 0.02
-    items = [canvas.create_arc(cx - bw * 0.36, top - s * 0.36, cx + bw * 0.36, top + s * 0.12,
-                               start=0, extent=180, style="arc", outline=color,
-                               width=max(2, round(s * 0.09)), tags=tags),
-             canvas.create_rectangle(cx - bw / 2, top, cx + bw / 2, top + bh, fill=color,
-                                     outline=color, tags=tags),
-             canvas.create_oval(cx - s * 0.05, top + bh * 0.28, cx + s * 0.05, top + bh * 0.28 + s * 0.10,
-                                fill=bg, outline=bg, tags=tags)]
+    items = [
+        canvas.create_arc(
+            cx - bw * 0.36,
+            top - s * 0.36,
+            cx + bw * 0.36,
+            top + s * 0.12,
+            start=0,
+            extent=180,
+            style="arc",
+            outline=color,
+            width=max(2, round(s * 0.09)),
+            tags=tags,
+        ),
+        canvas.create_rectangle(
+            cx - bw / 2, top, cx + bw / 2, top + bh, fill=color, outline=color, tags=tags
+        ),
+        canvas.create_oval(
+            cx - s * 0.05,
+            top + bh * 0.28,
+            cx + s * 0.05,
+            top + bh * 0.28 + s * 0.10,
+            fill=bg,
+            outline=bg,
+            tags=tags,
+        ),
+    ]
     return items
 
 
@@ -178,8 +263,9 @@ class Logo(tk.Canvas):
 
     def __init__(self, parent, theme, size=64, background=None):
         bg = background or parent.cget("background")
-        super().__init__(parent, width=size, height=size, background=bg,
-                         highlightthickness=0, borderwidth=0)
+        super().__init__(
+            parent, width=size, height=size, background=bg, highlightthickness=0, borderwidth=0
+        )
         self.theme = theme
         self.resize(size)
 
@@ -204,8 +290,9 @@ class Backdrop(tk.Canvas):
     box. Purely decorative: place it, then lower it below the real content."""
 
     def __init__(self, parent, theme, glows=None):
-        super().__init__(parent, background=theme.bg_app, highlightthickness=0, borderwidth=0,
-                         width=1, height=1)
+        super().__init__(
+            parent, background=theme.bg_app, highlightthickness=0, borderwidth=0, width=1, height=1
+        )
         self.theme = theme
         # (relative x, relative y, radius as a fraction of the larger side, colour, strength)
         # Glows sit in the far corners so the area behind a centred card stays the plain
@@ -225,8 +312,8 @@ class Backdrop(tk.Canvas):
     @staticmethod
     def _mix(a, b, k):
         a, b = a.lstrip("#"), b.lstrip("#")
-        ca = [int(a[i:i + 2], 16) for i in (0, 2, 4)]
-        cb = [int(b[i:i + 2], 16) for i in (0, 2, 4)]
+        ca = [int(a[i : i + 2], 16) for i in (0, 2, 4)]
+        cb = [int(b[i : i + 2], 16) for i in (0, 2, 4)]
         return "#" + "".join(f"{round(x + (y - x) * k):02x}" for x, y in zip(ca, cb))
 
     def _draw(self):
@@ -239,11 +326,11 @@ class Backdrop(tk.Canvas):
         for rx, ry, rr, color, strength in self.glows:
             cx, cy, radius = rx * w, ry * h, rr * side
             for i in range(steps):
-                k = i / (steps - 1)                 # 0 = outer edge, 1 = centre
+                k = i / (steps - 1)  # 0 = outer edge, 1 = centre
                 r = radius * (1 - k)
                 if r < 2:
                     break
-                tint = self._mix(base, color, strength * (k ** 2.2))
+                tint = self._mix(base, color, strength * (k**2.2))
                 self.create_oval(cx - r, cy - r, cx + r, cy + r, fill=tint, outline="")
 
 
@@ -252,8 +339,14 @@ class Avatar(tk.Canvas):
     given user is always the same colour in every window)."""
 
     def __init__(self, parent, theme, name, size=36, background=None):
-        super().__init__(parent, width=size, height=size, background=background or theme.bg_panel,
-                         highlightthickness=0, borderwidth=0)
+        super().__init__(
+            parent,
+            width=size,
+            height=size,
+            background=background or theme.bg_panel,
+            highlightthickness=0,
+            borderwidth=0,
+        )
         self.theme, self.size, self._name = theme, size, name
         self.set_name(name)
 
@@ -267,8 +360,13 @@ class Avatar(tk.Canvas):
         self.delete("all")
         s = self.size
         self.create_oval(1, 1, s - 1, s - 1, fill=self.theme.avatar_color(name), outline="")
-        self.create_text(s / 2, s / 2, text=(name or "?")[:1].upper(),
-                         fill=self.theme.fg_on_accent, font=self.theme.font("heading"))
+        self.create_text(
+            s / 2,
+            s / 2,
+            text=(name or "?")[:1].upper(),
+            fill=self.theme.fg_on_accent,
+            font=self.theme.font("heading"),
+        )
 
 
 class RoundedFrame(tk.Frame):
@@ -281,19 +379,40 @@ class RoundedFrame(tk.Frame):
     `background=frame.fill`. `surface` is the colour around the card (the parent's
     background by default), which is what shows outside the rounded corners."""
 
-    def __init__(self, parent, theme, fill=None, outline=None, radius="lg", surface=None,
-                 padx=None, pady=None, outline_width=1, **kw):
+    def __init__(
+        self,
+        parent,
+        theme,
+        fill=None,
+        outline=None,
+        radius="lg",
+        surface=None,
+        padx=None,
+        pady=None,
+        outline_width=1,
+        **kw,
+    ):
         surface = surface or parent.cget("background")
-        self.theme, self.fill, self.outline, self.surface = theme, fill or theme.bg_panel, outline, surface
+        self.theme, self.fill, self.outline, self.surface = (
+            theme,
+            fill or theme.bg_panel,
+            outline,
+            surface,
+        )
         self._radius_step, self._outline_width = radius, outline_width
-        super().__init__(parent, background=self.fill,
-                         padx=theme.sp(padx) if isinstance(padx, str) else (padx or 0),
-                         pady=theme.sp(pady) if isinstance(pady, str) else (pady or 0), **kw)
-        self._bg = tk.Canvas(self, background=surface, highlightthickness=0, borderwidth=0,
-                             width=1, height=1)
+        super().__init__(
+            parent,
+            background=self.fill,
+            padx=theme.sp(padx) if isinstance(padx, str) else (padx or 0),
+            pady=theme.sp(pady) if isinstance(pady, str) else (pady or 0),
+            **kw,
+        )
+        self._bg = tk.Canvas(
+            self, background=surface, highlightthickness=0, borderwidth=0, width=1, height=1
+        )
         # bordermode="outside": cover the frame's padding too, not just its interior.
         self._bg.place(x=0, y=0, relwidth=1, relheight=1, bordermode="outside")
-        self._bg.tk.call("lower", self._bg._w)   # Canvas.lower() means tag_lower
+        self._bg.tk.call("lower", self._bg._w)  # Canvas.lower() means tag_lower
         self._bg.bind("<Configure>", lambda _e: self._draw())
         # A click on the card's padding should behave like a click on the card.
         self._bg.bind("<Button-1>", lambda e: self.event_generate("<Button-1>", x=e.x, y=e.y))
@@ -322,8 +441,14 @@ class RoundedFrame(tk.Frame):
         self._draw()
 
     def on_theme(self, mapping):
-        swap = lambda c: mapping.get(c.lower(), c) if c else c
-        self.fill, self.outline, self.surface = swap(self.fill), swap(self.outline), swap(self.surface)
+        def swap(c):
+            return mapping.get(c.lower(), c) if c else c
+
+        self.fill, self.outline, self.surface = (
+            swap(self.fill),
+            swap(self.outline),
+            swap(self.surface),
+        )
         self._bg.configure(background=self.surface)
         tk.Frame.configure(self, background=self.fill)
         self._draw()
@@ -364,8 +489,20 @@ class Pill(tk.Label):
 
     _REFRESH_OPTIONS = {"text", "font", "wraplength", "textvariable"}
 
-    def __init__(self, parent, theme, text="", fill=None, foreground=None, font=None,
-                 padx=None, pady=None, radius=None, outline=None, **kw):
+    def __init__(
+        self,
+        parent,
+        theme,
+        text="",
+        fill=None,
+        foreground=None,
+        font=None,
+        padx=None,
+        pady=None,
+        radius=None,
+        outline=None,
+        **kw,
+    ):
         self.theme = theme
         self._fill, self._outline = fill or theme.bg_raised, outline
         self._padx = padx if padx is not None else theme.sp("sm") + 2
@@ -373,17 +510,28 @@ class Pill(tk.Label):
         self._radius = radius
         self._ready = False
         surface = kw.pop("background", None) or parent.cget("background")
-        super().__init__(parent, text=text, background=surface,
-                         foreground=foreground or theme.fg_primary,
-                         font=font or theme.font("caption_bold"), compound="center",
-                         padx=0, pady=0, borderwidth=0, highlightthickness=0, **kw)
+        super().__init__(
+            parent,
+            text=text,
+            background=surface,
+            foreground=foreground or theme.fg_primary,
+            font=font or theme.font("caption_bold"),
+            compound="center",
+            padx=0,
+            pady=0,
+            borderwidth=0,
+            highlightthickness=0,
+            **kw,
+        )
         self._ready = True
         self._refresh()
 
     def configure(self, cnf=None, **kw):
         result = super().configure(cnf, **kw)
-        if self._ready and (self._REFRESH_OPTIONS & set(kw) or
-                            (isinstance(cnf, dict) and self._REFRESH_OPTIONS & set(cnf))):
+        if self._ready and (
+            self._REFRESH_OPTIONS & set(kw)
+            or (isinstance(cnf, dict) and self._REFRESH_OPTIONS & set(cnf))
+        ):
             self._refresh()
         return result
 
@@ -399,7 +547,9 @@ class Pill(tk.Label):
         self._refresh()
 
     def on_theme(self, mapping):
-        swap = lambda c: mapping.get(c.lower(), c) if c else c
+        def swap(c):
+            return mapping.get(c.lower(), c) if c else c
+
         self._fill, self._outline = swap(self._fill), swap(self._outline)
         self._refresh()
 
@@ -421,21 +571,26 @@ class Chip(Pill):
     "warn" (amber), "bad" (red)."""
 
     KINDS = {
-        "off":  ("bg_raised", "fg_secondary"),
-        "ok":   ("bg_success_soft", "success"),
+        "off": ("bg_raised", "fg_secondary"),
+        "ok": ("bg_success_soft", "success"),
         "info": ("bg_accent_soft", "accent"),
         "warn": ("bg_warning_soft", "warning"),
-        "bad":  ("bg_danger_soft", "danger"),
-        "bad_dark":  ("bg_app", "danger"),     # on top of a red card
-        "warn_dark": ("bg_app", "warning"),    # on top of an amber card
+        "bad": ("bg_danger_soft", "danger"),
+        "bad_dark": ("bg_app", "danger"),  # on top of a red card
+        "warn_dark": ("bg_app", "warning"),  # on top of an amber card
     }
 
     def __init__(self, parent, theme, text, kind="off", mono=False, command=None):
         self.kind = kind
         bg_name, fg_name = self.KINDS[kind]
-        super().__init__(parent, theme, text=text, fill=getattr(theme, bg_name),
-                         foreground=getattr(theme, fg_name),
-                         font=theme.font("mono_small_bold" if mono else "caption_bold"))
+        super().__init__(
+            parent,
+            theme,
+            text=text,
+            fill=getattr(theme, bg_name),
+            foreground=getattr(theme, fg_name),
+            font=theme.font("mono_small_bold" if mono else "caption_bold"),
+        )
         if command:
             self.configure(cursor=hand_cursor())
             self.bind("<Button-1>", lambda _e: command())
@@ -457,17 +612,33 @@ class PlaceholderText(tk.Text):
 
     def __init__(self, parent, theme, placeholder="", max_lines=4, **kw):
         kw.setdefault("background", theme.bg_input)
-        super().__init__(parent, wrap="word", height=1, width=10, borderwidth=0, highlightthickness=0,
-                         foreground=theme.fg_primary, insertbackground=theme.accent, insertwidth=2,
-                         selectbackground=theme.bg_accent, selectforeground="#ffffff",
-                         font=theme.font("body"), padx=theme.sp("xs"), pady=theme.sp("sm"),
-                         undo=True, **kw)
+        super().__init__(
+            parent,
+            wrap="word",
+            height=1,
+            width=10,
+            borderwidth=0,
+            highlightthickness=0,
+            foreground=theme.fg_primary,
+            insertbackground=theme.accent,
+            insertwidth=2,
+            selectbackground=theme.bg_accent,
+            selectforeground="#ffffff",
+            font=theme.font("body"),
+            padx=theme.sp("xs"),
+            pady=theme.sp("sm"),
+            undo=True,
+            **kw,
+        )
         self.theme, self.placeholder, self.max_lines = theme, placeholder, max_lines
         self._showing_placeholder = False
         self.tag_configure("placeholder", foreground=theme.fg_hint)
         # The placeholder stays visible while the empty box has focus and goes away on the
         # first keystroke (or paste).
-        self.bind("<FocusIn>", lambda _e: self.mark_set("insert", "1.0") if self._showing_placeholder else None)
+        self.bind(
+            "<FocusIn>",
+            lambda _e: self.mark_set("insert", "1.0") if self._showing_placeholder else None,
+        )
         self.bind("<FocusOut>", lambda _e: self._show_placeholder())
         self.bind("<KeyPress>", self._on_keypress)
         self.bind("<<Paste>>", lambda _e: self._hide_placeholder(), add="+")
@@ -558,25 +729,47 @@ class StepList(tk.Frame):
         for text in texts:
             frame = tk.Frame(self, background=self.bg)
             frame.pack(fill="x", pady=(0, t.sp("xs")))
-            glyph = tk.Label(frame, text=self.GLYPH["pending"], width=2, background=self.bg,
-                             foreground=t.fg_hint, font=t.font("body_bold"))
+            glyph = tk.Label(
+                frame,
+                text=self.GLYPH["pending"],
+                width=2,
+                background=self.bg,
+                foreground=t.fg_hint,
+                font=t.font("body_bold"),
+            )
             glyph.pack(side="left")
-            label = tk.Label(frame, text=text, background=self.bg, foreground=t.fg_hint,
-                             font=t.font("body"), anchor="w", justify="left", wraplength=360)
+            label = tk.Label(
+                frame,
+                text=text,
+                background=self.bg,
+                foreground=t.fg_hint,
+                font=t.font("body"),
+                anchor="w",
+                justify="left",
+                wraplength=360,
+            )
             label.pack(side="left", fill="x", expand=True)
             self._rows.append((frame, glyph, label))
 
     def set(self, index, state, text=None):
         t = self.theme
-        if index >= len(self._rows):      # no steps shown (e.g. the list was never started)
+        if index >= len(self._rows):  # no steps shown (e.g. the list was never started)
             return
         _frame, glyph, label = self._rows[index]
-        color = {"pending": t.fg_hint, "active": t.accent, "done": t.success,
-                 "error": t.danger, "waiting": t.warning}[state]
+        color = {
+            "pending": t.fg_hint,
+            "active": t.accent,
+            "done": t.success,
+            "error": t.danger,
+            "waiting": t.warning,
+        }[state]
         glyph.configure(text=self.GLYPH[state], foreground=color)
-        label.configure(foreground=t.fg_primary if state in ("done", "active", "waiting")
-                        else (t.danger if state == "error" else t.fg_hint),
-                        font=t.font("body_bold" if state in ("active", "error") else "body"))
+        label.configure(
+            foreground=t.fg_primary
+            if state in ("done", "active", "waiting")
+            else (t.danger if state == "error" else t.fg_hint),
+            font=t.font("body_bold" if state in ("active", "error") else "body"),
+        )
         if text is not None:
             label.configure(text=text)
 
@@ -590,20 +783,36 @@ class StepList(tk.Frame):
 def make_card(parent, theme, background=None, border=None, padx=None, pady=None, radius="lg"):
     """A rounded card with a hairline border (the one 'card' look used by login, receipt,
     receipts, dashboard...)."""
-    return RoundedFrame(parent, theme, fill=background or theme.bg_panel,
-                        outline=border or theme.border, radius=radius,
-                        padx=padx or "lg", pady=pady or "lg")
+    return RoundedFrame(
+        parent,
+        theme,
+        fill=background or theme.bg_panel,
+        outline=border or theme.border,
+        radius=radius,
+        padx=padx or "lg",
+        pady=pady or "lg",
+    )
 
 
 def flat_button(parent, theme, text, command, kind="secondary", **kw):
     """A small rounded clickable pill; used where a ttk.Button would be too heavy (copy
     buttons, banner dismiss)."""
-    fills = {"secondary": (theme.bg_raised, theme.bg_raised_hover, theme.fg_primary),
-             "ghost": (None, theme.bg_raised, theme.fg_secondary)}
+    fills = {
+        "secondary": (theme.bg_raised, theme.bg_raised_hover, theme.fg_primary),
+        "ghost": (None, theme.bg_raised, theme.fg_secondary),
+    }
     fill, hover, fg = fills[kind]
     parent_bg = kw.pop("background", None) or parent.cget("background")
-    label = Pill(parent, theme, text=text, fill=fill or parent_bg, foreground=fg,
-                 background=parent_bg, cursor=hand_cursor(), **kw)
+    label = Pill(
+        parent,
+        theme,
+        text=text,
+        fill=fill or parent_bg,
+        foreground=fg,
+        background=parent_bg,
+        cursor=hand_cursor(),
+        **kw,
+    )
     label.bind("<Button-1>", lambda _e: command())
     colours = {"rest": fill or parent_bg, "hover": hover}
     label.bind("<Enter>", lambda _e: label.set_fill(colours["hover"]))
@@ -614,6 +823,7 @@ def flat_button(parent, theme, text, command, kind="secondary", **kw):
         for key, value in colours.items():
             colours[key] = mapping.get(value.lower(), value)
         _orig(mapping)
+
     label.on_theme = on_theme
     return label
 
@@ -640,17 +850,33 @@ class Field(RoundedFrame):
     error, with an optional trailing control (e.g. the show/hide-password toggle)."""
 
     def __init__(self, parent, theme, textvariable, show="", width=30, trailing=None):
-        super().__init__(parent, theme, fill=theme.bg_input, outline=theme.border_strong,
-                         radius="md")
+        super().__init__(
+            parent, theme, fill=theme.bg_input, outline=theme.border_strong, radius="md"
+        )
         self.error = False
-        self.entry = tk.Entry(self, textvariable=textvariable, show=show, width=width,
-                              borderwidth=0, highlightthickness=0, background=theme.bg_input,
-                              foreground=theme.fg_primary, insertbackground=theme.accent,
-                              insertwidth=2, disabledbackground=theme.bg_input,
-                              font=theme.font("body"),
-                              selectbackground=theme.bg_accent, selectforeground="#ffffff")
-        self.entry.pack(side="left", fill="x", expand=True, padx=(theme.sp("md"), theme.sp("xs")),
-                        pady=theme.sp("sm") + 2)
+        self.entry = tk.Entry(
+            self,
+            textvariable=textvariable,
+            show=show,
+            width=width,
+            borderwidth=0,
+            highlightthickness=0,
+            background=theme.bg_input,
+            foreground=theme.fg_primary,
+            insertbackground=theme.accent,
+            insertwidth=2,
+            disabledbackground=theme.bg_input,
+            font=theme.font("body"),
+            selectbackground=theme.bg_accent,
+            selectforeground="#ffffff",
+        )
+        self.entry.pack(
+            side="left",
+            fill="x",
+            expand=True,
+            padx=(theme.sp("md"), theme.sp("xs")),
+            pady=theme.sp("sm") + 2,
+        )
         if trailing is not None:
             trailing(self).pack(side="right", padx=(0, theme.sp("md")))
         self.entry.bind("<FocusIn>", lambda _e: self._paint(True))
@@ -700,7 +926,7 @@ def scale_window(window, ratio, margin=24):
     """Grow/shrink a window and its minimum size by `ratio`, never past the screen."""
     window.update_idletasks()
     screen_w, screen_h = window.winfo_screenwidth(), window.winfo_screenheight()
-    max_w, max_h = screen_w - margin, screen_h - margin - 33     # menu bar
+    max_w, max_h = screen_w - margin, screen_h - margin - 33  # menu bar
     min_w, min_h = window.minsize()
     window.minsize(min(round(min_w * ratio), max_w), min(round(min_h * ratio), max_h))
     width = max(window.winfo_width(), min_w)

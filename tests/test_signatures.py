@@ -84,6 +84,7 @@ def test_two_signatures_of_same_message_differ():
 
 # --- PEM serialization -----------------------------------------------------
 
+
 def test_private_key_pem_round_trip():
     private_key, public_key = generate_keypair()
     pem = serialize_private_key(private_key)
@@ -113,6 +114,7 @@ def test_private_key_pem_does_not_leak_as_public():
 # --- full pipeline integration: sign -> wrap -> AES-GCM encrypt -> decrypt
 # -> verify, simulating the real client.py sign-then-encrypt flow -----------
 
+
 def test_full_pipeline_sign_encrypt_decrypt_verify():
     # Simulate two identities, A (sender) and B (receiver).
     rsa_priv_a, rsa_pub_a = generate_keypair()
@@ -130,10 +132,13 @@ def test_full_pipeline_sign_encrypt_decrypt_verify():
     message = "hello B, this is really A"
     signature = sign(rsa_priv_a, message.encode("utf-8"))
     import json
-    wrapped = json.dumps({
-        "message": message,
-        "signature": base64.b64encode(signature).decode("ascii"),
-    }).encode("utf-8")
+
+    wrapped = json.dumps(
+        {
+            "message": message,
+            "signature": base64.b64encode(signature).decode("ascii"),
+        }
+    ).encode("utf-8")
     box = encrypt(session_key_a, wrapped)
 
     # B decrypts with its independently-derived session key, unwraps, and
@@ -156,12 +161,15 @@ def test_full_pipeline_catches_tampering_anywhere_in_the_chain():
     session_key_b = compute_shared_key(ecdh_priv_b, ecdh_pub_a)
 
     import json
+
     message = "the real message"
     signature = sign(rsa_priv_a, message.encode("utf-8"))
-    wrapped = json.dumps({
-        "message": message,
-        "signature": base64.b64encode(signature).decode("ascii"),
-    }).encode("utf-8")
+    wrapped = json.dumps(
+        {
+            "message": message,
+            "signature": base64.b64encode(signature).decode("ascii"),
+        }
+    ).encode("utf-8")
     box = encrypt(session_key_a, wrapped)
 
     # 1) Tamper with the ciphertext -> AES-GCM itself must catch this.

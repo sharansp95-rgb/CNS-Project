@@ -3,14 +3,20 @@
 import contextlib
 import io
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 from client.client import SecureChatClient
 from client.evidence import build_evidence
 from crypto_engine.attachment_tools import display_text
-from crypto_engine.call_tools import PLACEHOLDER, PREFIX, parse_signal, signed_fingerprint, valid_sdp
+from crypto_engine.call_tools import (
+    PLACEHOLDER,
+    PREFIX,
+    parse_signal,
+    signed_fingerprint,
+    valid_sdp,
+)
 from crypto_engine.signatures import generate_keypair, serialize_public_key
 from tools import verify_transcript
 
@@ -28,8 +34,12 @@ def test_sdp_and_signal_validation():
     assert parse_signal(gen.msg(type="invite", sdp=gen.sdp(gen.FP)))["type"] == "invite"
     assert parse_signal(gen.record("caller"))["outcome"] == "completed"
     for bad in (
-        gen.msg(type="invite"), gen.msg(type="invite", sdp="junk"), gen.msg(type="decline", sdp=gen.sdp(gen.FP)),
-        gen.msg(type="record", role="caller", outcome="won"), gen.msg(type="bogus"), PREFIX + "{bad",
+        gen.msg(type="invite"),
+        gen.msg(type="invite", sdp="junk"),
+        gen.msg(type="decline", sdp=gen.sdp(gen.FP)),
+        gen.msg(type="record", role="caller", outcome="won"),
+        gen.msg(type="bogus"),
+        PREFIX + "{bad",
         PREFIX + json.dumps({"v": 1, "call": "x", "type": "decline"}),
     ):
         assert parse_signal(bad) is None, bad
@@ -54,13 +64,21 @@ def test_real_clients_keep_chain_and_evidence_valid_with_call_messages():
     a.rsa_private_key, ap = generate_keypair()
     b.rsa_private_key, bp = generate_keypair()
     a.peer_public_key, b.peer_public_key = bp, ap
-    a.peer_public_key_pem, b.peer_public_key_pem = serialize_public_key(bp).decode(), serialize_public_key(ap).decode()
+    a.peer_public_key_pem, b.peer_public_key_pem = (
+        serialize_public_key(bp).decode(),
+        serialize_public_key(ap).decode(),
+    )
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
         a.initiate_handshake()
         b._handle_handshake_init(a.sock.sent[-1])
         a._handle_handshake_response(b.sock.sent[-1])
-        for text in ("hi", gen.msg(type="invite", sdp=gen.sdp(gen.FP)), gen.record("caller"), "bye"):
+        for text in (
+            "hi",
+            gen.msg(type="invite", sdp=gen.sdp(gen.FP)),
+            gen.record("caller"),
+            "bye",
+        ):
             a.send_message(text)
             b._handle_chat(a.sock.sent[-1])
     shown = out.getvalue()
@@ -70,8 +88,15 @@ def test_real_clients_keep_chain_and_evidence_valid_with_call_messages():
 
 
 def test_corpus_call_evidence_and_cli():
-    result = subprocess.run([sys.executable, "tools/verify_transcript.py", str(CORPUS / "valid_v2_call.json")],
-                            capture_output=True, text=True)
-    assert result.returncode == 0 and "Voice calls" in result.stdout and "connection direct" in result.stdout
+    result = subprocess.run(
+        [sys.executable, "tools/verify_transcript.py", str(CORPUS / "valid_v2_call.json")],
+        capture_output=True,
+        text=True,
+    )
+    assert (
+        result.returncode == 0
+        and "Voice calls" in result.stdout
+        and "connection direct" in result.stdout
+    )
     forged = json.loads((CORPUS / "edited_call_record.json").read_text())
     assert not verify_transcript.verify_evidence(forged).valid

@@ -81,7 +81,9 @@ test("two isolated browsers exchange, inspect, export and restore a wrapped iden
   await a.getByRole("button", { name: "Disconnect", exact: false }).click();
   // A browser close is local; wait for the relay to release the identity before
   // logging it in again over a different connection through the live proxy.
-  await expect(b.locator(".session-divider")).toContainText("Peer disconnected");
+  await expect(b.locator(".session-divider")).toContainText(
+    "Peer disconnected",
+  );
   await aContext.close();
   await bContext.close();
   const restored = await browser.newContext(),
@@ -291,7 +293,9 @@ test("a dropped connection reconnects, requires login and derives a different si
             const frame = JSON.parse(String(data));
             if (frame.type === "handshake_init")
               (window as any).handshakeKeys.push(frame.pubkey);
-          } catch {}
+          } catch {
+            /* Non-JSON frames are irrelevant to handshake-key capture. */
+          }
           send(data);
         };
         (window as any).testSockets.push(socket);

@@ -29,7 +29,7 @@ def _set_bundle_name(name):
     if not objc_path or not foundation_path:
         return False
     objc = ctypes.cdll.LoadLibrary(objc_path)
-    ctypes.cdll.LoadLibrary(foundation_path)          # registers NSBundle / NSString
+    ctypes.cdll.LoadLibrary(foundation_path)  # registers NSBundle / NSString
 
     objc.objc_getClass.restype = ctypes.c_void_p
     objc.objc_getClass.argtypes = [ctypes.c_char_p]
@@ -43,8 +43,12 @@ def _set_bundle_name(name):
         return send(receiver, objc.sel_registerName(selector), *args)
 
     def nsstring(text):
-        return call(objc.objc_getClass(b"NSString"), b"stringWithUTF8String:",
-                    text.encode("utf-8"), argtypes=(ctypes.c_char_p,))
+        return call(
+            objc.objc_getClass(b"NSString"),
+            b"stringWithUTF8String:",
+            text.encode("utf-8"),
+            argtypes=(ctypes.c_char_p,),
+        )
 
     bundle = call(objc.objc_getClass(b"NSBundle"), b"mainBundle")
     info = call(bundle, b"infoDictionary") if bundle else None

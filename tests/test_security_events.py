@@ -17,20 +17,26 @@ import socket
 import time
 from unittest.mock import patch
 
-
-from conftest import wait_for_events
 import _demo_common as dc
+from conftest import wait_for_events
+
 from client.client import b64
 from crypto_engine.dh_exchange import generate_keypair as generate_ecdh_keypair
 from crypto_engine.signatures import generate_keypair, serialize_public_key, sign
 from server.lockout import LockoutGuard
 from server.security_log import log_event, read_events
 
-SENSITIVE_SUBSTRINGS = ("password", "BEGIN PRIVATE KEY", "BEGIN RSA PRIVATE KEY",
-                        "session_key", "plaintext")
+SENSITIVE_SUBSTRINGS = (
+    "password",
+    "BEGIN PRIVATE KEY",
+    "BEGIN RSA PRIVATE KEY",
+    "session_key",
+    "plaintext",
+)
 
 
 # --- event log mechanics ------------------------------------------------------
+
 
 def test_log_event_writes_a_valid_json_line(tmp_path):
     path = tmp_path / "events.jsonl"
@@ -57,6 +63,7 @@ def test_read_events_on_missing_file_returns_empty_list(tmp_path):
 
 
 # --- end-to-end: register/login produce the right events, no secrets --------
+
 
 def test_register_and_login_produce_expected_events_with_no_secrets(net, security_log_path):
     server, host, port = net.start_server()
@@ -124,6 +131,7 @@ def test_address_rate_limit_is_logged_and_enforced(net, security_log_path):
 
 # --- security_alert envelope -------------------------------------------------
 
+
 def test_client_sends_security_alert_on_tampered_message(net, security_log_path):
     server, host, port = net.start_server()
     alice_name = dc.demo_username("alice")
@@ -135,9 +143,15 @@ def test_client_sends_security_alert_on_tampered_message(net, security_log_path)
     # Feed bob a hand-built garbage ciphertext -- this test is about the
     # resulting security_alert, not the attack mechanism itself (that is
     # what tests/test_attack_lab.py and test_aes_gcm.py cover).
-    bob._handle_chat({"type": "chat", "from": alice_name,
-                      "nonce": b64(os.urandom(12)), "ciphertext": b64(b"x" * 16),
-                      "tag": b64(b"y" * 16)})
+    bob._handle_chat(
+        {
+            "type": "chat",
+            "from": alice_name,
+            "nonce": b64(os.urandom(12)),
+            "ciphertext": b64(b"x" * 16),
+            "tag": b64(b"y" * 16),
+        }
+    )
 
     alerts = wait_for_events(security_log_path, "security_alert")
     assert alerts[-1]["reported_by"] == bob_name
@@ -164,19 +178,31 @@ def test_client_sends_security_alert_on_handshake_abort(net, security_log_path):
     bob.peer_public_key_pem = serialize_public_key(real_alice_pub).decode("ascii")
 
     _, forged_pub = generate_ecdh_keypair()
-    bob._handle_handshake_init({
-        "type": "handshake_init", "from": alice_name, "to": bob_name,
-        "pubkey": b64(forged_pub), "handshake_sig": b64(sign(attacker_priv, forged_pub))})
+    bob._handle_handshake_init(
+        {
+            "type": "handshake_init",
+            "from": alice_name,
+            "to": bob_name,
+            "pubkey": b64(forged_pub),
+            "handshake_sig": b64(sign(attacker_priv, forged_pub)),
+        }
+    )
 
     assert bob.session_key is None
     alerts = wait_for_events(security_log_path, "security_alert")
-    assert any(a["alert"] == "handshake_aborted" and a["reported_by"] == bob_name
-               for a in alerts)
+    assert any(a["alert"] == "handshake_aborted" and a["reported_by"] == bob_name for a in alerts)
 
 
 # --- full lockout flow end to end, including the PBKDF2-skip ----------------
 
-def test_full_lockout_flow_end_to_end(net, security_log_path):
+
+def test_full_lockout_flow_end_to_end(net, security_log_path, monkeypatch):
+    from types import SimpleNamespace
+
+    # Real network/DB round trips must not consume the synthetic one-second lock.
+    # Replace only the guard's clock; sockets, event timestamps and polling stay real.
+    clock = [time.time()]
+    monkeypatch.setattr("server.lockout.time", SimpleNamespace(time=lambda: clock[0]))
     guard = LockoutGuard(threshold=3, window=60, backoff_schedule=(1,))  # 1s lock
     server, host, port = net.start_server(lockout=guard)
     username = dc.demo_username("lockme")
@@ -196,7 +222,7 @@ def test_full_lockout_flow_end_to_end(net, security_log_path):
     wait_for_events(security_log_path, "account_locked")
     wait_for_events(security_log_path, "lockout_rejected")
 
-    time.sleep(1.2)  # the lock lasts 1s and was set before the attempt above
+    clock[0] += 1.2  # the lock lasts 1s and was set before the attempt above
     final = net.login_attempt(port, username, dc.DEMO_PASSWORD)
     assert final["success"] is True
     wait_for_events(security_log_path, "user_login")

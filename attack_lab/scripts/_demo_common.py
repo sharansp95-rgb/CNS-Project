@@ -10,7 +10,6 @@ protocol, it's the real thing, pointed at an ephemeral local port so it
 doesn't collide with any server you might already have running.
 """
 
-from pathlib import Path
 import contextlib
 import io
 import os
@@ -19,10 +18,12 @@ import sys
 import threading
 import time
 import uuid
+from pathlib import Path
 
 PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 sys.path.insert(0, PROJECT_ROOT)
 
+from attack_lab.relay import RogueRelay as ChatServer  # noqa: E402
 from auth.keystore import save_private_key  # noqa: E402
 from client.client import (  # noqa: E402
     SecureChatClient,
@@ -32,12 +33,11 @@ from client.client import (  # noqa: E402
 )
 from crypto_engine.signatures import generate_keypair as generate_rsa_keypair  # noqa: E402
 from server.server import CertsMissingError
-from attack_lab.relay import RogueRelay as ChatServer  # noqa: E402
 
 DEMO_PASSWORD = "Demo-Password-1234!"
 
 
-_DEMO_STATE = None     # the temporary directory while isolation is active
+_DEMO_STATE = None  # the temporary directory while isolation is active
 
 
 def isolate_demo_state():
@@ -81,6 +81,7 @@ def isolate_demo_state():
 def demo_export_dir():
     """Where a demo should write evidence files: the temp exports folder once isolated."""
     import client.evidence as evidence_module
+
     return evidence_module.DEFAULT_EXPORT_DIR
 
 
@@ -156,8 +157,10 @@ def start_mini_relay(host="127.0.0.1"):
         server = ChatServer(host, port)
     except CertsMissingError as exc:
         print(f"[!] {exc}")
-        print("[!] This demo needs a real TLS cert. Run "
-              "`python certs/generate_certs.py` once, then re-run this demo.")
+        print(
+            "[!] This demo needs a real TLS cert. Run "
+            "`python certs/generate_certs.py` once, then re-run this demo."
+        )
         sys.exit(1)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -195,8 +198,10 @@ def register_client(host, port, username, peer, event_callback=None):
     client.register(username, DEMO_PASSWORD, public_key_pem=public_key_pem)
     result = client.auth_results.get(timeout=10)
     if not result or not result.get("success"):
-        print(f"[!] Registration failed for {username}: "
-              f"{result.get('reason') if result else 'no response'}")
+        print(
+            f"[!] Registration failed for {username}: "
+            f"{result.get('reason') if result else 'no response'}"
+        )
         sys.exit(1)
 
     save_private_key(username, rsa_private_key)
@@ -209,16 +214,17 @@ def establish_signed_handshake(client_a, client_b, timeout=5):
     completion between two already-registered demo clients, deterministically
     (no reliance on roster/user_joined timing), and return True once both
     sides report a session key."""
-    assert client_a.fetch_peer_public_key(timeout=timeout), \
+    assert client_a.fetch_peer_public_key(timeout=timeout), (
         f"{client_a.username} could not fetch {client_a.peer}'s public key"
-    assert client_b.fetch_peer_public_key(timeout=timeout), \
+    )
+    assert client_b.fetch_peer_public_key(timeout=timeout), (
         f"{client_b.username} could not fetch {client_b.peer}'s public key"
+    )
 
     # Same deterministic tie-break the real client uses: lower username
     # initiates. Whichever of A/B that is, initiate from that side.
     initiator, responder = (
-        (client_a, client_b) if client_a.username < client_b.username
-        else (client_b, client_a)
+        (client_a, client_b) if client_a.username < client_b.username else (client_b, client_a)
     )
     initiator.initiate_handshake()
 

@@ -4,7 +4,9 @@ Transports supply send_envelope/close, or override _send in a legacy adapter.
 No TLS, socket, asyncio, or attack-lab dependencies belong in this module.
 All roster/auth state changes are protected by the same reentrant lock.
 """
+
 import threading
+
 from server.db import get_database, record_relay
 from server.lockout import LockoutGuard
 from server.security_log import log_event
@@ -14,7 +16,16 @@ RELAYED_TYPES = frozenset(("chat", "handshake_init", "handshake_response"))
 
 
 class RelayCore:
-    def __init__(self, lockout=None, register=None, verify=None, public_key=None, logger=None, database=None, interceptor=None):
+    def __init__(
+        self,
+        lockout=None,
+        register=None,
+        verify=None,
+        public_key=None,
+        logger=None,
+        database=None,
+        interceptor=None,
+    ):
         self.clients = {}
         self._lock = threading.RLock()
         self.database = database if database is not None else get_database()
@@ -24,7 +35,9 @@ class RelayCore:
         self.register_user = register or scoped.register_user
         self.verify_user = verify or scoped.verify_user
         self.get_public_key = public_key or scoped.get_public_key
-        self.log_event = logger or (lambda event, **fields: log_event(event, database=self.database, **fields))
+        self.log_event = logger or (
+            lambda event, **fields: log_event(event, database=self.database, **fields)
+        )
 
     def _send(self, conn, envelope):
         conn.send_envelope(envelope)
@@ -58,18 +71,24 @@ class RelayCore:
         for field in ("username", "password", "public_key"):
             value = envelope.get(field)
             if value is not None and (not isinstance(value, str) or len(value) > 16384):
-                self._send(conn, {"type": f"{etype}_result", "success": False,
-                                  "reason": "invalid credentials"})
+                self._send(
+                    conn,
+                    {"type": f"{etype}_result", "success": False, "reason": "invalid credentials"},
+                )
                 return None
         # Stage D: a per-source-address rate limit covers BOTH register
         # and login attempts, independent of any one username -- this is
         # what catches an attacker spreading guesses across many
         # usernames, which the per-account lockout below alone would not.
         if not self.lockout.check_address_rate(addr[0]):
-            self._send(conn, {
-                "type": f"{etype}_result", "success": False,
-                "reason": "too many requests from this address -- slow down and retry shortly",
-            })
+            self._send(
+                conn,
+                {
+                    "type": f"{etype}_result",
+                    "success": False,
+                    "reason": "too many requests from this address -- slow down and retry shortly",
+                },
+            )
             self.log_event("address_rate_limited", from_addr=addr[0], attempted_type=etype)
             return None
 
@@ -78,10 +97,14 @@ class RelayCore:
         public_key_pem = envelope.get("public_key")
         result_type = f"{etype}_result"
         if not username or not password:
-            self._send(conn, {
-                "type": result_type, "success": False,
-                "reason": "username and password are required",
-            })
+            self._send(
+                conn,
+                {
+                    "type": result_type,
+                    "success": False,
+                    "reason": "username and password are required",
+                },
+            )
             return None
 
         if etype == "login":
@@ -96,34 +119,54 @@ class RelayCore:
             lock_status = self.lockout.status(username)
             if lock_status.locked:
                 retry_after = int(lock_status.retry_after) + 1
-                self._send(conn, {
-                    "type": "login_result", "success": False,
-                    "reason": f"account temporarily locked, retry in {retry_after}s",
-                })
-                self.log_event("lockout_rejected", username=username, from_addr=addr[0],
-                         retry_after=retry_after)
+                self._send(
+                    conn,
+                    {
+                        "type": "login_result",
+                        "success": False,
+                        "reason": f"account temporarily locked, retry in {retry_after}s",
+                    },
+                )
+                self.log_event(
+                    "lockout_rejected",
+                    username=username,
+                    from_addr=addr[0],
+                    retry_after=retry_after,
+                )
                 return None
 
         with self._lock:
             already_online = username in self.clients
         if already_online:
-            self._send(conn, {
-                "type": result_type, "success": False,
-                "reason": f"'{username}' is already logged in elsewhere",
-            })
+            self._send(
+                conn,
+                {
+                    "type": result_type,
+                    "success": False,
+                    "reason": f"'{username}' is already logged in elsewhere",
+                },
+            )
             return None
 
         if etype == "register":
             if not self.register_user(username, password, public_key_pem=public_key_pem):
-                self._send(conn, {
-                    "type": "register_result", "success": False,
-                    "reason": f"username '{username}' is already taken",
-                })
+                self._send(
+                    conn,
+                    {
+                        "type": "register_result",
+                        "success": False,
+                        "reason": f"username '{username}' is already taken",
+                    },
+                )
                 return None
-            self._send(conn, {
-                "type": "register_result", "success": True,
-                "reason": "registered and logged in",
-            })
+            self._send(
+                conn,
+                {
+                    "type": "register_result",
+                    "success": True,
+                    "reason": "registered and logged in",
+                },
+            )
             print(f"[+] {username} registered from {addr[0]}:{addr[1]}")
             self.log_event("user_registered", username=username, from_addr=addr[0])
             return username
@@ -132,20 +175,35 @@ class RelayCore:
                 status = self.lockout.record_failure(username, addr=addr[0])
                 self.log_event("failed_login", username=username, from_addr=addr[0])
                 if status.newly_locked:
-                    print(f"[!] {username} locked out after repeated failed logins "
-                          f"(retry in {int(status.retry_after)}s)")
-                    self.log_event("account_locked", username=username, from_addr=addr[0],
-                             retry_after=status.retry_after, lock_level=status.lock_level)
-                self._send(conn, {
-                    "type": "login_result", "success": False,
-                    "reason": "invalid username or password",
-                })
+                    print(
+                        f"[!] {username} locked out after repeated failed logins "
+                        f"(retry in {int(status.retry_after)}s)"
+                    )
+                    self.log_event(
+                        "account_locked",
+                        username=username,
+                        from_addr=addr[0],
+                        retry_after=status.retry_after,
+                        lock_level=status.lock_level,
+                    )
+                self._send(
+                    conn,
+                    {
+                        "type": "login_result",
+                        "success": False,
+                        "reason": "invalid username or password",
+                    },
+                )
                 return None
             self.lockout.record_success(username)
-            self._send(conn, {
-                "type": "login_result", "success": True,
-                "reason": "login successful",
-            })
+            self._send(
+                conn,
+                {
+                    "type": "login_result",
+                    "success": True,
+                    "reason": "login successful",
+                },
+            )
             print(f"[+] {username} logged in from {addr[0]}:{addr[1]}")
             self.log_event("user_login", username=username, from_addr=addr[0])
             return username
@@ -184,7 +242,9 @@ class RelayCore:
             sender = self.clients.get(sender_name)
         if target is None:
             if sender is not None:
-                self._send_system(sender, f"[!] {envelope.get('to')} is not online -- message not delivered.")
+                self._send_system(
+                    sender, f"[!] {envelope.get('to')} is not online -- message not delivered."
+                )
             return
         record_relay(envelope, sender_name, self.database)
         self._send(target, envelope)
@@ -192,8 +252,15 @@ class RelayCore:
     def _handle_get_pubkey(self, conn, envelope):
         name = envelope.get("username")
         public = self.get_public_key(name) if isinstance(name, str) and name else None
-        self._send(conn, {"type": "pubkey_result", "username": name,
-                          "public_key": public, "success": public is not None})
+        self._send(
+            conn,
+            {
+                "type": "pubkey_result",
+                "username": name,
+                "public_key": public,
+                "success": public is not None,
+            },
+        )
 
     def handle_authenticated(self, conn, addr, name, envelope):
         etype = envelope.get("type")
@@ -202,10 +269,20 @@ class RelayCore:
         elif etype == "get_pubkey":
             self._handle_get_pubkey(conn, envelope)
         elif etype == "security_alert":
-            self.log_event("security_alert", reported_by=name, from_addr=addr[0],
-                           alert=envelope.get("alert"), reason=envelope.get("reason"),
-                           peer=envelope.get("peer"), seq=envelope.get("seq"))
+            self.log_event(
+                "security_alert",
+                reported_by=name,
+                from_addr=addr[0],
+                alert=envelope.get("alert"),
+                reason=envelope.get("reason"),
+                peer=envelope.get("peer"),
+                seq=envelope.get("seq"),
+            )
         else:
-            self.log_event("unsupported_envelope", username=name, from_addr=addr[0],
-                           envelope_type=etype if isinstance(etype, str) else "invalid type")
+            self.log_event(
+                "unsupported_envelope",
+                username=name,
+                from_addr=addr[0],
+                envelope_type=etype if isinstance(etype, str) else "invalid type",
+            )
             self._send(conn, {"type": "error", "reason": "unknown envelope type"})

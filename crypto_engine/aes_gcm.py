@@ -37,7 +37,7 @@ __all__ = [
     "decrypt",
 ]
 
-KEY_SIZE = 32   # AES-256
+KEY_SIZE = 32  # AES-256
 NONCE_SIZE = 12  # 96-bit nonce, the size GCM is designed around
 TAG_SIZE = 16
 

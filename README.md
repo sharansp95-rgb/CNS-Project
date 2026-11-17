@@ -1021,8 +1021,8 @@ envelope is ever sent.
 ```python
 from crypto_engine import generate_key, encrypt, decrypt
 
-key = generate_key()                       # 32 random bytes (testing only)
-box = encrypt(key, b"hello")               # {"nonce", "ciphertext", "tag"}
+key = generate_key()  # 32 random bytes (testing only)
+box = encrypt(key, b"hello")  # {"nonce", "ciphertext", "tag"}
 decrypt(key, box["nonce"], box["ciphertext"], box["tag"])  # b"hello"
 ```
 
@@ -1060,7 +1060,13 @@ the `users` database table — the plaintext password is never written to disk.
 PEM (de)serialization helpers and the `fingerprint()` helper:
 
 ```python
-from crypto_engine.signatures import generate_keypair, sign, verify, fingerprint, serialize_public_key
+from crypto_engine.signatures import (
+    generate_keypair,
+    sign,
+    verify,
+    fingerprint,
+    serialize_public_key,
+)
 
 private_key, public_key = generate_keypair()
 signature = sign(private_key, b"hello")

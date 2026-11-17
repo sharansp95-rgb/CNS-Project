@@ -42,6 +42,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "demo"))
 
 import _demo_common as dc  # noqa: E402
+
 import client.client as client_module  # noqa: E402
 import server.security_log as security_log  # noqa: E402
 import server.server as server_module  # noqa: E402
@@ -55,6 +56,7 @@ AUTH_TIMEOUT = 20  # seconds; see module docstring
 # Session-scoped TLS certificates -- generated ONCE, used by every test.
 # Tests must never read or write the real certs/ directory.
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _test_certs():
@@ -91,6 +93,7 @@ def _test_certs():
         os.environ["SECURECHAT_CERT_DIR"] = old_cert_dir
 
     import shutil
+
     shutil.rmtree(tmpdir, ignore_errors=True)
 
 
@@ -101,31 +104,48 @@ def isolated_state(tmp_path, monkeypatch, request):
     DATABASE_URL is inherited by script-mode subprocesses as well.
     """
     from contextlib import ExitStack
+
     stack = ExitStack()
     database_url = "sqlite:///" + str(tmp_path / "securechat.db")
     if os.environ.get("TEST_DATABASE_URL") and request.node.path.name in {
-        "test_database.py", "test_lockout.py", "test_security_events.py",
-        "test_web_gateway.py", "test_evidence_vault.py", "test_postgres_upgrade.py",
+        "test_database.py",
+        "test_lockout.py",
+        "test_security_events.py",
+        "test_web_gateway.py",
+        "test_evidence_vault.py",
+        "test_postgres_upgrade.py",
         "test_attachments.py",
     }:
         from tools.postgres_test_support import postgres_schema
-        database_url = stack.enter_context(postgres_schema(
-            os.environ["TEST_DATABASE_URL"], os.environ.get("DATABASE_URL")))
+
+        database_url = stack.enter_context(
+            postgres_schema(os.environ["TEST_DATABASE_URL"], os.environ.get("DATABASE_URL"))
+        )
     monkeypatch.setenv("TSA_KEY_PATH", str(tmp_path / "tsa.key"))
     monkeypatch.setenv("DATABASE_URL", database_url)
     keys_dir = str(tmp_path / "keys")
     for module in (client_module, dc):
-        monkeypatch.setattr(module, "save_private_key",
-                            functools.partial(module.save_private_key, keys_dir=keys_dir))
-    monkeypatch.setattr(client_module, "load_private_key",
-                        functools.partial(client_module.load_private_key, keys_dir=keys_dir))
+        monkeypatch.setattr(
+            module,
+            "save_private_key",
+            functools.partial(module.save_private_key, keys_dir=keys_dir),
+        )
+    monkeypatch.setattr(
+        client_module,
+        "load_private_key",
+        functools.partial(client_module.load_private_key, keys_dir=keys_dir),
+    )
 
     log_path = str(tmp_path / "security_events.jsonl")
     real_log_event = security_log.log_event
-    monkeypatch.setattr(server_module, "log_event",
-                        lambda event, **fields: real_log_event(event, path=log_path, **fields))
+    monkeypatch.setattr(
+        server_module,
+        "log_event",
+        lambda event, **fields: real_log_event(event, path=log_path, **fields),
+    )
     yield log_path
     from server.db import dispose_databases
+
     dispose_databases()
     stack.close()
 
@@ -151,8 +171,9 @@ class NetEnv:
         server_cls = server_cls or server_module.ChatServer
         server = server_cls(HOST, 0, lockout=lockout or LockoutGuard(), **kwargs)
         port = server.listen()
-        thread = threading.Thread(target=server.serve_forever, daemon=True,
-                                  name=f"test-server-{port}")
+        thread = threading.Thread(
+            target=server.serve_forever, daemon=True, name=f"test-server-{port}"
+        )
         thread.start()
         self._servers.append((server, thread))
         return server, HOST, port
@@ -168,16 +189,18 @@ class NetEnv:
         against the server on `port` and return the ready client. Pass
         `event_callback` to see events from the very first one (a callback
         attached afterwards can miss events that fire right after login)."""
-        return self.track(dc.register_client(HOST, port, username, peer,
-                                             event_callback=event_callback))
+        return self.track(
+            dc.register_client(HOST, port, username, peer, event_callback=event_callback)
+        )
 
     def _auth_attempt(self, port, kind, username, password):
         sock = client_module.connect_tls(HOST, port)
         c = client_module.SecureChatClient(sock, username=None, peer="x")
         threading.Thread(target=c.receive_loop, daemon=True).start()
         try:
-            getattr(c, kind)(username, password, **({"public_key_pem": None}
-                                                    if kind == "register" else {}))
+            getattr(c, kind)(
+                username, password, **({"public_key_pem": None} if kind == "register" else {})
+            )
             result = c.auth_results.get(timeout=AUTH_TIMEOUT)
         finally:
             _close_client(c)
@@ -248,6 +271,7 @@ def wait_for_events(log_path, event_type, count=1, timeout=10):
     so reading the file immediately after a client call is a race; a
     timeout here means the event genuinely never happened."""
     from server.security_log import read_events
+
     deadline = time.time() + timeout
     while True:
         found = [e for e in read_events(log_path) if e["event"] == event_type]
@@ -255,8 +279,8 @@ def wait_for_events(log_path, event_type, count=1, timeout=10):
             return found
         if time.time() > deadline:
             raise AssertionError(
-                f"expected {count} '{event_type}' event(s) within {timeout}s, "
-                f"found {len(found)}")
+                f"expected {count} '{event_type}' event(s) within {timeout}s, found {len(found)}"
+            )
         time.sleep(0.02)
 
 
@@ -271,6 +295,7 @@ def _finalize_tk_objects_on_the_main_thread():
     code 133). Collecting here keeps that from ever happening."""
     yield
     import gc
+
     gc.collect()
 
 

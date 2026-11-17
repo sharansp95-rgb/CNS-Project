@@ -50,13 +50,17 @@ def test_header_rows_fit_the_minimum_window_width(app):
     app.geometry(f"{min_width}x600+10000+10000")
     app.update()
     app.update()
-    row1 = [w for w in app.header_row1.winfo_children() if w.winfo_manager()
-            and w is not app.header_row1.winfo_children()[-1]]
-    fixed = sum(w.winfo_reqwidth() for w in (app.avatar, app.export_button,
-                                              app.network_button))
+    _row1 = [
+        w
+        for w in app.header_row1.winfo_children()
+        if w.winfo_manager() and w is not app.header_row1.winfo_children()[-1]
+    ]
+    fixed = sum(w.winfo_reqwidth() for w in (app.avatar, app.export_button, app.network_button))
     assert fixed <= app.winfo_width(), f"avatar + action buttons need {fixed}px"
     chips = sum(w.winfo_reqwidth() for w in app.chip_row.winfo_children() if w.winfo_manager())
-    assert chips <= app.winfo_width(), f"chip row needs {chips}px but the window is {app.winfo_width()}px"
+    assert chips <= app.winfo_width(), (
+        f"chip row needs {chips}px but the window is {app.winfo_width()}px"
+    )
     assert app._status_hidden, "the long status sentence should be dropped on a narrow window"
 
 
@@ -68,7 +72,9 @@ def test_action_buttons_are_actually_mapped_and_inside_the_window(app, size):
     width = app.winfo_width()
     for button in (app.export_button, app.network_button):
         assert button.winfo_ismapped()
-        assert button.winfo_width() > 60, f"{button.cget('text')} squeezed to {button.winfo_width()}px"
+        assert button.winfo_width() > 60, (
+            f"{button.cget('text')} squeezed to {button.winfo_width()}px"
+        )
         assert button.winfo_rootx() - app.winfo_rootx() + button.winfo_width() <= width
 
 
@@ -90,6 +96,7 @@ def test_dashboard_shows_a_short_relative_log_path():
     """The dashboard header showed the absolute log path, which was clipped to a fragment
     next to the title; inside the project it must be relative."""
     import gui.security_dashboard as dashboard
+
     try:
         window = dashboard.SecurityDashboard()
     except tk.TclError as exc:
@@ -110,10 +117,22 @@ def test_dashboard_locked_account_text_wraps_instead_of_being_clipped(tmp_path):
     accounts pane and was clipped; it must wrap."""
     import json
     import time as _time
+
     import gui.security_dashboard as dashboard
+
     log = tmp_path / "events.jsonl"
-    log.write_text(json.dumps({"ts": _time.time(), "event": "account_locked",
-                               "username": "carol", "retry_after": 60, "lock_level": 1}) + "\n")
+    log.write_text(
+        json.dumps(
+            {
+                "ts": _time.time(),
+                "event": "account_locked",
+                "username": "carol",
+                "retry_after": 60,
+                "lock_level": 1,
+            }
+        )
+        + "\n"
+    )
     try:
         window = dashboard.SecurityDashboard(log_path=str(log))
     except tk.TclError as exc:
@@ -123,10 +142,14 @@ def test_dashboard_locked_account_text_wraps_instead_of_being_clipped(tmp_path):
     try:
         window.geometry("+10000+10000")
         window.update()  # runs the first poll, which renders the locked account
-        labels = [w for row in window.locked_list.winfo_children() for w in row.winfo_children()
-                  if isinstance(w, tk.Label) and "retry in" in str(w.cget("text"))]
+        labels = [
+            w
+            for row in window.locked_list.winfo_children()
+            for w in row.winfo_children()
+            if isinstance(w, tk.Label) and "retry in" in str(w.cget("text"))
+        ]
         assert labels, "locked account was not rendered"
-        assert all(int(str(l.cget("wraplength"))) > 0 for l in labels)
+        assert all(int(str(label.cget("wraplength"))) > 0 for label in labels)
     finally:
         window.update()
         window.destroy()
@@ -137,6 +160,7 @@ def test_dashboard_header_and_locked_pane_fit_at_the_launcher_width():
     "/securit" and the Locked accounts pane showed "Locked acco" / "ounts currently":
     both must fit."""
     import gui.security_dashboard as dashboard
+
     try:
         window = dashboard.SecurityDashboard()  # default log path: shown relative to the project
     except tk.TclError as exc:
@@ -146,8 +170,9 @@ def test_dashboard_header_and_locked_pane_fit_at_the_launcher_width():
     try:
         window.geometry("700x430+10000+10000")
         window.update()
-        header = window.path_var and [w for w in window.winfo_children()
-                                      if isinstance(w, tk.Frame)][0]
+        header = (
+            window.path_var and [w for w in window.winfo_children() if isinstance(w, tk.Frame)][0]
+        )
         assert header.winfo_reqwidth() <= 700, "dashboard header is wider than the window"
         assert window.paned.sashpos(0) >= 220, "Locked accounts pane is too narrow"
         assert window.locked_empty_label.winfo_reqwidth() <= window.paned.sashpos(0)
@@ -163,4 +188,5 @@ def test_login_card_fits_in_a_short_window(app):
     app.update()
     card = app.login_frame.winfo_children()[0]
     assert card.winfo_reqheight() <= 540, (
-        f"login card needs {card.winfo_reqheight()}px but the window is only 540px tall")
+        f"login card needs {card.winfo_reqheight()}px but the window is only 540px tall"
+    )

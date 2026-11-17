@@ -1,0 +1,15 @@
+{
+  "name": "@cns/lint-tooling",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated supported TypeScript parser; the application compiler stays pinned to TypeScript 7.",
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.73.0",
+    "@eslint/js": "10.0.1",
+    "eslint": "10.15.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.14.0"
+  }
+}

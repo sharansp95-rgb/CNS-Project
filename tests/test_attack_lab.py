@@ -1,19 +1,16 @@
 """Separate hostile relay, genuine clients, one-shot semantics and product separation."""
 
-import base64
 import json
 import subprocess
 import sys
 import time
 
-import pytest
-from sqlalchemy import select
 import _demo_common as dc
+import pytest
+
 from attack_lab.relay import RogueRelay, lab_database
 from server.lockout import LockoutGuard
 from server.security_log import log_event, read_events
-from server.server import ChatServer
-from server.db import relayed_envelopes
 
 
 def wait(predicate, timeout=10):
@@ -28,9 +25,10 @@ def wait(predicate, timeout=10):
 @pytest.fixture()
 def rogue(net, tmp_path, security_log_path):
     database = lab_database("sqlite:///" + str(tmp_path / "separate_lab.db"))
-    logger = lambda event, **fields: log_event(
-        event, path=security_log_path, database=database, **fields
-    )
+
+    def logger(event, **fields):
+        return log_event(event, path=security_log_path, database=database, **fields)
+
     server, _, port = net.start_server(
         server_cls=RogueRelay,
         database=database,
@@ -68,9 +66,7 @@ def test_attacks_are_caught_by_real_unmodified_clients(net, rogue, action, reaso
     wait(lambda: any(d.get("reason") == reason for _, d in events))
     assert "alice" not in server.pending
     if action in ("tamper_next", "drop_next"):
-        assert not any(
-            r["message"] == "first confidential message" for r in b.transcript
-        )
+        assert not any(r["message"] == "first confidential message" for r in b.transcript)
     if action == "inject_next":
         assert all(r["message"] == "first confidential message" for r in b.transcript)
     if action == "reorder_next":
@@ -93,9 +89,7 @@ def test_mitm_stops_key_derivation(net, rogue):
     a = net.register_client(port, "alice", "bob")
     server.arm("mitm_next_handshake", "alice")
     events = []
-    b = net.register_client(
-        port, "bob", "alice", event_callback=lambda k, d: events.append((k, d))
-    )
+    b = net.register_client(port, "bob", "alice", event_callback=lambda k, d: events.append((k, d)))
     wait(lambda: any(k == "handshake_aborted" for k, _ in events))
     assert b.session_key is None and a.session_key is None
     assert "alice" not in server.pending
@@ -160,15 +154,10 @@ def test_production_control_is_unknown_and_logged(net, security_log_path):
     c.send_envelope(dict(type="lab_control", action="tamper_next"))
     wait(
         lambda: any(
-            e.get("event") == "unsupported_envelope"
-            for e in read_events(security_log_path)
+            e.get("event") == "unsupported_envelope" for e in read_events(security_log_path)
         )
     )
-    event = [
-        e
-        for e in read_events(security_log_path)
-        if e["event"] == "unsupported_envelope"
-    ][-1]
+    event = [e for e in read_events(security_log_path) if e["event"] == "unsupported_envelope"][-1]
     assert event["envelope_type"] == "lab_control"
     wait(
         lambda: any(
@@ -182,9 +171,7 @@ def test_production_control_is_unknown_and_logged(net, security_log_path):
         if k == "envelope_received" and d.get("envelope", {}).get("type") == "error"
     ]
     assert errors[-1]["reason"] == "unknown envelope type"
-    assert not hasattr(server, "arm") and not hasattr(
-        server, "_apply_lab_tamper_or_drop"
-    )
+    assert not hasattr(server, "arm") and not hasattr(server, "_apply_lab_tamper_or_drop")
     assert server.interceptor is None
 
 
@@ -209,14 +196,12 @@ def test_production_flag_is_removed():
 
 
 def test_raw_tls_failure_uses_only_the_supplied_lab_logger(rogue):
-    from unittest.mock import Mock, patch
     import ssl
+    from unittest.mock import Mock, patch
 
     server, _ = rogue
     raw = Mock()
-    with patch.object(
-        server.ssl_context, "wrap_socket", side_effect=ssl.SSLError("invalid TLS")
-    ):
+    with patch.object(server.ssl_context, "wrap_socket", side_effect=ssl.SSLError("invalid TLS")):
         with patch(
             "server.server.log_event",
             side_effect=AssertionError("default service logger used"),

@@ -5,31 +5,65 @@ or the real session produced; nothing here decides whether something is secure."
 import tkinter as tk
 
 import pytest
+from test_gui_attack_lab import site as site
 
 import gui.chat_gui as chat_gui
 from gui.explain import banner_for
-from test_gui_attack_lab import site  # separate sandbox fixture
+from gui.theme import is_no_display_error
 
-AUTH = {"username": "alice", "peer": "bob", "lab_mode": True,
-        "own_fingerprint": "AAAA BBBB CCCC DDDD", "peer_key_found": True}
+AUTH = {
+    "username": "alice",
+    "peer": "bob",
+    "lab_mode": True,
+    "own_fingerprint": "AAAA BBBB CCCC DDDD",
+    "peer_key_found": True,
+}
 
 
 # ---- wording (pure) ----------------------------------------------------------------
 
-@pytest.mark.parametrize("kind,data,severity,text", [
-    ("handshake_established", {"peer": "bob"}, "ok",
-     "Keys were exchanged with ECDH and the exchange was signed with RSA. The server never saw the key."),
-    ("message_rejected", {"reason": "decryption_failed"}, "bad",
-     "The relay changed one byte. AES-GCM's authentication tag no longer matched, so the message was rejected."),
-    ("message_rejected", {"reason": "replay_duplicate"}, "bad",
-     "An old message was sent again. The duplicate nonce/timestamp check rejected it."),
-    ("chain_warning", {"reason": "chain_gap"}, "warn",
-     "A message is missing. The hash chain noticed the gap in the sequence."),
-    ("handshake_aborted", {"reason": "the ECDH public key ... did NOT verify against their RSA public key"}, "bad",
-     "Someone swapped the key during the handshake. The RSA signature check failed, so no session was created."),
-    ("evidence_exported", {}, "ok",
-     "A signed copy of this conversation was saved. Anyone can verify it offline."),
-])
+
+@pytest.mark.parametrize(
+    "kind,data,severity,text",
+    [
+        (
+            "handshake_established",
+            {"peer": "bob"},
+            "ok",
+            "Keys were exchanged with ECDH and the exchange was signed with RSA. The server never saw the key.",
+        ),
+        (
+            "message_rejected",
+            {"reason": "decryption_failed"},
+            "bad",
+            "The relay changed one byte. AES-GCM's authentication tag no longer matched, so the message was rejected.",
+        ),
+        (
+            "message_rejected",
+            {"reason": "replay_duplicate"},
+            "bad",
+            "An old message was sent again. The duplicate nonce/timestamp check rejected it.",
+        ),
+        (
+            "chain_warning",
+            {"reason": "chain_gap"},
+            "warn",
+            "A message is missing. The hash chain noticed the gap in the sequence.",
+        ),
+        (
+            "handshake_aborted",
+            {"reason": "the ECDH public key ... did NOT verify against their RSA public key"},
+            "bad",
+            "Someone swapped the key during the handshake. The RSA signature check failed, so no session was created.",
+        ),
+        (
+            "evidence_exported",
+            {},
+            "ok",
+            "A signed copy of this conversation was saved. Anyone can verify it offline.",
+        ),
+    ],
+)
 def test_banner_wording_matches_the_spec(kind, data, severity, text):
     assert banner_for(kind, data) == (severity, text)
 
@@ -44,12 +78,14 @@ def test_other_rejections_fall_back_to_their_explanation_and_unknown_events_have
 
 def test_banners_are_one_or_two_sentences():
     from gui.explain import BANNER_TEXT
+
     for key, (_sev, text) in BANNER_TEXT.items():
         assert 1 <= text.count(". ") + 1 <= 2, key
         assert len(text) < 200, key
 
 
 # ---- the banner strip (needs Tk) ------------------------------------------------------
+
 
 @pytest.fixture()
 def app():
@@ -76,8 +112,9 @@ def banner_text(app):
 
 def test_no_banner_until_something_happens(app):
     assert app._banner is None
-    app._handle_event("message_received", {"sender": "bob", "message": "hi", "timestamp": 1,
-                                           "receipt": {}})
+    app._handle_event(
+        "message_received", {"sender": "bob", "message": "hi", "timestamp": 1, "receipt": {}}
+    )
     assert app._banner is None, "ordinary messages must not produce banners"
 
 
@@ -89,8 +126,9 @@ def test_session_established_shows_the_ecdh_rsa_banner(app):
 
 def test_a_rejection_banner_follows_the_real_event_and_replaces_the_previous_one(app):
     app._handle_event("handshake_established", {"peer": "bob"})
-    app._handle_event("message_rejected", {"sender": "bob", "reason": "decryption_failed",
-                                           "detail": "x"})
+    app._handle_event(
+        "message_rejected", {"sender": "bob", "reason": "decryption_failed", "detail": "x"}
+    )
     app.update()
     assert "authentication tag" in banner_text(app)
     assert len(app.banner_holder.winfo_children()) == 1, "a new banner replaces the old one"
@@ -112,36 +150,44 @@ def test_explain_events_toggle_turns_banners_off(app):
     app.explain_var.set(False)
     app._on_explain_toggled()
     assert app._banner is None, "turning it off dismisses the current banner"
-    app._handle_event("message_rejected", {"sender": "bob", "reason": "replay_duplicate",
-                                           "detail": "x"})
+    app._handle_event(
+        "message_rejected", {"sender": "bob", "reason": "replay_duplicate", "detail": "x"}
+    )
     assert app._banner is None
     # ...but the blocked card in the conversation is still drawn (that is not an "explanation")
     assert any(i["kind"] == "blocked" for i in app._items)
     app.explain_var.set(True)
-    app._handle_event("message_rejected", {"sender": "bob", "reason": "replay_duplicate",
-                                           "detail": "x"})
+    app._handle_event(
+        "message_rejected", {"sender": "bob", "reason": "replay_duplicate", "detail": "x"}
+    )
     assert "duplicate nonce" in banner_text(app)
 
 
 def test_settings_menu_has_the_explain_toggle_and_is_on_by_default(app):
     assert app.explain_var.get() is True
-    labels = [app.settings_menu.entrycget(i, "label") for i in range(app.settings_menu.index("end") + 1)]
+    labels = [
+        app.settings_menu.entrycget(i, "label") for i in range(app.settings_menu.index("end") + 1)
+    ]
     assert "Explain events" in labels
 
 
 def test_separate_lab_does_not_claim_detection_for_an_attempt(site):
-    from test_gui_attack_lab import start, ORIGIN
+    from test_gui_attack_lab import ORIGIN, start
+
     client, lab = site
     start(client)
-    response = client.post('/lab/arm', json={'action': 'tamper_next', 'target': 'lab_alice'},
-                           headers={'origin': ORIGIN})
+    response = client.post(
+        "/lab/arm",
+        json={"action": "tamper_next", "target": "lab_alice"},
+        headers={"origin": ORIGIN},
+    )
     assert response.status_code == 200
-    html = client.get('/').text
-    assert 'Attempted actions are not successful detections.' in html
-    assert 'A missing report is never labeled' in html and 'caught' in html
+    html = client.get("/").text
+    assert "Attempted actions are not successful detections." in html
+    assert "A missing report is never labeled" in html and "caught" in html
     events = lab.state.relay.events
-    assert events[-1]['event'] == 'lab_attack_armed'
-    assert not any(e['event'] == 'security_alert' for e in events)
+    assert events[-1]["event"] == "lab_attack_armed"
+    assert not any(e["event"] == "security_alert" for e in events)
 
 
 def test_banner_wraps_within_a_narrow_window(app):
@@ -158,21 +204,27 @@ def test_success_banners_fade_but_blocks_and_warnings_stay(app):
     assert app._banner_job is not None, "an ok banner schedules its own dismissal"
     app._dismiss_if_current(app._banner[0])
     assert app._banner is None and app._banner_job is None
-    app._handle_event("message_rejected", {"sender": "bob", "reason": "decryption_failed", "detail": "x"})
-    assert app._banner is not None and getattr(app, "_banner_job", None) is None, \
+    app._handle_event(
+        "message_rejected", {"sender": "bob", "reason": "decryption_failed", "detail": "x"}
+    )
+    assert app._banner is not None and getattr(app, "_banner_job", None) is None, (
         "a block stays until it is dismissed or replaced"
+    )
 
 
 def test_dismissing_a_stale_banner_does_not_remove_a_newer_one(app):
     app._handle_event("handshake_established", {"peer": "bob"})
     old = app._banner[0]
-    app._handle_event("message_rejected", {"sender": "bob", "reason": "replay_duplicate", "detail": "x"})
+    app._handle_event(
+        "message_rejected", {"sender": "bob", "reason": "replay_duplicate", "detail": "x"}
+    )
     app._dismiss_if_current(old)
     assert app._banner is not None and "duplicate nonce" in banner_text(app)
 
 
 def test_settings_button_is_compact_and_opens_the_menu(app):
     from tkinter import ttk
+
     assert isinstance(app.settings_button, ttk.Button)
     assert app.settings_button.winfo_reqwidth() < app.export_button.winfo_reqwidth() * 0.6
     popped = []
@@ -183,20 +235,29 @@ def test_settings_button_is_compact_and_opens_the_menu(app):
 
 # ---- gap wording (explained by an earlier rejection vs a real deletion) ------------------
 
+
 def test_gap_card_and_banner_say_when_the_gap_matches_a_blocked_message():
     from gui.explain import describe_rejection
+
     explained = {"missing": 1, "explained": 1}
     info = describe_rejection("chain_warning", "chain_gap", "d", explained)
-    assert info["headline"] == "Warning: gap matches a blocked message" and info["severity"] == "warn"
+    assert (
+        info["headline"] == "Warning: gap matches a blocked message" and info["severity"] == "warn"
+    )
     assert "matches a message this window already blocked" in info["explain"]
-    assert banner_for("chain_warning", explained)[1].startswith("A message that was blocked earlier")
+    assert banner_for("chain_warning", explained)[1].startswith(
+        "A message that was blocked earlier"
+    )
 
 
 def test_gap_with_nothing_blocked_still_says_possible_deletion():
     from gui.explain import describe_rejection
+
     info = describe_rejection("chain_warning", "chain_gap", "d", {"missing": 1, "explained": 0})
     assert info["headline"] == "Warning: message missing"
     assert "nothing was blocked for it" in info["explain"] and "may have deleted" in info["explain"]
-    assert banner_for("chain_warning", {"missing": 1, "explained": 0}) == banner_for("chain_warning", {})
+    assert banner_for("chain_warning", {"missing": 1, "explained": 0}) == banner_for(
+        "chain_warning", {}
+    )
     many = describe_rejection("chain_warning", "chain_gap", "d", {"missing": 3, "explained": 1})
     assert "3 messages missing: 1 match" in many["explain"] and "2 do not" in many["explain"]

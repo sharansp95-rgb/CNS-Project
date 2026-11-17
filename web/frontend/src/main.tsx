@@ -6,7 +6,12 @@ import { wrap, unwrap, loadBackup, saveBackup, type Backup } from "./keystore";
 import "./style.css";
 import { PublicVerify, EvidencePanel } from "./ProofUI";
 import { CallButton, CallOverlay, callLogEntry } from "./CallUI";
-import { AttachmentCard, Lightbox, asDescriptor, stageText } from "./AttachmentUI";
+import {
+  AttachmentCard,
+  Lightbox,
+  asDescriptor,
+  stageText,
+} from "./AttachmentUI";
 import type { Progress, OpenedAttachment } from "./session";
 
 function download(name: string, body: unknown) {
@@ -41,7 +46,10 @@ function App() {
     localStorage.getItem("securechat-theme") || "dark",
   );
   const notify = () => refresh((n) => n + 1);
-  const [sending, setSending] = useState<{ name: string; progress: Progress }>(),
+  const [sending, setSending] = useState<{
+      name: string;
+      progress: Progress;
+    }>(),
     [strip, setStrip] = useState(true),
     [dragging, setDragging] = useState(false),
     [zoom, setZoom] = useState<OpenedAttachment>(),
@@ -51,7 +59,10 @@ function App() {
     if (!file || !session || sending) return;
     setError("");
     sendAbort.current = new AbortController();
-    setSending({ name: file.name, progress: { stage: "Preparing", fraction: 0 } });
+    setSending({
+      name: file.name,
+      progress: { stage: "Preparing", fraction: 0 },
+    });
     try {
       await session.sendAttachment(file, {
         stripMetadata: strip,
@@ -104,6 +115,7 @@ function App() {
         location.host +
         "/ws";
       let conn: Session;
+      // eslint-disable-next-line prefer-const -- Callbacks may run before construction completes.
       conn = new Session(
         name,
         peer.trim() || "__vault_only__",
@@ -424,10 +436,12 @@ function App() {
                   >
                     <span>{item.message}</span>
                     <small>
-                      {new Date(item.receipt.timestamp * 1000).toLocaleTimeString(
-                        [],
-                        { hour: "2-digit", minute: "2-digit" },
-                      )}{" "}
+                      {new Date(
+                        item.receipt.timestamp * 1000,
+                      ).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}{" "}
                       · {item.receipt.chain_link === "gap" ? "⚠" : "✓✓"}
                     </small>
                   </button>
@@ -441,11 +455,22 @@ function App() {
             )}
             {sending && (
               <div className="att-sending" role="status">
-                <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(sending.progress.fraction * 100)}>
-                  <span style={{ width: `${sending.progress.fraction * 100}%` }} />
+                <div
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(sending.progress.fraction * 100)}
+                >
+                  <span
+                    style={{ width: `${sending.progress.fraction * 100}%` }}
+                  />
                 </div>
-                <span>{sending.name}: {stageText(sending.progress)}</span>
-                <button onClick={() => sendAbort.current?.abort()}>Cancel</button>
+                <span>
+                  {sending.name}: {stageText(sending.progress)}
+                </span>
+                <button onClick={() => sendAbort.current?.abort()}>
+                  Cancel
+                </button>
               </div>
             )}
             <form
@@ -458,7 +483,11 @@ function App() {
                 }
               }}
             >
-              <label className={"attach" + (!session.key || sending ? " disabled" : "")}>
+              <label
+                className={
+                  "attach" + (!session.key || sending ? " disabled" : "")
+                }
+              >
                 📎
                 <input
                   type="file"
@@ -493,8 +522,13 @@ function App() {
               </button>
             </form>
             <label className="strip-toggle">
-              <input type="checkbox" checked={strip} onChange={(e) => setStrip(e.target.checked)} />
-              Remove location &amp; camera data (EXIF) from images before encrypting
+              <input
+                type="checkbox"
+                checked={strip}
+                onChange={(e) => setStrip(e.target.checked)}
+              />
+              Remove location &amp; camera data (EXIF) from images before
+              encrypting
               <small>
                 {strip
                   ? "Location data is removed. Video metadata is not stripped."

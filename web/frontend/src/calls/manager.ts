@@ -8,13 +8,18 @@
 // Both sides also see a short authentication string derived from both fingerprints.
 import { api } from "../attachments/transfer";
 import {
-  connectionType, fingerprintMatches, remoteCertificateFingerprint, signedFingerprint, validateSdp,
+  connectionType,
+  fingerprintMatches,
+  remoteCertificateFingerprint,
+  signedFingerprint,
+  validateSdp,
 } from "./sdp";
 import { sas } from "./sas";
 import { encodeSignal, type Outcome, type Signal } from "./signal";
 
 export const RING_SECONDS = 30;
-export type CallState = "idle" | "calling" | "ringing" | "connecting" | "active";
+export type CallState =
+  "idle" | "calling" | "ringing" | "connecting" | "active";
 export type FpStatus = "pending" | "match" | "mismatch" | "unavailable";
 export interface IceConfig {
   iceServers: RTCIceServer[];
@@ -52,7 +57,10 @@ export interface CallHost {
   note(type: string, fields: Record<string, unknown>): void;
   securityAlert(kind: string, reason: string): void;
 }
-const hex = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, "0")).join("");
+const hex = (n: number) =>
+  Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("");
 export function micMessage(e: unknown): string {
   const name = (e as DOMException)?.name;
   if (!window.isSecureContext || !navigator.mediaDevices)
@@ -63,12 +71,17 @@ export function micMessage(e: unknown): string {
     return "No microphone was found. Connect one and try again.";
   if (name === "NotReadableError" || name === "AbortError")
     return "The microphone is in use by another app or could not be started.";
-  return "Could not access the microphone: " + ((e as Error)?.message || name || "unknown error");
+  return (
+    "Could not access the microphone: " +
+    ((e as Error)?.message || name || "unknown error")
+  );
 }
 /** Count candidate types in an SDP ("host", "srflx", "relay"): shown in the Wire Log. */
 export function candidateSummary(sdp: string): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const m of sdp.matchAll(/^a=candidate:\S+ \d+ (\w+) \d+ \S+ \d+ typ (\w+)/gm)) {
+  for (const m of sdp.matchAll(
+    /^a=candidate:\S+ \d+ (\w+) \d+ \S+ \d+ typ (\w+)/gm,
+  )) {
     const k = `${m[2]}/${m[1].toLowerCase()}`;
     out[k] = (out[k] ?? 0) + 1;
   }
@@ -127,17 +140,22 @@ export class CallManager {
     // Mint the next credential a few minutes BEFORE the current one expires, so a call
     // never has to use a brand-new (not yet propagated) credential.
     clearInterval(this.refresher);
-    this.refresher = setInterval(() => {
-      this.cache = this.cache && { ...this.cache, at: 0 };
-      void this.ice().catch(() => {});
-    }, 5 * 60 * 1000);
+    this.refresher = setInterval(
+      () => {
+        this.cache = this.cache && { ...this.cache, at: 0 };
+        void this.ice().catch(() => {});
+      },
+      5 * 60 * 1000,
+    );
   }
   private ice(): Promise<IceConfig> {
-    if (this.cache && Date.now() - this.cache.at < CallManager.CACHE_MS) return Promise.resolve(this.cache.cfg);
+    if (this.cache && Date.now() - this.cache.at < CallManager.CACHE_MS)
+      return Promise.resolve(this.cache.cfg);
     this.fetching ??= api<IceConfig>(this.s.apiToken, "GET", "/api/calls/ice")
       .catch((): IceConfig => ({ iceServers: [], turn: "unavailable" }))
       .then((cfg) => {
-        if (cfg.turn !== "unavailable" || !this.cache) this.cache = { cfg, at: Date.now() };
+        if (cfg.turn !== "unavailable" || !this.cache)
+          this.cache = { cfg, at: Date.now() };
         return cfg;
       })
       .finally(() => (this.fetching = undefined));
@@ -148,16 +166,40 @@ export class CallManager {
     clearInterval(this.refresher);
     this.cache = undefined;
   }
-  private newInfo(id: string, role: "caller" | "callee", cfg: IceConfig): CallInfo {
+  private newInfo(
+    id: string,
+    role: "caller" | "callee",
+    cfg: IceConfig,
+  ): CallInfo {
     return {
-      id, role, state: role === "caller" ? "calling" : "ringing", startedAt: 0, localFp: "", remoteFp: "",
-      observedFp: "", fpStatus: "pending", words: [], sasConfirmed: false, conn: "unknown", quality: "unknown",
-      muted: false, turn: cfg.turn, note: "", alert: "", inboundBytes: 0, trackEnabled: true, outputs: [],
+      id,
+      role,
+      state: role === "caller" ? "calling" : "ringing",
+      startedAt: 0,
+      localFp: "",
+      remoteFp: "",
+      observedFp: "",
+      fpStatus: "pending",
+      words: [],
+      sasConfirmed: false,
+      conn: "unknown",
+      quality: "unknown",
+      muted: false,
+      turn: cfg.turn,
+      note: "",
+      alert: "",
+      inboundBytes: 0,
+      trackEnabled: true,
+      outputs: [],
     };
   }
   private async mic() {
     this.local = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
       video: false,
     });
   }
@@ -170,9 +212,12 @@ export class CallManager {
       bundlePolicy: "max-bundle",
       iceTransportPolicy: relayOnly ? "relay" : "all",
     });
-    if (relayOnly && this.info) this.info.note = "Relay-only mode: all audio goes through the TURN relay.";
+    if (relayOnly && this.info)
+      this.info.note =
+        "Relay-only mode: all audio goes through the TURN relay.";
     this.pc = pc;
-    for (const track of this.local!.getAudioTracks()) pc.addTrack(track, this.local!);
+    for (const track of this.local!.getAudioTracks())
+      pc.addTrack(track, this.local!);
     const audio = (this.audio = document.createElement("audio"));
     audio.autoplay = true;
     audio.setAttribute("playsinline", "");
@@ -182,20 +227,24 @@ export class CallManager {
     pc.ontrack = (e) => {
       audio.srcObject = e.streams[0] ?? new MediaStream([e.track]);
       void audio.play().catch(() => {
-        if (this.info) this.info.note = "Tap the call screen to start audio (browser autoplay rules).";
+        if (this.info)
+          this.info.note =
+            "Tap the call screen to start audio (browser autoplay rules).";
         this.ui();
       });
     };
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
       if (!this.info) return;
-      if (st === "connected" && this.info.state !== "active") this.onConnected();
+      if (st === "connected" && this.info.state !== "active")
+        this.onConnected();
       else if (st === "failed") void this.finish("failed", "connection_failed");
       else if (st === "disconnected") {
         this.info.note = "Connection interrupted… trying to recover.";
         this.ui();
         setTimeout(() => {
-          if (this.pc === pc && pc.connectionState === "disconnected") void this.finish("failed", "connection_lost");
+          if (this.pc === pc && pc.connectionState === "disconnected")
+            void this.finish("failed", "connection_lost");
         }, 10000);
       }
     };
@@ -206,7 +255,9 @@ export class CallManager {
       if (!("setSinkId" in HTMLMediaElement.prototype)) return;
       const devices = await navigator.mediaDevices.enumerateDevices();
       if (this.info)
-        this.info.outputs = devices.filter((d) => d.kind === "audiooutput").map((d) => ({ id: d.deviceId, label: d.label || "Speaker" }));
+        this.info.outputs = devices
+          .filter((d) => d.kind === "audiooutput")
+          .map((d) => ({ id: d.deviceId, label: d.label || "Speaker" }));
       this.ui();
     } catch {
       /* output selection is optional */
@@ -222,17 +273,27 @@ export class CallManager {
   }
   private armRing(outcome: Outcome) {
     this.ringTimer = setTimeout(() => {
-      if (!this.info || !["calling", "ringing"].includes(this.info.state)) return;
-      if (this.info.role === "caller") this.signal({ call: this.info.id, type: "cancel", reason: "timeout" });
+      if (!this.info || !["calling", "ringing"].includes(this.info.state))
+        return;
+      if (this.info.role === "caller")
+        this.signal({ call: this.info.id, type: "cancel", reason: "timeout" });
       void this.finish(outcome, "ring_timeout", false);
     }, RING_SECONDS * 1000);
   }
 
   /** Caller: must be invoked from a user gesture (permission prompt + autoplay rules). */
   async start() {
-    if (!this.canCall) throw Error(this.info ? "You are already in a call." : "Wait for a secure session with an online peer.");
+    if (!this.canCall)
+      throw Error(
+        this.info
+          ? "You are already in a call."
+          : "Wait for a secure session with an online peer.",
+      );
     const id = hex(16);
-    this.info = this.newInfo(id, "caller", { iceServers: [], turn: "unavailable" });
+    this.info = this.newInfo(id, "caller", {
+      iceServers: [],
+      turn: "unavailable",
+    });
     this.ended = false;
     this.ui();
     try {
@@ -240,22 +301,33 @@ export class CallManager {
     } catch (e) {
       this.info = undefined;
       this.ui();
-      throw Error(micMessage(e));
+      throw Error(micMessage(e), { cause: e });
     }
     try {
       const cfg = await this.ice();
       this.info.turn = cfg.turn;
       this.connect(cfg);
       const pc = this.pc!;
-      await pc.setLocalDescription(await pc.createOffer({ offerToReceiveAudio: true }));
+      await pc.setLocalDescription(
+        await pc.createOffer({ offerToReceiveAudio: true }),
+      );
       await gathered(pc);
       const sdp = pc.localDescription!.sdp;
       const err = validateSdp(sdp);
       if (err) throw Error("Could not build a valid call offer: " + err);
       this.info.localFp = signedFingerprint(sdp)!;
-      this.s.note("call_candidates", { call: id, gathered: candidateSummary(sdp), ice_servers: cfg.iceServers.length, turn: cfg.turn });
+      this.s.note("call_candidates", {
+        call: id,
+        gathered: candidateSummary(sdp),
+        ice_servers: cfg.iceServers.length,
+        turn: cfg.turn,
+      });
       this.signal({ call: id, type: "invite", sdp });
-      this.s.note("call_fingerprints", { call: id, local_dtls_sha256: this.info.localFp, note: "Sent inside the signed, encrypted invite" });
+      this.s.note("call_fingerprints", {
+        call: id,
+        local_dtls_sha256: this.info.localFp,
+        note: "Sent inside the signed, encrypted invite",
+      });
       this.armRing("no_answer");
       this.ui();
     } catch (e) {
@@ -271,7 +343,10 @@ export class CallManager {
       if (sig.type === "invite") {
         if (cur || !this.s.key) {
           this.signal({ call: sig.call, type: "busy" });
-          this.s.note("call_busy", { call: sig.call, note: "Rejected an incoming call: already in a call" });
+          this.s.note("call_busy", {
+            call: sig.call,
+            note: "Rejected an incoming call: already in a call",
+          });
           return;
         }
         const cfg: IceConfig = { iceServers: [], turn: "not_configured" };
@@ -279,27 +354,56 @@ export class CallManager {
         this.ended = false;
         this.offer = sig.sdp;
         this.info.remoteFp = signedFingerprint(sig.sdp!)!;
-        this.s.note("call_fingerprints", { call: sig.call, remote_dtls_sha256: this.info.remoteFp, note: "From the signed invite" });
+        this.s.note("call_fingerprints", {
+          call: sig.call,
+          remote_dtls_sha256: this.info.remoteFp,
+          note: "From the signed invite",
+        });
         this.startRinging();
         this.armRing("missed");
         this.ui();
         return;
       }
       if (!cur || cur.id !== sig.call) return; // stale / unrelated call id: ignore
-      if (sig.type === "accept" && cur.role === "caller" && cur.state === "calling") {
+      if (
+        sig.type === "accept" &&
+        cur.role === "caller" &&
+        cur.state === "calling"
+      ) {
         cur.remoteFp = signedFingerprint(sig.sdp!)!;
-        this.s.note("call_fingerprints", { call: cur.id, remote_dtls_sha256: cur.remoteFp, note: "From the signed answer" });
+        this.s.note("call_fingerprints", {
+          call: cur.id,
+          remote_dtls_sha256: cur.remoteFp,
+          note: "From the signed answer",
+        });
         cur.state = "connecting";
         clearTimeout(this.ringTimer);
         await this.pc!.setRemoteDescription({ type: "answer", sdp: sig.sdp! });
         cur.words = await sas(cur.localFp, cur.remoteFp, cur.id);
         this.ui();
-      } else if (sig.type === "decline" && cur.role === "caller") await this.finish("declined", "peer_declined", false);
-      else if (sig.type === "busy" && cur.role === "caller") await this.finish("busy", "peer_busy", false);
-      else if (sig.type === "cancel" && cur.role === "callee" && cur.state === "ringing") await this.finish("missed", "caller_canceled", false);
-      else if (sig.type === "hangup") await this.finish(cur.state === "active" ? "completed" : "failed", sig.reason || "peer_hangup", false);
+      } else if (sig.type === "decline" && cur.role === "caller")
+        await this.finish("declined", "peer_declined", false);
+      else if (sig.type === "busy" && cur.role === "caller")
+        await this.finish("busy", "peer_busy", false);
+      else if (
+        sig.type === "cancel" &&
+        cur.role === "callee" &&
+        cur.state === "ringing"
+      )
+        await this.finish("missed", "caller_canceled", false);
+      else if (sig.type === "hangup")
+        await this.finish(
+          cur.state === "active" ? "completed" : "failed",
+          sig.reason || "peer_hangup",
+          false,
+        );
     } catch (e) {
-      await this.finish("failed", "signaling_error", true, (e as Error).message);
+      await this.finish(
+        "failed",
+        "signaling_error",
+        true,
+        (e as Error).message,
+      );
     }
   }
 
@@ -333,11 +437,20 @@ export class CallManager {
       if (err) throw Error(err);
       cur.localFp = signedFingerprint(sdp)!;
       cur.words = await sas(cur.localFp, cur.remoteFp, cur.id);
-      this.s.note("call_candidates", { call: cur.id, gathered: candidateSummary(sdp), ice_servers: cfg.iceServers.length, turn: cfg.turn });
+      this.s.note("call_candidates", {
+        call: cur.id,
+        gathered: candidateSummary(sdp),
+        ice_servers: cfg.iceServers.length,
+        turn: cfg.turn,
+      });
       this.signal({ call: cur.id, type: "accept", sdp });
-      this.s.note("call_fingerprints", { call: cur.id, local_dtls_sha256: cur.localFp, note: "Sent inside the signed, encrypted answer" });
+      this.s.note("call_fingerprints", {
+        call: cur.id,
+        local_dtls_sha256: cur.localFp,
+        note: "Sent inside the signed, encrypted answer",
+      });
       this.ui();
-    } catch (e) {
+    } catch (_e) {
       await this.finish("failed", "setup_failed", true);
     }
   }
@@ -351,9 +464,18 @@ export class CallManager {
   hangup() {
     const cur = this.info;
     if (!cur) return;
-    if (cur.state === "calling") this.signal({ call: cur.id, type: "cancel", reason: "user" });
+    if (cur.state === "calling")
+      this.signal({ call: cur.id, type: "cancel", reason: "user" });
     else this.signal({ call: cur.id, type: "hangup", reason: "user" });
-    void this.finish(cur.state === "active" ? "completed" : cur.role === "caller" && cur.state === "calling" ? "canceled" : "failed", "user", false);
+    void this.finish(
+      cur.state === "active"
+        ? "completed"
+        : cur.role === "caller" && cur.state === "calling"
+          ? "canceled"
+          : "failed",
+      "user",
+      false,
+    );
   }
   toggleMute() {
     if (!this.info || !this.local) return;
@@ -409,31 +531,52 @@ export class CallManager {
         jitter = r.jitter ?? 0;
         cur.inboundBytes = r.bytesReceived ?? 0;
       }
-      if (r.type === "candidate-pair" && r.state === "succeeded" && r.nominated) rtt = r.currentRoundTripTime ?? rtt;
+      if (r.type === "candidate-pair" && r.state === "succeeded" && r.nominated)
+        rtt = r.currentRoundTripTime ?? rtt;
     });
     const dRecv = recv - this.lastRecv,
       dLost = lost - this.lastLost;
     this.lastRecv = recv;
     this.lastLost = lost;
     const loss = dRecv + dLost > 0 ? dLost / (dRecv + dLost) : 0;
-    cur.quality = recv === 0 ? "unknown" : loss > 0.1 || jitter > 0.08 || rtt > 0.6 ? "poor" : loss > 0.03 || jitter > 0.03 || rtt > 0.3 ? "fair" : "good";
+    cur.quality =
+      recv === 0
+        ? "unknown"
+        : loss > 0.1 || jitter > 0.08 || rtt > 0.6
+          ? "poor"
+          : loss > 0.03 || jitter > 0.03 || rtt > 0.3
+            ? "fair"
+            : "good";
     if (cur.fpStatus === "pending") {
       const observed = remoteCertificateFingerprint(report);
       if (observed) {
         cur.observedFp = observed;
-        this.s.note("call_fingerprints", { call: cur.id, observed_remote_dtls_sha256: observed, signed_remote_dtls_sha256: cur.remoteFp });
+        this.s.note("call_fingerprints", {
+          call: cur.id,
+          observed_remote_dtls_sha256: observed,
+          signed_remote_dtls_sha256: cur.remoteFp,
+        });
         if (fingerprintMatches(cur.remoteFp, observed)) cur.fpStatus = "match";
         else {
           cur.fpStatus = "mismatch";
-          cur.alert = "SECURITY ALERT: the DTLS certificate of this call does not match the fingerprint your contact signed. The call was ended.";
-          this.s.securityAlert("call_fingerprint_mismatch", "fingerprint_mismatch");
-          this.signal({ call: cur.id, type: "hangup", reason: "fingerprint_mismatch" });
+          cur.alert =
+            "SECURITY ALERT: the DTLS certificate of this call does not match the fingerprint your contact signed. The call was ended.";
+          this.s.securityAlert(
+            "call_fingerprint_mismatch",
+            "fingerprint_mismatch",
+          );
+          this.signal({
+            call: cur.id,
+            type: "hangup",
+            reason: "fingerprint_mismatch",
+          });
           await this.finish("security_alert", "fingerprint_mismatch", false);
           return;
         }
       } else if (++this.statsMisses >= 6) {
         cur.fpStatus = "unavailable";
-        cur.note = "This browser could not report the DTLS certificate, so only the signed fingerprint and the words below protect this call.";
+        cur.note =
+          "This browser could not report the DTLS certificate, so only the signed fingerprint and the words below protect this call.";
       }
     }
     this.ui();
@@ -455,7 +598,9 @@ export class CallManager {
       void ctx.resume().catch(() => {});
       beep();
       const timer = setInterval(beep, 2000);
-      this.ring = { stop: () => (clearInterval(timer), void ctx.close().catch(() => {})) };
+      this.ring = {
+        stop: () => (clearInterval(timer), void ctx.close().catch(() => {})),
+      };
     } catch {
       /* Autoplay may block the ringtone; the on-screen prompt remains. */
     }
@@ -466,7 +611,12 @@ export class CallManager {
   }
 
   /** End the call locally and (optionally) record it as a signed chat event. */
-  private async finish(outcome: Outcome, reason: string, sendHangup = false, detail = "") {
+  private async finish(
+    outcome: Outcome,
+    reason: string,
+    sendHangup = false,
+    detail = "",
+  ) {
     const cur = this.info;
     if (!cur || this.ended) return;
     this.ended = true;
@@ -476,8 +626,19 @@ export class CallManager {
       duration = started ? now - started : 0;
     this.releaseMedia();
     const record: Omit<Signal, "v"> = {
-      call: cur.id, type: "record", role: cur.role, outcome, started, ended: started ? now : 0, duration,
-      fp_match: cur.fpStatus === "match" ? "yes" : cur.fpStatus === "mismatch" ? "no" : "n/a",
+      call: cur.id,
+      type: "record",
+      role: cur.role,
+      outcome,
+      started,
+      ended: started ? now : 0,
+      duration,
+      fp_match:
+        cur.fpStatus === "match"
+          ? "yes"
+          : cur.fpStatus === "mismatch"
+            ? "no"
+            : "n/a",
       sas_confirmed: cur.sasConfirmed && cur.fpStatus === "match",
       conn: started && cur.conn !== "unknown" ? cur.conn : "none",
     };

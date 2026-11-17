@@ -1,9 +1,24 @@
 import * as c from "./crypto";
-import { sniff, stripMetadata, sanitizeFilename, type Kind } from "./attachments/media";
-import { encryptFile, decryptFile, AttachmentError, type FileSecrets } from "./attachments/fileCrypto";
+import {
+  sniff,
+  stripMetadata,
+  sanitizeFilename,
+  type Kind,
+} from "./attachments/media";
+import {
+  encryptFile,
+  decryptFile,
+  AttachmentError,
+  type FileSecrets,
+} from "./attachments/fileCrypto";
 import { encodeDescriptor, type Descriptor } from "./attachments/descriptor";
 import { makeThumbnail } from "./attachments/thumbnail";
-import { api, putObject, getObject, type Presigned } from "./attachments/transfer";
+import {
+  api,
+  putObject,
+  getObject,
+  type Presigned,
+} from "./attachments/transfer";
 import { CallManager, type CallHost } from "./calls/manager";
 import { parseSignal } from "./calls/signal";
 export type Envelope = Record<string, any>;
@@ -24,7 +39,14 @@ export interface OpenedAttachment {
   name: string;
   size: number;
 }
-export type Stage = "Preparing" | "Encrypting" | "Uploading" | "Sending" | "Downloading" | "Decrypting" | "Verifying";
+export type Stage =
+  | "Preparing"
+  | "Encrypting"
+  | "Uploading"
+  | "Sending"
+  | "Downloading"
+  | "Decrypting"
+  | "Verifying";
 export interface Progress {
   stage: Stage;
   fraction: number;
@@ -83,13 +105,24 @@ export class Session {
     this.socket = this.openSocket();
   }
   private callHost(): CallHost {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- Live getters follow key/token rotation.
     const s = this;
     return {
-      get username() { return s.username; },
-      get peer() { return s.peer; },
-      get apiToken() { return s.apiToken; },
-      get key() { return s.key; },
-      get peerOnline() { return s.peerOnline; },
+      get username() {
+        return s.username;
+      },
+      get peer() {
+        return s.peer;
+      },
+      get apiToken() {
+        return s.apiToken;
+      },
+      get key() {
+        return s.key;
+      },
+      get peerOnline() {
+        return s.peerOnline;
+      },
       send: (text) => s.sendMessage(text),
       changed: () => s.changed(),
       note: (type, fields) => s.wireNote("out", type, fields),
@@ -110,8 +143,13 @@ export class Session {
         window.addEventListener(ev, mark, { passive: true });
     this.lastActive = Date.now();
     this.pingTimer = setInterval(() => {
-      const active = Date.now() - this.lastActive < 30 * 60 * 1000 || this.calls.busy;
-      if (this.socket.readyState === WebSocket.OPEN && this.isAuthenticated && active)
+      const active =
+        Date.now() - this.lastActive < 30 * 60 * 1000 || this.calls.busy;
+      if (
+        this.socket.readyState === WebSocket.OPEN &&
+        this.isAuthenticated &&
+        active
+      )
         this.socket.send(JSON.stringify({ type: "ping" }));
     }, every);
   }
@@ -251,7 +289,11 @@ export class Session {
   }
   async receive(e: Envelope) {
     if (e.type === "pong") return; // keepalive replies stay out of the Wire Log
-    if (e.type === "session_policy" && Number.isFinite(e.idle_seconds) && e.idle_seconds > 0) {
+    if (
+      e.type === "session_policy" &&
+      Number.isFinite(e.idle_seconds) &&
+      e.idle_seconds > 0
+    ) {
       this.startKeepalive(e.idle_seconds);
       return;
     }
@@ -616,34 +658,57 @@ export class Session {
       signal?: AbortSignal;
     },
   ) {
-    const say = (stage: Stage, fraction = 0) => opts.onProgress?.({ stage, fraction });
-    if (!this.key || !this.apiToken) throw Error("Wait for a verified handshake");
+    const say = (stage: Stage, fraction = 0) =>
+      opts.onProgress?.({ stage, fraction });
+    if (!this.key || !this.apiToken)
+      throw Error("Wait for a verified handshake");
     const epoch = this.epoch;
     say("Preparing");
-    this.limits ??= await api<AttachmentLimits>(this.apiToken, "GET", "/api/attachments/config");
+    this.limits ??= await api<AttachmentLimits>(
+      this.apiToken,
+      "GET",
+      "/api/attachments/config",
+    );
     // Reject before reading whole oversized files into memory.
     if (file.size === 0) throw Error("That file is empty");
-    if (file.size > this.limits.video_max) throw Error(`File exceeds the ${this.limits.video_max / 2 ** 20} MiB limit`);
+    if (file.size > this.limits.video_max)
+      throw Error(
+        `File exceeds the ${this.limits.video_max / 2 ** 20} MiB limit`,
+      );
     let bytes = new Uint8Array(await file.arrayBuffer());
     const type = sniff(bytes);
-    if (!type) throw Error("Unsupported file type. Allowed: JPEG, PNG, WebP, GIF, MP4, WebM");
-    const max = type.kind === "image" ? this.limits.image_max : this.limits.video_max;
-    if (bytes.length > max) throw Error(`${type.kind === "image" ? "Images" : "Videos"} are limited to ${max / 2 ** 20} MiB`);
+    if (!type)
+      throw Error(
+        "Unsupported file type. Allowed: JPEG, PNG, WebP, GIF, MP4, WebM",
+      );
+    const max =
+      type.kind === "image" ? this.limits.image_max : this.limits.video_max;
+    if (bytes.length > max)
+      throw Error(
+        `${type.kind === "image" ? "Images" : "Videos"} are limited to ${max / 2 ** 20} MiB`,
+      );
     const stripped = opts.stripMetadata && type.kind === "image";
-    if (stripped) bytes = stripMetadata(bytes, type.mime) as Uint8Array<ArrayBuffer>;
+    if (stripped)
+      bytes = stripMetadata(bytes, type.mime) as Uint8Array<ArrayBuffer>;
     const thumb = await makeThumbnail(bytes, type.mime, type.kind);
     const { ciphertext, secrets } = await encryptFile(bytes, {
       signal: opts.signal,
       onProgress: (d, t) => say("Encrypting", d / t),
     });
-    if (epoch !== this.epoch) throw Error("Connection changed; attachment was not sent");
-    const init = await api<{ upload: Presigned }>(this.apiToken, "POST", "/api/attachments", {
-      id: secrets.id,
-      recipient: this.peer,
-      kind: type.kind,
-      ciphertext_size: secrets.ct_size,
-      ciphertext_sha256: secrets.ct_sha256,
-    });
+    if (epoch !== this.epoch)
+      throw Error("Connection changed; attachment was not sent");
+    const init = await api<{ upload: Presigned }>(
+      this.apiToken,
+      "POST",
+      "/api/attachments",
+      {
+        id: secrets.id,
+        recipient: this.peer,
+        kind: type.kind,
+        ciphertext_size: secrets.ct_size,
+        ciphertext_sha256: secrets.ct_sha256,
+      },
+    );
     this.wireNote("out", "attachment_upload", {
       note: "Only ciphertext was uploaded (HTTPS PUT straight to object storage)",
       ciphertext_sha256: secrets.ct_sha256,
@@ -651,12 +716,23 @@ export class Session {
       storage_host: new URL(init.upload.url, location.href).host,
     });
     try {
-      await putObject(init.upload, ciphertext, (l, t) => say("Uploading", t ? l / t : l / secrets.ct_size), opts.signal);
+      await putObject(
+        init.upload,
+        ciphertext,
+        (l, t) => say("Uploading", t ? l / t : l / secrets.ct_size),
+        opts.signal,
+      );
       say("Uploading", 1);
-      await api(this.apiToken, "POST", `/api/attachments/${secrets.id}/finalize`);
+      await api(
+        this.apiToken,
+        "POST",
+        `/api/attachments/${secrets.id}/finalize`,
+      );
     } catch (e) {
       // Best effort: free the quota of a cancelled or failed upload.
-      api(this.apiToken, "DELETE", `/api/attachments/${secrets.id}`).catch(() => {});
+      api(this.apiToken, "DELETE", `/api/attachments/${secrets.id}`).catch(
+        () => {},
+      );
       throw e;
     }
     say("Sending");
@@ -671,7 +747,9 @@ export class Session {
     };
     await this.sendMessage(encodeDescriptor(descriptor));
     this.opened.set(descriptor.id, {
-      url: URL.createObjectURL(new Blob([bytes as BlobPart], { type: type.mime })),
+      url: URL.createObjectURL(
+        new Blob([bytes as BlobPart], { type: type.mime }),
+      ),
       mime: type.mime,
       name: descriptor.name,
       size: bytes.length,
@@ -687,35 +765,66 @@ export class Session {
     const have = this.opened.get(d.id);
     if (have) return have;
     if (!this.apiToken) throw Error("Log in to download attachments");
-    const say = (stage: Stage, fraction = 0) => onProgress?.({ stage, fraction });
+    const say = (stage: Stage, fraction = 0) =>
+      onProgress?.({ stage, fraction });
     say("Downloading");
-    const info = await api<{ url: string; ciphertext_sha256: string; ciphertext_size: number }>(
-      this.apiToken, "GET", `/api/attachments/${d.id}/download`,
-    );
+    const info = await api<{
+      url: string;
+      ciphertext_sha256: string;
+      ciphertext_size: number;
+    }>(this.apiToken, "GET", `/api/attachments/${d.id}/download`);
     this.wireNote("in", "attachment_download", {
       note: "Downloaded ciphertext only; decrypted locally with the key from the signed message",
       ciphertext_sha256: info.ciphertext_sha256,
       ciphertext_size: info.ciphertext_size,
     });
-    const ciphertext = await getObject(info.url, (l, t) => say("Downloading", t ? l / t : l / d.ct_size), signal);
+    const ciphertext = await getObject(
+      info.url,
+      (l, t) => say("Downloading", t ? l / t : l / d.ct_size),
+      signal,
+    );
     say("Verifying");
-    const secrets: FileSecrets = { id: d.id, key: d.key, chunk: d.chunk, size: d.size, ct_size: d.ct_size, ct_sha256: d.ct_sha256, pt_sha256: d.pt_sha256 };
+    const secrets: FileSecrets = {
+      id: d.id,
+      key: d.key,
+      chunk: d.chunk,
+      size: d.size,
+      ct_size: d.ct_size,
+      ct_sha256: d.ct_sha256,
+      pt_sha256: d.pt_sha256,
+    };
     let plain: Uint8Array;
     try {
-      plain = await decryptFile(ciphertext, secrets, { signal, onProgress: (n, t) => say("Decrypting", n / t) });
+      plain = await decryptFile(ciphertext, secrets, {
+        signal,
+        onProgress: (n, t) => say("Decrypting", n / t),
+      });
     } catch (e) {
       if (e instanceof AttachmentError) {
-        this.wireNote("in", "attachment_rejected", { reason: e.code, note: e.message });
-        this.send({ type: "security_alert", alert: "attachment_rejected", reason: e.code, peer: this.peer });
+        this.wireNote("in", "attachment_rejected", {
+          reason: e.code,
+          note: e.message,
+        });
+        this.send({
+          type: "security_alert",
+          alert: "attachment_rejected",
+          reason: e.code,
+          peer: this.peer,
+        });
       }
       throw e;
     }
     // Never trust the sender's declared type: re-check the decrypted bytes.
     const type = sniff(plain);
     if (!type || type.mime !== d.mime)
-      throw new AttachmentError("type", "Attachment rejected: content does not match its declared type");
+      throw new AttachmentError(
+        "type",
+        "Attachment rejected: content does not match its declared type",
+      );
     const opened = {
-      url: URL.createObjectURL(new Blob([plain as BlobPart], { type: type.mime })),
+      url: URL.createObjectURL(
+        new Blob([plain as BlobPart], { type: type.mime }),
+      ),
       mime: type.mime,
       name: sanitizeFilename(d.name, type.ext),
       size: plain.length,

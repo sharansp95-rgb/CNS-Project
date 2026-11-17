@@ -17,8 +17,8 @@ from crypto_engine import (  # noqa: E402
     generate_key,
 )
 
-
 # --- key generation -------------------------------------------------------
+
 
 def test_generate_key_is_32_bytes():
     key = generate_key()
@@ -31,6 +31,7 @@ def test_generate_key_is_not_deterministic():
 
 
 # --- round trip -----------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "plaintext",
@@ -62,6 +63,7 @@ def test_ciphertext_is_not_plaintext():
 
 
 # --- tampering ------------------------------------------------------------
+
 
 def test_tampered_ciphertext_is_rejected():
     key = generate_key()
@@ -98,6 +100,7 @@ def test_tampered_nonce_is_rejected():
 
 # --- wrong key ------------------------------------------------------------
 
+
 def test_wrong_key_is_rejected():
     key = generate_key()
     other_key = generate_key()
@@ -124,6 +127,7 @@ def test_wrong_key_never_returns_plaintext():
 
 # --- nonce hygiene --------------------------------------------------------
 
+
 def test_nonces_differ_across_calls_with_same_key_and_plaintext():
     key = generate_key()
     plaintext = b"identical message"
@@ -143,6 +147,7 @@ def test_nonces_are_unique_over_many_calls():
 
 
 # --- input validation -----------------------------------------------------
+
 
 def test_short_key_rejected():
     with pytest.raises(ValueError):

@@ -6,22 +6,15 @@ the server (see tests/test_attack_lab.py) and caught by the receiving client's r
 the card only displays a `security_alert` record that client sent. Skipped where Tk has no
 display."""
 
-import json
-import threading
-import time
-import tkinter as tk
-
 import pytest
 
 import gui.chat_gui as chat_gui
 from attack_lab.presentation import (
-    HANDSHAKE_SIGNATURE,
     LAB_ATTACKS,
     REJECTIONS,
     find_lab_detection,
     lab_status,
 )
-from gui.theme import is_no_display_error
 
 # ---- pure logic -----------------------------------------------------------------------
 
@@ -90,11 +83,7 @@ def test_status_wording_for_every_state():
         "Caught by AES-256-GCM authentication tag (reported by bob)",
     )
     kind, text = lab_status("silent", "tamper_next", "bob")
-    assert (
-        kind == "warn"
-        and "No report from bob yet" in text
-        and "Watch bob's window" in text
-    )
+    assert kind == "warn" and "No report from bob yet" in text and "Watch bob's window" in text
     assert lab_status("rejected", "tamper_next", "bob", "lab mode is off") == (
         "bad",
         "Rejected: lab mode is off",
@@ -103,9 +92,10 @@ def test_status_wording_for_every_state():
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from attack_lab.app import create_app, ACCOUNTS
+
+from attack_lab.app import ACCOUNTS, create_app
 from attack_lab.relay import lab_database
-from server.db import users, get_database
+from server.db import get_database, users
 from web.app import create_app as product_app
 
 ORIGIN = "http://localhost:8090"
@@ -138,17 +128,14 @@ def test_site_has_persistent_banner_and_separate_control_entry(site):
 
 
 def test_victim_html_and_bundle_are_identical_to_product(site):
-    from web.app import STATIC
     import re
+
+    from web.app import STATIC
 
     client, _ = site
     assert client.get("/victim").content == (STATIC / "index.html").read_bytes()
-    script = re.search(r'src="(/assets/[^"]+\.js)"', client.get("/victim").text).group(
-        1
-    )
-    assert (
-        client.get(script).content == (STATIC / script.removeprefix("/")).read_bytes()
-    )
+    script = re.search(r'src="(/assets/[^"]+\.js)"', client.get("/victim").text).group(1)
+    assert client.get(script).content == (STATIC / script.removeprefix("/")).read_bytes()
 
 
 def test_controls_need_session_and_separate_origin(site):

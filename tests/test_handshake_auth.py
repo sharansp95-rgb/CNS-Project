@@ -37,8 +37,9 @@ class FakeSocket:
         return json.loads(self.sent[-1].decode("utf-8"))
 
 
-def make_client(username, peer, rsa_private_key=None, peer_public_key=None,
-                 peer_public_key_pem=None):
+def make_client(
+    username, peer, rsa_private_key=None, peer_public_key=None, peer_public_key_pem=None
+):
     client = SecureChatClient(FakeSocket(), username, peer)
     client.rsa_private_key = rsa_private_key
     client.peer_public_key = peer_public_key
@@ -56,12 +57,17 @@ def identities():
     pem_a = serialize_public_key(pub_a).decode("ascii")
     pem_b = serialize_public_key(pub_b).decode("ascii")
     return {
-        "priv_a": priv_a, "pub_a": pub_a, "pem_a": pem_a,
-        "priv_b": priv_b, "pub_b": pub_b, "pem_b": pem_b,
+        "priv_a": priv_a,
+        "pub_a": pub_a,
+        "pem_a": pem_a,
+        "priv_b": priv_b,
+        "pub_b": pub_b,
+        "pem_b": pem_b,
     }
 
 
 # --- 1. a correctly signed handshake completes normally -------------------
+
 
 def test_correctly_signed_handshake_completes(identities):
     a = make_client("alice", "bob", identities["priv_a"], identities["pub_b"], identities["pem_b"])
@@ -85,6 +91,7 @@ def test_correctly_signed_handshake_completes(identities):
 
 
 # --- 2. the ECDH public key is swapped/tampered after signing -------------
+
 
 def test_tampered_ecdh_pubkey_after_signing_is_rejected(identities):
     a = make_client("alice", "bob", identities["priv_a"], identities["pub_b"], identities["pem_b"])
@@ -127,6 +134,7 @@ def test_tampered_handshake_response_is_rejected(identities):
 
 # --- 3. a handshake signed with the wrong RSA private key is rejected -----
 
+
 def test_handshake_signed_with_wrong_key_is_rejected(identities):
     """Simulates impersonation: 'mallory' signs a handshake_init claiming to
     be from 'alice', using mallory's own RSA key instead of alice's."""
@@ -134,7 +142,10 @@ def test_handshake_signed_with_wrong_key_is_rejected(identities):
 
     # Attacker-controlled client, but claiming the "alice" identity.
     mallory_as_alice = make_client(
-        "alice", "bob", rsa_private_key=priv_mallory, peer_public_key=identities["pub_b"],
+        "alice",
+        "bob",
+        rsa_private_key=priv_mallory,
+        peer_public_key=identities["pub_b"],
     )
     mallory_as_alice.initiate_handshake()
     forged_handshake_init = mallory_as_alice.sock.last_envelope()
@@ -175,6 +186,7 @@ def test_handshake_aborted_when_peer_public_key_unknown(identities):
 
 # --- 4. fingerprints match for the same key, differ for different keys ----
 
+
 def test_fingerprint_matches_for_same_public_key(identities):
     fp1 = fingerprint(identities["pem_a"])
     fp2 = fingerprint(identities["pem_a"])
@@ -191,7 +203,5 @@ def test_both_sides_compute_the_same_fingerprint_for_each_other(identities):
     """What two humans would read aloud to compare: A's view of B's
     fingerprint must equal what B would compute for their own key."""
     fp_seen_by_a = fingerprint(identities["pem_b"])
-    fp_computed_by_b_for_self = fingerprint(
-        serialize_public_key(identities["priv_b"].public_key())
-    )
+    fp_computed_by_b_for_self = fingerprint(serialize_public_key(identities["priv_b"].public_key()))
     assert fp_seen_by_a == fp_computed_by_b_for_self

@@ -58,3 +58,7 @@ web/frontend/playwright-report/
 # Separate sandbox browser test artifacts.
 attack_lab/test-results/
 attack_lab/playwright-report/
+
+# Development lint caches and nested parser tooling.
+.ruff_cache/
+web/frontend/lint/node_modules/

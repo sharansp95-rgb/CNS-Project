@@ -31,8 +31,13 @@ def app(monkeypatch):
     window.destroy()
 
 
-AUTH = {"username": "alice", "peer": "bob", "lab_mode": False,
-        "own_fingerprint": "AAAA BBBB CCCC DDDD", "peer_key_found": True}
+AUTH = {
+    "username": "alice",
+    "peer": "bob",
+    "lab_mode": False,
+    "own_fingerprint": "AAAA BBBB CCCC DDDD",
+    "peer_key_found": True,
+}
 
 
 def test_validation_messages_for_every_field():
@@ -40,7 +45,9 @@ def test_validation_messages_for_every_field():
     errors = validate_login_form("h", "abc", "", "", "")
     assert set(errors) == {"port", "username", "peer", "password"}
     assert "number" in errors["port"]
-    assert validate_login_form("h", "5000", "alice", "alice", "pw") == {"peer": "The peer must be someone else."}
+    assert validate_login_form("h", "5000", "alice", "alice", "pw") == {
+        "peer": "The peer must be someone else."
+    }
     assert "port" in validate_login_form("h", "70000", "alice", "bob", "pw")
     assert "port" in validate_login_form("h", "0", "alice", "bob", "pw")
     assert validate_login_form("h", "", "alice", "bob", "pw") == {}  # empty port = default
@@ -55,13 +62,16 @@ def test_invalid_form_shows_inline_errors_and_never_connects(app):
         assert app._field_errors[key].cget("text")
     assert app.client is None and str(app.login_button.cget("state")) != "disabled"
     # fixing a field and retrying clears its error
-    app.username_var.set("alice"); app.peer_var.set("bob"); app.password_var.set("x")
+    app.username_var.set("alice")
+    app.peer_var.set("bob")
+    app.password_var.set("x")
     app.port_var.set("nope")
     app._start_auth("login")
     app.update()
     assert not app._fields["username"].error
-    assert app._fields["port"].error and app.server_box.winfo_ismapped(), \
+    assert app._fields["port"].error and app.server_box.winfo_ismapped(), (
         "an invalid port must open the server settings so the error is visible"
+    )
 
 
 def test_enter_submits_when_all_fields_are_filled_otherwise_moves_on(app):
@@ -69,11 +79,17 @@ def test_enter_submits_when_all_fields_are_filled_otherwise_moves_on(app):
     app._start_auth = lambda mode: calls.append(mode)
     entries = [app._fields[k].entry for k in ("username", "peer", "password")]
     app.username_var.set("alice")
-    entries[0].focus_force(); app.update()
-    entries[0].event_generate("<Return>"); app.update()
-    assert calls == [] and app.focus_get() is entries[1], "Enter should move to the next empty field"
-    app.peer_var.set("bob"); app.password_var.set("pw")
-    entries[1].event_generate("<Return>"); app.update()
+    entries[0].focus_force()
+    app.update()
+    entries[0].event_generate("<Return>")
+    app.update()
+    assert calls == [] and app.focus_get() is entries[1], (
+        "Enter should move to the next empty field"
+    )
+    app.peer_var.set("bob")
+    app.password_var.set("pw")
+    entries[1].event_generate("<Return>")
+    app.update()
     assert calls == ["login"], "Enter with every field filled must submit"
 
 
@@ -87,13 +103,20 @@ def test_show_hide_password_toggle(app):
 
 
 def test_progress_list_has_the_five_real_steps_and_fits_a_short_window(app):
-    app.username_var.set("alice"); app.peer_var.set("bob"); app.password_var.set("pw")
-    app.port_var.set("1")   # nothing listens there: the worker will fail, which is fine
+    app.username_var.set("alice")
+    app.peer_var.set("bob")
+    app.password_var.set("pw")
+    app.port_var.set("1")  # nothing listens there: the worker will fail, which is fine
     app._start_auth("login")
     app.update()
     texts = [row[2].cget("text") for row in app.steps._rows]
-    assert texts == ["Connecting over TLS 1.3", "Verifying the server certificate", "Logging in",
-                     "Exchanging keys with bob", "Verifying the handshake signature"]
+    assert texts == [
+        "Connecting over TLS 1.3",
+        "Verifying the server certificate",
+        "Logging in",
+        "Exchanging keys with bob",
+        "Verifying the handshake signature",
+    ]
     assert not app._fields["username"].winfo_ismapped(), "the form is hidden while connecting"
     card = app.login_frame.winfo_children()[0]
     assert card.winfo_reqheight() <= 540, "card with the progress list must fit a 540px window"
@@ -128,7 +151,7 @@ def test_peer_offline_shows_waiting_then_chat_opens(app):
 
 def test_events_before_the_chat_screen_are_buffered_and_replayed_in_order(app):
     app.steps.set_steps(["a", "b", "c", "d", "e"])
-    app._handle_event("handshake_established", {"peer": "bob"})   # arrives early
+    app._handle_event("handshake_established", {"peer": "bob"})  # arrives early
     assert not app._chat_ready and len(app._held_events) == 1
     app._handle_event("auth_success", dict(AUTH))
     app._handoff_to_chat()
@@ -144,7 +167,9 @@ def test_tls_failure_marks_the_first_step_red_and_back_restores_the_form(app):
     app._set_login_busy(True)
     app._handle_event("auth_error", {"detail": "Could not connect to 127.0.0.1:1", "stage": "tls"})
     app.update()
-    assert app.steps.state(0) == "error" and "Could not connect" in app.steps._rows[0][2].cget("text")
+    assert app.steps.state(0) == "error" and "Could not connect" in app.steps._rows[0][2].cget(
+        "text"
+    )
     assert app.back_button.winfo_ismapped()
     app._login_back()
     app.update()

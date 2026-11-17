@@ -157,7 +157,12 @@ function testImage(frame: HTMLIFrameElement, colour: string): Promise<File> {
   ctx.fillRect(0, 0, 48, 48);
   return new Promise((resolve) =>
     canvas.toBlob(
-      (blob) => resolve(new view.File([blob!], "lab-" + ++sequence + ".png", { type: "image/png" })),
+      (blob) =>
+        resolve(
+          new view.File([blob!], "lab-" + ++sequence + ".png", {
+            type: "image/png",
+          }),
+        ),
       "image/png",
     ),
   );
@@ -167,28 +172,35 @@ button("attach").onclick = async () => {
     const colours = ["#c0392b", "#2980b9", "#27ae60"];
     const file = await testImage(frames[0], colours[sequence % 3]);
     const view = frames[0].contentWindow as any;
-    const field = frames[0].contentDocument!.querySelector<HTMLInputElement>('input[type="file"][aria-label="Attach file"]');
+    const field = frames[0].contentDocument!.querySelector<HTMLInputElement>(
+      'input[type="file"][aria-label="Attach file"]',
+    );
     if (!field) throw Error("Victim is not connected yet");
     const dt = new view.DataTransfer();
     dt.items.add(file);
     field.files = dt.files;
     field.dispatchEvent(new view.Event("change", { bubbles: true }));
-    status.textContent = "Alice is encrypting and uploading a test image (ciphertext only).";
+    status.textContent =
+      "Alice is encrypting and uploading a test image (ciphertext only).";
   } catch (e) {
     show(e);
   }
 };
 // Calls are driven through the victims' real UI. The lab uses STUN/host candidates only.
 const victimButton = (frame: HTMLIFrameElement, label: RegExp) =>
-  Array.from(frame.contentDocument!.querySelectorAll<HTMLButtonElement>("button")).find(
-    (b) => label.test(b.getAttribute("aria-label") || b.textContent || ""),
+  Array.from(
+    frame.contentDocument!.querySelectorAll<HTMLButtonElement>("button"),
+  ).find((b) =>
+    label.test(b.getAttribute("aria-label") || b.textContent || ""),
   );
 button("call").onclick = () => {
   try {
     const b = victimButton(frames[0], /Start voice call/);
-    if (!b || b.disabled) throw Error("Victim A cannot call yet: connect both victims first");
+    if (!b || b.disabled)
+      throw Error("Victim A cannot call yet: connect both victims first");
     b.click();
-    status.textContent = "Alice is calling Bob (signaling is end-to-end encrypted; the relay sees ciphertext).";
+    status.textContent =
+      "Alice is calling Bob (signaling is end-to-end encrypted; the relay sees ciphertext).";
   } catch (e) {
     show(e);
   }
@@ -198,7 +210,8 @@ button("answer").onclick = () => {
     const b = victimButton(frames[1], /^Accept$/);
     if (!b) throw Error("Bob has no incoming call");
     b.click();
-    status.textContent = "Bob accepted. Each client checks the DTLS certificate against the signed SDP.";
+    status.textContent =
+      "Bob accepted. Each client checks the DTLS certificate against the signed SDP.";
   } catch (e) {
     show(e);
   }
@@ -220,16 +233,24 @@ function armDtlsMitm() {
     const copy = new view.Map(report);
     for (const [id, entry] of copy)
       if (entry.type === "certificate")
-        copy.set(id, { ...entry, fingerprint: Array.from({ length: 32 }, () => "AA").join(":") });
+        copy.set(id, {
+          ...entry,
+          fingerprint: Array.from({ length: 32 }, () => "AA").join(":"),
+        });
     return copy;
   };
 }
 button("open").onclick = () => {
   try {
-    const buttons = Array.from(frames[1].contentDocument!.querySelectorAll<HTMLButtonElement>("button.att-thumb"));
+    const buttons = Array.from(
+      frames[1].contentDocument!.querySelectorAll<HTMLButtonElement>(
+        "button.att-thumb",
+      ),
+    );
     if (!buttons.length) throw Error("Bob has no attachment yet");
     buttons[buttons.length - 1].click();
-    status.textContent = "Bob is downloading and verifying the newest attachment.";
+    status.textContent =
+      "Bob is downloading and verifying the newest attachment.";
   } catch (e) {
     show(e);
   }

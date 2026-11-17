@@ -11,11 +11,15 @@ import pytest
 
 import gui.chat_gui as chat_gui
 import gui.security_dashboard as dashboard
-from gui import widgets
 from gui.theme import TYPE_SCALE, is_no_display_error
 
-AUTH = {"username": "alice", "peer": "bob", "lab_mode": True,
-        "own_fingerprint": "AAAA BBBB CCCC DDDD", "peer_key_found": True}
+AUTH = {
+    "username": "alice",
+    "peer": "bob",
+    "lab_mode": True,
+    "own_fingerprint": "AAAA BBBB CCCC DDDD",
+    "peer_key_found": True,
+}
 
 
 class FakeClient:
@@ -95,7 +99,9 @@ def test_window_grows_but_never_past_the_screen(request, fixture):
     assert window.winfo_height() <= window.winfo_screenheight()
     window.set_presentation(False)
     window.update()
-    assert abs(window.winfo_width() - before[0]) <= 2 and abs(window.winfo_height() - before[1]) <= 2
+    assert (
+        abs(window.winfo_width() - before[0]) <= 2 and abs(window.winfo_height() - before[1]) <= 2
+    )
 
 
 def test_chat_padding_of_real_widgets_scales(chat):
@@ -108,11 +114,20 @@ def test_chat_padding_of_real_widgets_scales(chat):
 
 
 def test_conversation_is_redrawn_at_the_new_size(chat):
-    chat._handle_event("message_received", {"sender": "bob", "message": "hello there",
-                                           "timestamp": 1_800_000_000, "receipt": {}})
+    chat._handle_event(
+        "message_received",
+        {"sender": "bob", "message": "hello there", "timestamp": 1_800_000_000, "receipt": {}},
+    )
     chat.update()
-    bubbles = lambda: [c for r in chat.bubble_list.winfo_children() for c in r.winfo_children()
-                       if isinstance(c, tk.Canvas) and int(c.cget("height")) > 40]
+
+    def bubbles():
+        return [
+            c
+            for r in chat.bubble_list.winfo_children()
+            for c in r.winfo_children()
+            if isinstance(c, tk.Canvas) and int(c.cget("height")) > 40
+        ]
+
     before = max(int(c.cget("height")) for c in bubbles())
     chat.set_presentation(True)
     chat.update()
@@ -139,8 +154,9 @@ def test_keyboard_shortcut_and_view_menu_are_wired(request, fixture):
     window = request.getfixturevalue(fixture)
     prefix = "Command" if sys.platform == "darwin" else "Control"
     assert window.bind_all(f"<{prefix}-Shift-P>"), "Cmd+Shift+P (Ctrl+Shift+P) must be bound"
-    labels = [window.view_menu.entrycget(i, "label")
-              for i in range(window.view_menu.index("end") + 1)]
+    labels = [
+        window.view_menu.entrycget(i, "label") for i in range(window.view_menu.index("end") + 1)
+    ]
     assert "Presentation mode" in labels
     window.view_menu.invoke(labels.index("Presentation mode"))
     assert window.theme.presentation, "the menu item toggles it"
@@ -151,8 +167,9 @@ def test_keyboard_shortcut_and_view_menu_are_wired(request, fixture):
 @pytest.mark.parametrize("script", ["gui/chat_gui.py", "gui/security_dashboard.py"])
 def test_presentation_flag_exists_on_the_command_line(script):
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    out = subprocess.run([sys.executable, script, "--help"], capture_output=True, text=True,
-                         cwd=root, timeout=30)
+    out = subprocess.run(
+        [sys.executable, script, "--help"], capture_output=True, text=True, cwd=root, timeout=30
+    )
     assert out.returncode == 0 and "--presentation" in out.stdout
 
 
@@ -160,7 +177,7 @@ def test_dashboard_compact_threshold_scales_with_the_mode(dash):
     dash.geometry("1000x600+10000+10000")
     dash.update()
     assert not dash._compact, "600px tall is roomy at normal size"
-    dash.theme.set_presentation(True)       # same window, bigger text: now it IS cramped
+    dash.theme.set_presentation(True)  # same window, bigger text: now it IS cramped
     dash._apply_density()
     assert dash._compact
     dash.theme.set_presentation(False)

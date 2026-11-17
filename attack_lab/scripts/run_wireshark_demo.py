@@ -31,7 +31,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import threading
 import time
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,10 +43,8 @@ from demo._demo_common import (
     check,
     demo_username,
     establish_signed_handshake,
-    free_port,
     register_client,
     start_mini_relay,
-    wait_for_port,
 )
 
 # ---------- Paths ----------
@@ -73,8 +70,7 @@ def plaintext_scan(capture_file, needles):
     needles that were found -- an empty list means nothing leaked."""
     with open(capture_file, "rb") as f:
         raw = f.read()
-    return [n for n in needles
-            if (n.encode("utf-8") if isinstance(n, str) else n) in raw]
+    return [n for n in needles if (n.encode("utf-8") if isinstance(n, str) else n) in raw]
 
 
 def find_tshark():
@@ -101,9 +97,12 @@ def start_tshark_capture(port, output_file):
 
     cmd = [
         tshark,
-        "-i", LOOPBACK_IFACE,
-        "-f", f"tcp port {port}",
-        "-w", output_file,
+        "-i",
+        LOOPBACK_IFACE,
+        "-f",
+        f"tcp port {port}",
+        "-w",
+        output_file,
         "-q",  # quiet mode
     ]
     print(f"[*] Starting capture: {' '.join(cmd)}")
@@ -161,9 +160,10 @@ def analyze_capture(capture_file, port, needles=()):
     # Show protocol hierarchy
     try:
         result = subprocess.run(
-            [tshark, "-r", capture_file, "-q", "-z", "io,phs",
-             "-d", f"tcp.port=={port},tls"],
-            capture_output=True, text=True, timeout=10,
+            [tshark, "-r", capture_file, "-q", "-z", "io,phs", "-d", f"tcp.port=={port},tls"],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.stdout:
             print("\n📊 Protocol Hierarchy:")
@@ -174,14 +174,26 @@ def analyze_capture(capture_file, port, needles=()):
     # Show TLS handshake details
     try:
         result = subprocess.run(
-            [tshark, "-r", capture_file,
-             "-d", f"tcp.port=={port},tls",
-             "-Y", "tls.handshake",
-             "-T", "fields",
-             "-e", "tls.handshake.type",
-             "-e", "tls.handshake.version",
-             "-e", "tls.handshake.ciphersuite"],
-            capture_output=True, text=True, timeout=10,
+            [
+                tshark,
+                "-r",
+                capture_file,
+                "-d",
+                f"tcp.port=={port},tls",
+                "-Y",
+                "tls.handshake",
+                "-T",
+                "fields",
+                "-e",
+                "tls.handshake.type",
+                "-e",
+                "tls.handshake.version",
+                "-e",
+                "tls.handshake.ciphersuite",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.stdout.strip():
             print("🔒 TLS Handshake Records Found:")
@@ -193,10 +205,10 @@ def analyze_capture(capture_file, port, needles=()):
     # Count Application Data records (encrypted payload)
     try:
         result = subprocess.run(
-            [tshark, "-r", capture_file,
-             "-d", f"tcp.port=={port},tls",
-             "-Y", "tls.app_data"],
-            capture_output=True, text=True, timeout=10,
+            [tshark, "-r", capture_file, "-d", f"tcp.port=={port},tls", "-Y", "tls.app_data"],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         app_data_count = len(result.stdout.strip().splitlines()) if result.stdout.strip() else 0
         print(f"\n🔐 Encrypted Application Data records: {app_data_count}")
@@ -208,10 +220,25 @@ def analyze_capture(capture_file, port, needles=()):
     problems = []
     try:
         result = subprocess.run(
-            [tshark, "-r", capture_file, "-d", f"tcp.port=={port},tls",
-             "-Y", "tls.handshake.type == 1 || tls.handshake.type == 2", "-T", "fields",
-             "-e", "tls.handshake.type", "-e", "tls.handshake.extensions.supported_version"],
-            capture_output=True, text=True, timeout=10)
+            [
+                tshark,
+                "-r",
+                capture_file,
+                "-d",
+                f"tcp.port=={port},tls",
+                "-Y",
+                "tls.handshake.type == 1 || tls.handshake.type == 2",
+                "-T",
+                "fields",
+                "-e",
+                "tls.handshake.type",
+                "-e",
+                "tls.handshake.extensions.supported_version",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         hellos = [ln.split("\t") for ln in result.stdout.strip().splitlines()]
         client_hellos = sum(1 for h in hellos if h[0] == "1")
         tls13_server_hellos = sum(1 for h in hellos if h[0] == "2" and "0x0304" in h[-1])
@@ -223,8 +250,10 @@ def analyze_capture(capture_file, port, needles=()):
 
     # Scan the RAW bytes of the capture for anything that should be encrypted.
     leaked = plaintext_scan(capture_file, needles)
-    print(f"\n🕵  Plaintext scan of the raw capture: {len(needles)} strings searched "
-          f"(usernames, password, message text, JSON field names)")
+    print(
+        f"\n🕵  Plaintext scan of the raw capture: {len(needles)} strings searched "
+        f"(usernames, password, message text, JSON field names)"
+    )
     if leaked:
         print(f"⚠️  WARNING: found in plaintext: {leaked}")
         problems.append(f"plaintext found: {leaked}")
@@ -253,10 +282,12 @@ def open_in_wireshark(capture_file, port):
 
 def main():
     parser = argparse.ArgumentParser(description="Automated Wireshark capture demo")
-    parser.add_argument("--open-wireshark", action="store_true",
-                        help="Open capture in Wireshark GUI when done")
-    parser.add_argument("--output", default=CAPTURE_FILE,
-                        help=f"Output capture file (default: {CAPTURE_FILE})")
+    parser.add_argument(
+        "--open-wireshark", action="store_true", help="Open capture in Wireshark GUI when done"
+    )
+    parser.add_argument(
+        "--output", default=CAPTURE_FILE, help=f"Output capture file (default: {CAPTURE_FILE})"
+    )
     args = parser.parse_args()
 
     banner("WIRESHARK DEMO — Automated Secure Chat Capture")
@@ -310,9 +341,11 @@ def main():
         ok = establish_signed_handshake(alice, bob, timeout=10)
         if ok:
             print("    ✓ Secure session established (ECDH + signatures)")
-            check(alice.session_key == bob.session_key,
-                  "Both sides derived the same session key",
-                  "Session keys don't match!")
+            check(
+                alice.session_key == bob.session_key,
+                "Both sides derived the same session key",
+                "Session keys don't match!",
+            )
         else:
             print("    ✗ Handshake failed!")
             sys.exit(1)
@@ -324,15 +357,15 @@ def main():
 
         messages_to_send = [
             (alice, "Hello Bob! This is a secret message from Alice. 🔒"),
-            (bob,   "Hi Alice! I received your message securely. 🛡️"),
+            (bob, "Hi Alice! I received your message securely. 🛡️"),
             (alice, "Great! Our communication is end-to-end encrypted."),
-            (bob,   "Yes! Even with Wireshark, nobody can read this."),
+            (bob, "Yes! Even with Wireshark, nobody can read this."),
             (alice, "Final test message — CNS Project Demo complete! 🎓"),
         ]
 
         for sender, msg in messages_to_send:
             sender_label = "Sender (alice)" if sender is alice else "Receiver (bob)"
-            print(f"    📨 {sender_label}: \"{msg}\"")
+            print(f'    📨 {sender_label}: "{msg}"')
             sender.send_message(msg)
             time.sleep(0.5)  # Let the message travel through TLS
 
@@ -347,22 +380,36 @@ def main():
         print("STEP 6: Stopping capture and analyzing traffic")
         print("━" * 50)
         packet_count, tshark_output = stop_tshark_capture(tshark_proc)
-        print(f"    Captured {packet_count} packets" if packet_count else
-              f"    Capture stopped. tshark output:\n    {tshark_output.strip()}")
+        print(
+            f"    Captured {packet_count} packets"
+            if packet_count
+            else f"    Capture stopped. tshark output:\n    {tshark_output.strip()}"
+        )
 
     # ── Analysis ──
     problems = []
     if os.path.exists(args.output) and os.path.getsize(args.output) > 0:
-        needles = [alice_name, bob_name, DEMO_PASSWORD, "password", "register", "username",
-                   '"type"', '"nonce"', '"ciphertext"', '"public_key"', '"message"',
-                   '"sender"', '"signature"'] + [m for _s, m in messages_to_send]
+        needles = [
+            alice_name,
+            bob_name,
+            DEMO_PASSWORD,
+            "password",
+            "register",
+            "username",
+            '"type"',
+            '"nonce"',
+            '"ciphertext"',
+            '"public_key"',
+            '"message"',
+            '"sender"',
+            '"signature"',
+        ] + [m for _s, m in messages_to_send]
         problems = analyze_capture(args.output, port, needles)
     else:
         problems = ["capture file empty or missing"]
         print(f"\n[!] Capture file is empty or missing: {args.output}")
         print("    This usually means tshark couldn't capture on the loopback interface.")
         print("    Try: sudo python demo/run_wireshark_demo.py")
-
 
     # ── Open in Wireshark ──
     if args.open_wireshark:
@@ -375,7 +422,7 @@ def main():
     banner("DEMO COMPLETE")
     print(f"""
 SUMMARY
-{'─' * 50}
+{"─" * 50}
   ✓ Server ran on 127.0.0.1:{port} over TLS 1.3
   ✓ Sender (alice) and Receiver (bob) registered
   ✓ ECDH key exchange completed with signatures
@@ -384,7 +431,7 @@ SUMMARY
   ✓ No plaintext visible in capture — TLS encrypts everything
 
 WHAT TO SHOW IN YOUR DEMO / REPORT:
-{'─' * 50}
+{"─" * 50}
   1. Open {args.output} in Wireshark
   2. Set display filter:  tcp.port == {port}
   3. If protocol shows 'RSL', right-click → Decode As → TLS

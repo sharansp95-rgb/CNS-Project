@@ -43,9 +43,7 @@ def _find_pids_on_port_windows(port):
     list of ints, or None if netstat itself couldn't be run/parsed (not "no
     PIDs found" -- that's an empty list)."""
     try:
-        result = subprocess.run(
-            ["netstat", "-ano"], capture_output=True, text=True, timeout=10
-        )
+        result = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
     if result.returncode != 0:
@@ -74,7 +72,9 @@ def _find_pids_on_port_unix(port):
     try:
         result = subprocess.run(
             ["lsof", "-i", f":{port}", "-sTCP:LISTEN", "-t"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         pids = [int(x) for x in result.stdout.split() if x.strip().isdigit()]
         if result.returncode == 0 or pids:
@@ -84,7 +84,10 @@ def _find_pids_on_port_unix(port):
 
     try:
         result = subprocess.run(
-            ["fuser", f"{port}/tcp"], capture_output=True, text=True, timeout=10,
+            ["fuser", f"{port}/tcp"],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         pids = [int(x) for x in result.stdout.split() if x.strip().isdigit()]
         return sorted(set(pids))
@@ -104,10 +107,14 @@ def _command_line(pid):
         if sys.platform.startswith("win"):
             result = subprocess.run(
                 ["wmic", "process", "where", f"processid={pid}", "get", "commandline"],
-                capture_output=True, text=True, timeout=10)
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
         else:
-            result = subprocess.run(["ps", "-p", str(pid), "-o", "command="],
-                                    capture_output=True, text=True, timeout=10)
+            result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=10
+            )
         text = result.stdout.strip()
         return text or None
     except (OSError, subprocess.SubprocessError):
@@ -130,12 +137,16 @@ def _kill_pid(pid):
         if sys.platform.startswith("win"):
             result = subprocess.run(
                 ["taskkill", "/F", "/PID", str(pid)],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
         else:
             result = subprocess.run(
                 ["kill", "-9", str(pid)],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
         return result.returncode == 0
     except (OSError, subprocess.SubprocessError):
@@ -157,42 +168,53 @@ def handle_port_in_use(host, port, auto_yes):
 
     pids = find_pids_on_port(port)
     if pids is None:
-        print(f"[!] Could not determine which process this is (no netstat/lsof/fuser "
-              f"available or the check failed).")
-        print(f"    Please find and close it yourself -- e.g. the terminal window "
-              f"running `python server/server.py` -- then re-run this script.")
+        print(
+            "[!] Could not determine which process this is (no netstat/lsof/fuser "
+            "available or the check failed)."
+        )
+        print(
+            "    Please find and close it yourself -- e.g. the terminal window "
+            "running `python server/server.py` -- then re-run this script."
+        )
         return False
 
     if not pids:
         print(f"[!] Port {port} is in use, but no matching PID could be identified.")
-        print(f"    Please close whatever is using it manually, then re-run this script.")
+        print("    Please close whatever is using it manually, then re-run this script.")
         return False
 
     ours = [p for p in pids if is_project_server(p)]
     foreign = [p for p in pids if p not in ours]
     for pid in foreign:
-        print(f"[*] PID {pid} is listening on port {port} but is not a server.py "
-              f"process ({_command_line(pid) or 'command unknown'}) -- leaving it alone.")
+        print(
+            f"[*] PID {pid} is listening on port {port} but is not a server.py "
+            f"process ({_command_line(pid) or 'command unknown'}) -- leaving it alone."
+        )
     if not ours:
-        print(f"[*] No server.py of ours is listening on port {port}, so there is no "
-              f"stale server to restart.")
+        print(
+            f"[*] No server.py of ours is listening on port {port}, so there is no "
+            f"stale server to restart."
+        )
         return True
     pids = ours
 
-    print(f"[!] Found server.py PID(s) listening on port {port}: "
-          f"{', '.join(str(p) for p in pids)}")
+    print(f"[!] Found server.py PID(s) listening on port {port}: {', '.join(str(p) for p in pids)}")
 
     if auto_yes:
         confirmed = True
     elif not sys.stdin.isatty():
-        print("[!] Not running interactively and --yes was not given -- refusing to "
-              "kill anything automatically.")
+        print(
+            "[!] Not running interactively and --yes was not given -- refusing to "
+            "kill anything automatically."
+        )
         confirmed = False
     else:
         try:
-            answer = input(
-                f"    Kill PID(s) {', '.join(str(p) for p in pids)} now? [y/N]: "
-            ).strip().lower()
+            answer = (
+                input(f"    Kill PID(s) {', '.join(str(p) for p in pids)} now? [y/N]: ")
+                .strip()
+                .lower()
+            )
         except EOFError:
             # isatty() can lie (some terminals/CI wrappers report a tty that
             # then closes stdin without ever sending a line) -- never let a
@@ -202,8 +224,10 @@ def handle_port_in_use(host, port, auto_yes):
         confirmed = answer == "y"
 
     if not confirmed:
-        print(f"    Not killing anything. Please stop that process yourself "
-              f"(close its terminal window, or Ctrl+C it), then re-run this script.")
+        print(
+            "    Not killing anything. Please stop that process yourself "
+            "(close its terminal window, or Ctrl+C it), then re-run this script."
+        )
         return False
 
     all_ok = True
@@ -221,14 +245,22 @@ def handle_port_in_use(host, port, auto_yes):
 def main():
     parser = argparse.ArgumentParser(
         description="Reset the local TLS environment: report/optionally clear a "
-                    "leftover server on the target port, then regenerate certs."
+        "leftover server on the target port, then regenerate certs."
     )
-    parser.add_argument("--host", default="127.0.0.1",
-                         help="host to check for a listening server (default 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
-                         help="port to check (default 5000, matching server.py's default)")
-    parser.add_argument("--yes", action="store_true",
-                         help="don't prompt before killing a detected leftover process")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="host to check for a listening server (default 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help="port to check (default 5000, matching server.py's default)",
+    )
+    parser.add_argument(
+        "--yes", action="store_true", help="don't prompt before killing a detected leftover process"
+    )
     args = parser.parse_args()
 
     print("=" * 70)
@@ -251,8 +283,8 @@ def main():
     fp = cert_fingerprint_from_file(CERT_PATH)
     print("\n" + "=" * 70)
     print(f"Environment reset. Cert fingerprint is now: {fp}")
-    print(f"Start the server fresh with: python server/server.py")
-    print(f"-- then launch clients only after you see that same fingerprint printed.")
+    print("Start the server fresh with: python server/server.py")
+    print("-- then launch clients only after you see that same fingerprint printed.")
     print("=" * 70)
 
 

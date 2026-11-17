@@ -28,25 +28,24 @@ comparison.
 """
 
 import sys
+import threading
 import time
 
+from attack_lab.relay import RogueRelay as ChatServer
 from attack_lab.scripts._demo_common import (
-    isolate_demo_state,
     banner,
     check,
     demo_username,
     free_port,
+    isolate_demo_state,
     register_client,
     run_step,
     wait_for_port,
 )
-
-import threading
 from client.client import b64
 from crypto_engine.dh_exchange import generate_keypair as generate_ecdh_keypair
 from crypto_engine.signatures import fingerprint, generate_keypair, serialize_public_key, sign
 from server.server import CertsMissingError
-from attack_lab.relay import RogueRelay as ChatServer
 
 
 class _MitmRelay(ChatServer):
@@ -73,16 +72,18 @@ class _MitmRelay(ChatServer):
             forged = dict(envelope)
             forged["pubkey"] = b64(attacker_ecdh_pub)
             forged["handshake_sig"] = b64(attacker_sig)
-            print(f"    [MALICIOUS RELAY] substituted its OWN ECDH public key for "
-                  f"{self.mitm_target_from}'s, signed with the ATTACKER's RSA key "
-                  f"(not {self.mitm_target_from}'s) -- classic unauthenticated-DH MITM.")
+            print(
+                f"    [MALICIOUS RELAY] substituted its OWN ECDH public key for "
+                f"{self.mitm_target_from}'s, signed with the ATTACKER's RSA key "
+                f"(not {self.mitm_target_from}'s) -- classic unauthenticated-DH MITM."
+            )
             super().route(forged, sender_name)
             return
         super().route(envelope, sender_name)
 
 
 def main():
-    isolate_demo_state()   # temp user store / keys / log / exports: never your real data/
+    isolate_demo_state()  # temp user store / keys / log / exports: never your real data/
     banner("DEMO 3: Signed handshake stops a relay-server MITM")
 
     attacker_priv, attacker_pub = generate_keypair()  # attacker never registers this key
@@ -94,8 +95,10 @@ def main():
     try:
         port = free_port()
         server = _MitmRelay(
-            "127.0.0.1", port,
-            mitm_target_from=alice_name, attacker_rsa_private_key=attacker_priv,
+            "127.0.0.1",
+            port,
+            mitm_target_from=alice_name,
+            attacker_rsa_private_key=attacker_priv,
         )
     except CertsMissingError as exc:
         print(f"[!] {exc}")
@@ -132,24 +135,29 @@ def main():
 
     banner("RESULTS")
     all_ok = True
-    all_ok &= check(server.mitm_attempted,
-                     "Confirmed the malicious relay actually attempted the key swap.",
-                     "The relay never attempted the swap -- test setup is broken.")
-    all_ok &= check(bob.session_key is None,
-                     "Bob's client derived NO session key from the forged handshake "
-                     "-- the MITM attempt was rejected.",
-                     "BOB DERIVED A SESSION KEY FROM THE FORGED HANDSHAKE -- MITM SUCCEEDED!")
-    all_ok &= check("HANDSHAKE ABORTED" in out,
-                     "Bob's client printed a clear handshake-abort warning naming the "
-                     "possible MITM.",
-                     "No handshake-abort warning was printed -- silent failure!")
+    all_ok &= check(
+        server.mitm_attempted,
+        "Confirmed the malicious relay actually attempted the key swap.",
+        "The relay never attempted the swap -- test setup is broken.",
+    )
+    all_ok &= check(
+        bob.session_key is None,
+        "Bob's client derived NO session key from the forged handshake "
+        "-- the MITM attempt was rejected.",
+        "BOB DERIVED A SESSION KEY FROM THE FORGED HANDSHAKE -- MITM SUCCEEDED!",
+    )
+    all_ok &= check(
+        "HANDSHAKE ABORTED" in out,
+        "Bob's client printed a clear handshake-abort warning naming the possible MITM.",
+        "No handshake-abort warning was printed -- silent failure!",
+    )
 
-    print(f"\n[*] For comparison -- what a human reading fingerprints aloud would see:")
+    print("\n[*] For comparison -- what a human reading fingerprints aloud would see:")
     print(f"    Real {alice_name}'s RSA fingerprint (what bob actually has on file):")
     print(f"        {real_alice_fingerprint}")
-    print(f"    Attacker's RSA fingerprint (what would have been used if the forged")
-    print(f"    handshake had used the attacker's OWN signature on THEIR OWN pubkey")
-    print(f"    submission, i.e. if the attacker had also tried to register as")
+    print("    Attacker's RSA fingerprint (what would have been used if the forged")
+    print("    handshake had used the attacker's OWN signature on THEIR OWN pubkey")
+    print("    submission, i.e. if the attacker had also tried to register as")
     print(f"    '{alice_name}'):")
     print(f"        {attacker_fingerprint}")
     all_ok &= check(

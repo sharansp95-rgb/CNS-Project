@@ -3,20 +3,20 @@
 import base64
 import contextlib
 import copy
-from datetime import datetime, timezone
 import io
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from client.client import SecureChatClient
 from client.evidence import build_evidence
-from crypto_engine.signatures import generate_keypair, serialize_public_key
-from crypto_engine.hash_chain import canonical_json
 from crypto_engine.evidence_tools import key_id, sha256
+from crypto_engine.hash_chain import canonical_json
+from crypto_engine.signatures import generate_keypair, serialize_public_key
 
 ROOT = Path(__file__).resolve().parent
 
@@ -30,9 +30,7 @@ class Socket:
 
 
 def generate():
-    a, b = SecureChatClient(Socket(), "alice", "bob"), SecureChatClient(
-        Socket(), "bob", "alice"
-    )
+    a, b = SecureChatClient(Socket(), "alice", "bob"), SecureChatClient(Socket(), "bob", "alice")
     a.rsa_private_key, ap = generate_keypair()
     b.rsa_private_key, bp = generate_keypair()
     a.peer_public_key = bp
@@ -108,9 +106,7 @@ def generate():
         "edited_message": dict(file="edited_message.json", valid=False, index=1),
         "removed_message": dict(file="removed_message.json", valid=False, index=2),
         "reordered": dict(file="reordered.json", valid=False, index=1),
-        "wrong_export_signature": dict(
-            file="wrong_export_signature.json", valid=False, index=None
-        ),
+        "wrong_export_signature": dict(file="wrong_export_signature.json", valid=False, index=None),
         "tampered_receipt": dict(
             file="valid_v2.json",
             receipt="tampered_receipt.json",

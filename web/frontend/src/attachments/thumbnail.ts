@@ -4,7 +4,10 @@
 import { MAX_THUMB } from "./descriptor";
 
 const SIZE = 160;
-async function frame(blobUrl: string, kind: "image" | "video"): Promise<CanvasImageSource & { w: number; h: number }> {
+async function frame(
+  blobUrl: string,
+  kind: "image" | "video",
+): Promise<CanvasImageSource & { w: number; h: number }> {
   if (kind === "image") {
     const img = new Image();
     img.decoding = "async";
@@ -33,18 +36,30 @@ export async function makeThumbnail(
   mime: string,
   kind: "image" | "video",
 ): Promise<Uint8Array | undefined> {
-  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
+  const url = URL.createObjectURL(
+    new Blob([bytes as BlobPart], { type: mime }),
+  );
   try {
     const src = await frame(url, kind);
     if (!src.w || !src.h) return undefined;
-    for (const [side, quality] of [[SIZE, 0.6], [SIZE, 0.4], [112, 0.4], [80, 0.35]] as const) {
+    for (const [side, quality] of [
+      [SIZE, 0.6],
+      [SIZE, 0.4],
+      [112, 0.4],
+      [80, 0.35],
+    ] as const) {
       const scale = Math.min(1, side / Math.max(src.w, src.h));
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(src.w * scale));
       canvas.height = Math.max(1, Math.round(src.h * scale));
-      canvas.getContext("2d")!.drawImage(src, 0, 0, canvas.width, canvas.height);
-      const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", quality));
-      if (blob && blob.size <= MAX_THUMB) return new Uint8Array(await blob.arrayBuffer());
+      canvas
+        .getContext("2d")!
+        .drawImage(src, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>((r) =>
+        canvas.toBlob(r, "image/jpeg", quality),
+      );
+      if (blob && blob.size <= MAX_THUMB)
+        return new Uint8Array(await blob.arrayBuffer());
     }
   } catch {
     /* A missing preview never blocks sending. */

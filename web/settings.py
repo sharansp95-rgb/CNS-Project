@@ -1,9 +1,9 @@
 """Shared deployment policy, with no service-specific secrets or attack logic."""
 
-from dataclasses import dataclass
 import ipaddress
 import logging
 import os
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from fastapi.responses import PlainTextResponse
@@ -24,9 +24,7 @@ class Settings:
     proxies: tuple[str, ...]
 
     @classmethod
-    def load(
-        cls, origins=None, default_origins="http://localhost:8080,http://127.0.0.1:8080"
-    ):
+    def load(cls, origins=None, default_origins="http://localhost:8080,http://127.0.0.1:8080"):
         prod = production()
         configured = os.environ.get("ALLOWED_ORIGINS")
         if prod and not configured:
@@ -34,11 +32,7 @@ class Settings:
         allowed = frozenset(
             origins
             if origins is not None
-            else (
-                x.strip()
-                for x in (configured or default_origins).split(",")
-                if x.strip()
-            )
+            else (x.strip() for x in (configured or default_origins).split(",") if x.strip())
         )
         if not allowed:
             raise ValueError("Explicit origins are required")
@@ -54,24 +48,16 @@ class Settings:
                 or parsed.fragment
                 or "*" in origin
             ):
-                raise ValueError(
-                    "Origins must be exact HTTP(S) origins; production requires HTTPS"
-                )
+                raise ValueError("Origins must be exact HTTP(S) origins; production requires HTTPS")
         proxies = tuple(
-            x.strip()
-            for x in os.environ.get("FORWARDED_ALLOW_IPS", "").split(",")
-            if x.strip()
+            x.strip() for x in os.environ.get("FORWARDED_ALLOW_IPS", "").split(",") if x.strip()
         )
         if prod and not proxies:
-            raise ValueError(
-                "FORWARDED_ALLOW_IPS must name trusted ingress proxies in production"
-            )
+            raise ValueError("FORWARDED_ALLOW_IPS must name trusted ingress proxies in production")
         for proxy in proxies:
             network = ipaddress.ip_network(proxy, strict=False)
             if network.prefixlen == 0:
-                raise ValueError(
-                    "Trust explicit proxy addresses/networks, never all IPs"
-                )
+                raise ValueError("Trust explicit proxy addresses/networks, never all IPs")
         return cls(prod, allowed, proxies)
 
 
@@ -82,9 +68,7 @@ class TransportPolicy:
     async def __call__(self, scope, receive, send):
         if self.enabled and scope["type"] in ("http", "websocket"):
             secure = scope.get("scheme") in ("https", "wss")
-            if not secure and not (
-                scope["type"] == "http" and scope.get("path") == "/healthz"
-            ):
+            if not secure and not (scope["type"] == "http" and scope.get("path") == "/healthz"):
                 logging.getLogger("uvicorn.error").warning(
                     "HTTPS required; untrusted/direct peer %s",
                     (scope.get("client") or ("unknown",))[0],
@@ -92,9 +76,7 @@ class TransportPolicy:
                 if scope["type"] == "websocket":
                     await send({"type": "websocket.close", "code": 1008})
                 else:
-                    await PlainTextResponse("HTTPS required", status_code=403)(
-                        scope, receive, send
-                    )
+                    await PlainTextResponse("HTTPS required", status_code=403)(scope, receive, send)
                 return
 
             async def secure_send(message):

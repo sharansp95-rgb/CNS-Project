@@ -22,11 +22,11 @@ import argparse
 import sys
 
 GAP = 8
-TITLE_BAR = 28                     # macOS title bar height added to every window's content height
-CHAT_MIN = (680, 460)              # gui/chat_gui.py minsize (content, normal size)
-DASH_MIN = (640, 240)              # gui/security_dashboard.py minsize
+TITLE_BAR = 28  # macOS title bar height added to every window's content height
+CHAT_MIN = (680, 460)  # gui/chat_gui.py minsize (content, normal size)
+DASH_MIN = (640, 240)  # gui/security_dashboard.py minsize
 SERVER_TERMINAL_W = 420
-PRESENTATION = 1.25                # same factor as gui/theme.py PRESENTATION_SCALE
+PRESENTATION = 1.25  # same factor as gui/theme.py PRESENTATION_SCALE
 
 
 def compute_layout(screen, presentation=False, simple=False, server_terminal=True):
@@ -46,7 +46,7 @@ def compute_layout(screen, presentation=False, simple=False, server_terminal=Tru
         band = 0
     else:
         band = max(round(0.32 * height), dash_min_h + TITLE_BAR)
-        band = min(band, usable_h - (chat_min_h + TITLE_BAR) - GAP)   # keep the chats readable
+        band = min(band, usable_h - (chat_min_h + TITLE_BAR) - GAP)  # keep the chats readable
         band = max(band, dash_min_h + TITLE_BAR)
     chat_frame_h = usable_h - (band + GAP if band else 0)
     chat_h = max(chat_frame_h - TITLE_BAR, chat_min_h)
@@ -57,8 +57,7 @@ def compute_layout(screen, presentation=False, simple=False, server_terminal=Tru
         chat_w = chat_min_w
     chat_a = {"x": left, "y": top, "w": chat_w, "h": chat_h}
     chat_b = {"x": right - chat_w, "y": top, "w": chat_w, "h": chat_h}
-    layout = {"chat_a": chat_a, "chat_b": chat_b, "dash": None, "server": None,
-              "overlap": overlap}
+    layout = {"chat_a": chat_a, "chat_b": chat_b, "dash": None, "server": None, "overlap": overlap}
     if simple:
         return layout
 
@@ -67,11 +66,17 @@ def compute_layout(screen, presentation=False, simple=False, server_terminal=Tru
     dash_w = usable_w - ((SERVER_TERMINAL_W + GAP) if server_terminal else 0)
     dash_w = max(dash_w, dash_min_w)
     layout["dash"] = {"x": left, "y": band_y, "w": dash_w, "h": band_frame_h - TITLE_BAR}
-    if band_y + band_frame_h > y0 + height:      # does not fit vertically (e.g. 1.25x on a short screen)
+    if (
+        band_y + band_frame_h > y0 + height
+    ):  # does not fit vertically (e.g. 1.25x on a short screen)
         layout["overlap"] = True
     if server_terminal:
-        layout["server"] = {"x": right - SERVER_TERMINAL_W, "y": band_y,
-                            "w": SERVER_TERMINAL_W, "h": band_frame_h}
+        layout["server"] = {
+            "x": right - SERVER_TERMINAL_W,
+            "y": band_y,
+            "w": SERVER_TERMINAL_W,
+            "h": band_frame_h,
+        }
         if left + dash_w > right - SERVER_TERMINAL_W:
             layout["overlap"] = True
     return layout
@@ -91,15 +96,19 @@ def main(argv=None):
     parser.add_argument("--simple", action="store_true")
     parser.add_argument("--no-terminal", action="store_true")
     args = parser.parse_args(argv)
-    layout = compute_layout((args.x, args.y, args.w, args.h), presentation=args.presentation,
-                            simple=args.simple, server_terminal=not args.no_terminal)
+    layout = compute_layout(
+        (args.x, args.y, args.w, args.h),
+        presentation=args.presentation,
+        simple=args.simple,
+        server_terminal=not args.no_terminal,
+    )
     print(f"CHAT_A_GEOM={geometry(layout['chat_a'])}")
     print(f"CHAT_B_GEOM={geometry(layout['chat_b'])}")
     if layout["dash"]:
         print(f"DASH_GEOM={geometry(layout['dash'])}")
     if layout["server"]:
         s = layout["server"]
-        print(f"SERVER_BOUNDS=\"{s['x']} {s['y']} {s['x'] + s['w']} {s['y'] + s['h']}\"")
+        print(f'SERVER_BOUNDS="{s["x"]} {s["y"]} {s["x"] + s["w"]} {s["y"] + s["h"]}"')
     print(f"OVERLAP={1 if layout['overlap'] else 0}")
     return 0
 

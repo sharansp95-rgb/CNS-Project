@@ -27,8 +27,13 @@ def main(argv):
             print(f"Origin must be an exact https origin: {origin}", file=sys.stderr)
             return 2
     env = os.environ
-    storage = S3Storage(env["S3_ENDPOINT"], env["S3_BUCKET"], env["S3_REGION"],
-                        env["S3_ACCESS_KEY_ID"], env["S3_SECRET_ACCESS_KEY"])
+    storage = S3Storage(
+        env["S3_ENDPOINT"],
+        env["S3_BUCKET"],
+        env["S3_REGION"],
+        env["S3_ACCESS_KEY_ID"],
+        env["S3_SECRET_ACCESS_KEY"],
+    )
     storage.put_cors(argv)
     print("CORS set for:", ", ".join(argv))
     return 0

@@ -39,20 +39,32 @@ def make_records(count, sender="alice", recipient="bob", genesis=GENESIS):
     records = []
     for i in range(count):
         seq, prev = out.next_fields()
-        fields = {"recipient": recipient, "seq": seq, "timestamp": 1000 + i,
-                  "message": f"message {seq}", "prev_hash": prev}
-        out.commit(canonical_record(sender, recipient, seq, fields["timestamp"],
-                                    fields["message"], prev))
+        fields = {
+            "recipient": recipient,
+            "seq": seq,
+            "timestamp": 1000 + i,
+            "message": f"message {seq}",
+            "prev_hash": prev,
+        }
+        out.commit(
+            canonical_record(sender, recipient, seq, fields["timestamp"], fields["message"], prev)
+        )
         records.append(fields)
     return records
 
 
 def feed(chain, fields):
-    return chain.check(fields["recipient"], fields["seq"], fields["timestamp"],
-                       fields["message"], fields["prev_hash"])
+    return chain.check(
+        fields["recipient"],
+        fields["seq"],
+        fields["timestamp"],
+        fields["message"],
+        fields["prev_hash"],
+    )
 
 
 # --- chain primitives --------------------------------------------------------
+
 
 def test_in_order_sequence_verifies():
     chain = IncomingChain("alice", GENESIS)
@@ -128,6 +140,7 @@ def test_canonical_record_is_stable_and_key_order_independent():
 
 # --- integration through the real client pipeline ---------------------------
 
+
 class FakeSocket:
     def __init__(self):
         self.sent = []
@@ -144,8 +157,9 @@ def pair():
     priv_b, pub_b = generate_keypair()
     events_b = []
     a = SecureChatClient(FakeSocket(), "alice", "bob")
-    b = SecureChatClient(FakeSocket(), "bob", "alice",
-                         event_callback=lambda k, d: events_b.append((k, d)))
+    b = SecureChatClient(
+        FakeSocket(), "bob", "alice", event_callback=lambda k, d: events_b.append((k, d))
+    )
     a.rsa_private_key, b.rsa_private_key = priv_a, priv_b
     a.peer_public_key, b.peer_public_key = pub_b, pub_a
     a.peer_public_key_pem = serialize_public_key(pub_b).decode("ascii")
@@ -188,7 +202,7 @@ def test_real_pipeline_in_order_has_no_warnings(pair, capsys):
 def test_real_pipeline_detects_relay_dropping_a_message(pair, capsys):
     a, b, events = pair
     first = send_and_collect(a, "one")
-    send_and_collect(a, "two")            # the relay silently drops this one
+    send_and_collect(a, "two")  # the relay silently drops this one
     third = send_and_collect(a, "three")
     b._handle_chat(first)
     b._handle_chat(third)
@@ -205,7 +219,7 @@ def test_real_pipeline_detects_reordering(pair, capsys):
     a, b, events = pair
     envs = [send_and_collect(a, t) for t in ("one", "two", "three")]
     b._handle_chat(envs[0])
-    b._handle_chat(envs[2])   # three arrives before two
+    b._handle_chat(envs[2])  # three arrives before two
     b._handle_chat(envs[1])
     assert "chain_warning" in kinds(events)
     rejected = [d for k, d in events if k == "message_rejected"]
@@ -222,12 +236,14 @@ def test_chain_fields_are_covered_by_the_signature(pair):
 
     a, b, events = pair
     env = send_and_collect(a, "one")
-    inner = json.loads(decrypt(a.session_key, unb64(env["nonce"]),
-                               unb64(env["ciphertext"]), unb64(env["tag"])))
+    inner = json.loads(
+        decrypt(a.session_key, unb64(env["nonce"]), unb64(env["ciphertext"]), unb64(env["tag"]))
+    )
     inner["seq"] = 7  # re-label as message 7
     box = encrypt(a.session_key, json.dumps(inner).encode("utf-8"))
-    forged = dict(env, nonce=b64(box["nonce"]), ciphertext=b64(box["ciphertext"]),
-                  tag=b64(box["tag"]))
+    forged = dict(
+        env, nonce=b64(box["nonce"]), ciphertext=b64(box["ciphertext"]), tag=b64(box["tag"])
+    )
     b._handle_chat(forged)
     rejected = [d for k, d in events if k == "message_rejected"]
     assert rejected and rejected[0]["reason"] == "signature_failed"
@@ -240,6 +256,9 @@ def test_sent_and_received_records_hash_identically(pair):
     got = b.transcript[0]
     assert sent["record_hash"] == got["record_hash"]
     assert sent["signature"] == got["signature"]
-    recomputed = record_hash(canonical_record("alice", "bob", sent["seq"], sent["timestamp"],
-                                              sent["message"], sent["prev_hash"]))
+    recomputed = record_hash(
+        canonical_record(
+            "alice", "bob", sent["seq"], sent["timestamp"], sent["message"], sent["prev_hash"]
+        )
+    )
     assert recomputed == sent["record_hash"]

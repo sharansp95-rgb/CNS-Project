@@ -65,23 +65,40 @@ def parse_descriptor(message):
     if not is_attachment_message(message) or len(message) > 64 * 1024:
         return None
     try:
-        d = json.loads(message[len(PREFIX):])
-        isint = lambda v: type(v) is int
+        d = json.loads(message[len(PREFIX) :])
+
+        def isint(v):
+            return type(v) is int
+
         ok = (
-            isinstance(d, dict) and d.get("v") == 1
-            and isinstance(d.get("id"), str) and _HEX32.fullmatch(d["id"])
-            and isinstance(d.get("key"), str) and len(d["key"]) == 44
-            and isinstance(d.get("name"), str) and len(d["name"]) <= 200
-            and d.get("mime") in ALLOWED_MIME and d.get("kind") in ("image", "video")
+            isinstance(d, dict)
+            and d.get("v") == 1
+            and isinstance(d.get("id"), str)
+            and _HEX32.fullmatch(d["id"])
+            and isinstance(d.get("key"), str)
+            and len(d["key"]) == 44
+            and isinstance(d.get("name"), str)
+            and len(d["name"]) <= 200
+            and d.get("mime") in ALLOWED_MIME
+            and d.get("kind") in ("image", "video")
             and d["mime"].startswith(d["kind"] + "/")
-            and isint(d.get("size")) and d["size"] > 0
-            and isint(d.get("chunk")) and 4096 <= d["chunk"] <= 8 * CHUNK
+            and isint(d.get("size"))
+            and d["size"] > 0
+            and isint(d.get("chunk"))
+            and 4096 <= d["chunk"] <= 8 * CHUNK
             and d.get("ct_size") == ciphertext_size(d["size"], d["chunk"])
-            and isinstance(d.get("ct_sha256"), str) and _HEX64.fullmatch(d["ct_sha256"])
-            and isinstance(d.get("pt_sha256"), str) and _HEX64.fullmatch(d["pt_sha256"])
-            and (d.get("thumb") is None or (
-                isinstance(d["thumb"], str) and len(d["thumb"]) <= MAX_THUMB * 4 // 3 + 4
-                and re.fullmatch(r"[A-Za-z0-9+/=]*", d["thumb"])))
+            and isinstance(d.get("ct_sha256"), str)
+            and _HEX64.fullmatch(d["ct_sha256"])
+            and isinstance(d.get("pt_sha256"), str)
+            and _HEX64.fullmatch(d["pt_sha256"])
+            and (
+                d.get("thumb") is None
+                or (
+                    isinstance(d["thumb"], str)
+                    and len(d["thumb"]) <= MAX_THUMB * 4 // 3 + 4
+                    and re.fullmatch(r"[A-Za-z0-9+/=]*", d["thumb"])
+                )
+            )
         )
         return d if ok else None
     except (ValueError, TypeError, RecursionError):
@@ -102,12 +119,16 @@ def encrypt_file(plain, file_id=None, chunk=CHUNK):
     key = AESGCM.generate_key(256)
     aes, n, parts = AESGCM(key), chunk_count(len(plain), chunk), []
     for i in range(n):
-        part, nonce = plain[i * chunk:(i + 1) * chunk], os.urandom(12)
+        part, nonce = plain[i * chunk : (i + 1) * chunk], os.urandom(12)
         parts.append(nonce + aes.encrypt(nonce, part, _aad(file_id, i, i == n - 1)))
     out = b"".join(parts)
     return out, dict(
-        id=file_id, key=base64.b64encode(key).decode(), chunk=chunk, size=len(plain),
-        ct_size=len(out), ct_sha256=hashlib.sha256(out).hexdigest(),
+        id=file_id,
+        key=base64.b64encode(key).decode(),
+        chunk=chunk,
+        size=len(plain),
+        ct_size=len(out),
+        ct_sha256=hashlib.sha256(out).hexdigest(),
         pt_sha256=hashlib.sha256(plain).hexdigest(),
     )
 
@@ -115,19 +136,33 @@ def encrypt_file(plain, file_id=None, chunk=CHUNK):
 def decrypt_file(ciphertext, s):
     """Verify ciphertext hash, authenticate each chunk, verify plaintext hash."""
     if len(ciphertext) != s["ct_size"] or s["ct_size"] != ciphertext_size(s["size"], s["chunk"]):
-        raise AttachmentError("size", "Attachment tampered or corrupted: size does not match the signed message")
+        raise AttachmentError(
+            "size", "Attachment tampered or corrupted: size does not match the signed message"
+        )
     if hashlib.sha256(ciphertext).hexdigest() != s["ct_sha256"]:
-        raise AttachmentError("ciphertext_hash", "Attachment tampered or corrupted: ciphertext hash mismatch")
-    aes, n, at, plain = AESGCM(base64.b64decode(s["key"])), chunk_count(s["size"], s["chunk"]), 0, []
+        raise AttachmentError(
+            "ciphertext_hash", "Attachment tampered or corrupted: ciphertext hash mismatch"
+        )
+    aes, n, at, plain = (
+        AESGCM(base64.b64decode(s["key"])),
+        chunk_count(s["size"], s["chunk"]),
+        0,
+        [],
+    )
     for i in range(n):
         length = min(s["chunk"], s["size"] - i * s["chunk"])
-        nonce, box = ciphertext[at:at + 12], ciphertext[at + 12:at + 12 + length + 16]
+        nonce, box = ciphertext[at : at + 12], ciphertext[at + 12 : at + 12 + length + 16]
         try:
             plain.append(aes.decrypt(nonce, box, _aad(s["id"], i, i == n - 1)))
         except InvalidTag:
-            raise AttachmentError("chunk_auth", f"Attachment tampered or corrupted: chunk {i + 1} failed authentication")
+            raise AttachmentError(
+                "chunk_auth",
+                f"Attachment tampered or corrupted: chunk {i + 1} failed authentication",
+            )
         at += 12 + length + 16
     data = b"".join(plain)
     if hashlib.sha256(data).hexdigest() != s["pt_sha256"]:
-        raise AttachmentError("plaintext_hash", "Attachment tampered or corrupted: plaintext hash mismatch")
+        raise AttachmentError(
+            "plaintext_hash", "Attachment tampered or corrupted: plaintext hash mismatch"
+        )
     return data

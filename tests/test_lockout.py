@@ -11,13 +11,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from server.lockout import LockoutGuard  # noqa: E402
 
 
-def make_guard(threshold=5, window=300, backoff=(30, 60, 120, 300, 900),
-              addr_limit=20, addr_window=60):
-    return LockoutGuard(threshold=threshold, window=window, backoff_schedule=backoff,
-                        addr_limit=addr_limit, addr_window=addr_window)
+def make_guard(
+    threshold=5, window=300, backoff=(30, 60, 120, 300, 900), addr_limit=20, addr_window=60
+):
+    return LockoutGuard(
+        threshold=threshold,
+        window=window,
+        backoff_schedule=backoff,
+        addr_limit=addr_limit,
+        addr_window=addr_window,
+    )
 
 
 # --- lockout triggers at exactly the threshold -------------------------------
+
 
 def test_not_locked_before_threshold():
     g = make_guard(threshold=5)
@@ -47,6 +54,7 @@ def test_failures_outside_the_window_do_not_count():
 
 # --- backoff grows and caps ---------------------------------------------------
 
+
 def test_backoff_grows_on_repeated_lockouts():
     g = make_guard(threshold=2, backoff=(30, 60, 120))
     now = time.time()
@@ -75,6 +83,7 @@ def test_backoff_caps_at_the_schedule_end():
 
 # --- success resets ------------------------------------------------------------
 
+
 def test_success_resets_failure_count():
     g = make_guard(threshold=5)
     for _ in range(4):
@@ -100,6 +109,7 @@ def test_success_resets_backoff_tier_to_first():
 
 # --- locked attempts skip PBKDF2 (checked via a spy) --------------------------
 
+
 def test_locked_status_check_means_caller_never_calls_verify_password():
     """Mirrors how server.py actually uses this: status() is checked FIRST,
     and verify_password is only ever called when status().locked is False."""
@@ -111,11 +121,13 @@ def test_locked_status_check_means_caller_never_calls_verify_password():
         status = g.status("alice")
         if not status.locked:
             from auth.password_hash import verify_password
+
             verify_password("whatever", "pbkdf2_sha256$1$x$y")
         spy.assert_not_called()
 
 
 # --- generic message before lockout (server-level behavior) -------------------
+
 
 def test_the_record_that_triggers_lockout_is_itself_reported_as_a_plain_failure():
     """The LockStatus from the triggering call carries no special
@@ -134,6 +146,7 @@ def test_the_record_that_triggers_lockout_is_itself_reported_as_a_plain_failure(
 
 
 # --- locked_accounts() for the dashboard --------------------------------------
+
 
 def test_locked_accounts_lists_only_currently_locked_usernames():
     g = make_guard(threshold=1, backoff=(30,))
@@ -157,6 +170,7 @@ def test_locked_accounts_excludes_expired_locks():
 
 # --- per-source-address rate limit --------------------------------------------
 
+
 def test_address_rate_limit_allows_up_to_the_cap():
     g = make_guard(addr_limit=3, addr_window=60)
     now = time.time()
@@ -168,7 +182,7 @@ def test_address_rate_limit_is_independent_per_address():
     g = make_guard(addr_limit=1, addr_window=60)
     now = time.time()
     assert g.check_address_rate("1.1.1.1", now=now) is True
-    assert g.check_address_rate("2.2.2.2", now=now) is True   # different address, unaffected
+    assert g.check_address_rate("2.2.2.2", now=now) is True  # different address, unaffected
     assert g.check_address_rate("1.1.1.1", now=now) is False  # same address, over the cap
 
 

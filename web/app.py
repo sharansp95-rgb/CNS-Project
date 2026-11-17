@@ -1,18 +1,19 @@
 """Hardened WebSocket transport; crypto remains exclusively in the clients."""
 
 import asyncio
-from collections import deque
-from contextlib import asynccontextmanager, suppress
 import json
 import os
-from pathlib import Path
 import threading
 import time
+from collections import deque
+from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from server.relay_core import RelayCore, RELAYED_TYPES
+
+from server.relay_core import RELAYED_TYPES, RelayCore
 from web.settings import Settings, install_transport
 
 STATIC = Path(__file__).with_name("static")
@@ -84,9 +85,7 @@ def create_app(
 ):
     settings = Settings.load(
         origins,
-        os.environ.get(
-            "SECURECHAT_ALLOWED_ORIGINS", "http://localhost:8080,http://127.0.0.1:8080"
-        ),
+        os.environ.get("SECURECHAT_ALLOWED_ORIGINS", "http://localhost:8080,http://127.0.0.1:8080"),
     )
     allowed_origins = settings.origins
     signer = None
@@ -96,12 +95,9 @@ def create_app(
 
         if (
             not os.environ.get("DATABASE_URL")
-            or normalize_url(os.environ["DATABASE_URL"]).get_backend_name()
-            != "postgresql"
+            or normalize_url(os.environ["DATABASE_URL"]).get_backend_name() != "postgresql"
         ):
-            raise ValueError(
-                "Production main service requires a PostgreSQL DATABASE_URL"
-            )
+            raise ValueError("Production main service requires a PostgreSQL DATABASE_URL")
         signer = TimestampSigner()  # validate before opening the database
     max_size = int(max_frame_size or os.environ.get("SECURECHAT_WS_MAX_BYTES", "65536"))
     rate = int(rate_limit or os.environ.get("SECURECHAT_WS_RATE_LIMIT", "60"))
@@ -129,12 +125,14 @@ def create_app(
     app.state.vault = vault
     # Attachments reuse the login-issued bearer tokens. The Attack Lab runs
     # without the evidence vault but still gets a (local-storage) attachment API.
-    from web.tokens import TokenStore
-    from web.attachments_api import AttachmentAPI
     from server.storage import storage_from_env
+    from web.attachments_api import AttachmentAPI
+    from web.tokens import TokenStore
 
     tokens = vault or TokenStore()
-    storage = attachment_storage or storage_from_env(production=settings.production and include_vault)
+    storage = attachment_storage or storage_from_env(
+        production=settings.production and include_vault
+    )
     app.state.storage = storage
     AttachmentAPI(app, core.database, storage, tokens)
     from web.calls_api import CallsAPI
@@ -151,8 +149,8 @@ def create_app(
 
     @app.get("/healthz")
     async def health():
-        from sqlalchemy import text
         from fastapi.responses import JSONResponse
+        from sqlalchemy import text
 
         def check():
             with core.database.engine.connect() as connection:
@@ -247,16 +245,12 @@ def create_app(
                     break
                 if name is None:
                     peer.attempted_username = envelope.get("username")
-                    name = await asyncio.to_thread(
-                        core.authenticate, peer, addr, envelope
-                    )
+                    name = await asyncio.to_thread(core.authenticate, peer, addr, envelope)
                     if name is not None:
                         # Tells the client how often it must ping to stay logged in.
                         peer.send_envelope({"type": "session_policy", "idle_seconds": idle})
                 else:
-                    await asyncio.to_thread(
-                        core.handle_authenticated, peer, addr, name, envelope
-                    )
+                    await asyncio.to_thread(core.handle_authenticated, peer, addr, name, envelope)
         except asyncio.TimeoutError:
             await ws.close(code=1001)
         except (WebSocketDisconnect, RuntimeError):
@@ -270,9 +264,7 @@ def create_app(
             app.state.peers.discard(peer)
             removed = await asyncio.to_thread(core.remove_client, peer)
             if removed:
-                await asyncio.to_thread(
-                    core.broadcast_system, f"*** {removed} left the chat ***"
-                )
+                await asyncio.to_thread(core.broadcast_system, f"*** {removed} left the chat ***")
                 await asyncio.to_thread(
                     core.broadcast_event, {"type": "user_left", "username": removed}
                 )

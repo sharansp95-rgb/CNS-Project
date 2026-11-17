@@ -34,7 +34,5 @@ class TokenStore:
         with self.lock:
             value = self.tokens.get(token)
             if value is None or value[1] <= time.monotonic():
-                raise HTTPException(
-                    401, "Log in over WebSocket to access this API"
-                )
+                raise HTTPException(401, "Log in over WebSocket to access this API")
             return value[0]

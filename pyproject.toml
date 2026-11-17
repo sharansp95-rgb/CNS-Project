@@ -1,0 +1,13 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".agents", ".codex", "CnsProj", "_to_delete", "dist"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Script entry points establish the project import path before local imports.
+"attack_lab/scripts/*.py" = ["E402"]
+"tools/evaluate_security.py" = ["E402"]
+"tests/test_gui_attack_lab.py" = ["E402"]

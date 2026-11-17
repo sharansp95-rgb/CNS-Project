@@ -38,7 +38,6 @@ sendall, recv, makefile("r"), shutdown, close, plus attribute delegation
 
 import io
 import select
-import socket
 import ssl
 import threading
 
@@ -71,7 +70,7 @@ class LockedTLSSocket:
     def __init__(self, ssl_sock):
         ssl_sock.setblocking(False)
         self._s = ssl_sock
-        self._ssl_lock = threading.Lock()    # guards every call into OpenSSL
+        self._ssl_lock = threading.Lock()  # guards every call into OpenSSL
         self._write_lock = threading.Lock()  # makes sendall() atomic per message
         self._closed = False
 

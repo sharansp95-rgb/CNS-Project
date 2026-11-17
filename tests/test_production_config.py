@@ -2,11 +2,13 @@
 
 import base64
 from unittest.mock import patch
+
 import pytest
-from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
 from server import db
 from server.relay_core import RelayCore
 from server.timestamp import TimestampSigner
@@ -41,9 +43,7 @@ def production_env(monkeypatch, origin="https://chat.example"):
 def main_app(monkeypatch):
     core = RelayCore(logger=lambda *a, **kw: None)
     production_env(monkeypatch)
-    monkeypatch.setenv(
-        "DATABASE_URL", "postgres://placeholder:placeholder@db.invalid/main"
-    )
+    monkeypatch.setenv("DATABASE_URL", "postgres://placeholder:placeholder@db.invalid/main")
     return create_app(core)
 
 
@@ -69,9 +69,7 @@ def test_production_missing_tsa_never_generates_a_file(monkeypatch, tmp_path):
     monkeypatch.delenv("TSA_PRIVATE_KEY")
     target = tmp_path / "never-created.key"
     monkeypatch.setenv("TSA_KEY_PATH", str(target))
-    with patch(
-        "server.timestamp.generate", side_effect=AssertionError("disk key generation")
-    ):
+    with patch("server.timestamp.generate", side_effect=AssertionError("disk key generation")):
         with pytest.raises(ValueError, match="TSA_PRIVATE_KEY"):
             TimestampSigner()
     assert not target.exists()
@@ -81,13 +79,9 @@ def test_production_main_refuses_sqlite_and_missing_key_before_db_connect(monkey
     production_env(monkeypatch)
     with pytest.raises(ValueError, match="PostgreSQL"):
         create_app()
-    monkeypatch.setenv(
-        "DATABASE_URL", "postgres://placeholder:placeholder@db.invalid/main"
-    )
+    monkeypatch.setenv("DATABASE_URL", "postgres://placeholder:placeholder@db.invalid/main")
     monkeypatch.delenv("TSA_PRIVATE_KEY")
-    with patch(
-        "server.db.create_engine", side_effect=AssertionError("database accessed")
-    ):
+    with patch("server.db.create_engine", side_effect=AssertionError("database accessed")):
         with pytest.raises(ValueError, match="TSA_PRIVATE_KEY"):
             create_app()
 
@@ -150,13 +144,9 @@ def test_forwarded_client_ip_only_from_explicit_trusted_proxy(monkeypatch, trust
 def test_untrusted_forwarded_https_cannot_bypass_wss_policy(monkeypatch):
     app = main_app(monkeypatch)
     with TestClient(app, client=("203.0.113.4", 123)) as client:
-        assert (
-            client.get("/", headers={"x-forwarded-proto": "https"}).status_code == 403
-        )
+        assert client.get("/", headers={"x-forwarded-proto": "https"}).status_code == 403
     with TestClient(app, client=("10.2.3.4", 123)) as client:
-        assert (
-            client.get("/", headers={"x-forwarded-proto": "https"}).status_code == 200
-        )
+        assert client.get("/", headers={"x-forwarded-proto": "https"}).status_code == 200
 
 
 def test_ingress_diagnostics_preserve_socket_peer_and_exclude_header_text(monkeypatch, caplog):
@@ -203,11 +193,7 @@ def test_neon_url_normalization_and_pool_settings(scheme):
             db.Database(url)
     try:
         engine = created[0]
-        assert (
-            engine.pool.size() == 2
-            and engine.pool._recycle == 240
-            and engine.pool._pre_ping
-        )
+        assert engine.pool.size() == 2 and engine.pool._recycle == 240 and engine.pool._pre_ping
         assert engine.pool._max_overflow == 1
     finally:
         engine.dispose()
@@ -334,7 +320,9 @@ def test_lab_code_rate_limit_and_missing_secret(monkeypatch, tmp_path):
 
 
 def test_print_env_produces_a_key_without_writing_local_state(tmp_path):
-    import subprocess, sys, os
+    import os
+    import subprocess
+    import sys
 
     result = subprocess.run(
         [sys.executable, "tools/generate_tsa_key.py", "--print-env"],
@@ -353,9 +341,7 @@ def test_print_env_produces_a_key_without_writing_local_state(tmp_path):
 def test_production_main_requires_s3_storage_and_https_endpoint(monkeypatch):
     core = RelayCore(logger=lambda *a, **kw: None)
     production_env(monkeypatch)
-    monkeypatch.setenv(
-        "DATABASE_URL", "postgres://placeholder:placeholder@db.invalid/main"
-    )
+    monkeypatch.setenv("DATABASE_URL", "postgres://placeholder:placeholder@db.invalid/main")
     monkeypatch.setenv("STORAGE_BACKEND", "local")
     with pytest.raises(ValueError, match="STORAGE_BACKEND=s3"):
         create_app(core)

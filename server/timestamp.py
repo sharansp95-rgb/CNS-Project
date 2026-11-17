@@ -4,13 +4,15 @@ import base64
 import os
 from collections import Counter
 from datetime import datetime, timezone
+
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from sqlalchemy import select, or_
-from crypto_engine.hash_chain import canonical_json
+from sqlalchemy import or_, select
+
 from crypto_engine.evidence_tools import key_id
-from tools.generate_tsa_key import generate
+from crypto_engine.hash_chain import canonical_json
 from server.db import relayed_envelopes
+from tools.generate_tsa_key import generate
 
 
 class TimestampSigner:
@@ -61,9 +63,7 @@ class TimestampSigner:
                     conn.execute(
                         select(relayed_envelopes.c.envelope_sha256).where(
                             relayed_envelopes.c.envelope_type == "chat",
-                            relayed_envelopes.c.envelope_sha256.in_(
-                                unique[offset : offset + 400]
-                            ),
+                            relayed_envelopes.c.envelope_sha256.in_(unique[offset : offset + 400]),
                             or_(
                                 relayed_envelopes.c.sender == owner,
                                 relayed_envelopes.c.recipient == owner,
@@ -86,7 +86,7 @@ class TimestampSigner:
             corroborated=count,
             total=total,
         )
-        body["signature"] = base64.b64encode(
-            self.private.sign(canonical_json(body))
-        ).decode("ascii")
+        body["signature"] = base64.b64encode(self.private.sign(canonical_json(body))).decode(
+            "ascii"
+        )
         return body

@@ -10,5 +10,12 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "../../attack_lab/frontend",
+    "tests",
+    "e2e",
+    "../../attack_lab/e2e",
+    "*.ts"
+  ]
 }

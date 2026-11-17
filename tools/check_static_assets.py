@@ -1,7 +1,7 @@
 """Fail a Python-only Render build if a committed frontend entry/bundle is absent."""
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 for directory in (ROOT / "web/static", ROOT / "attack_lab/static"):

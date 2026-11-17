@@ -116,17 +116,15 @@ export async function verify(key: CryptoKey, b: Uint8Array, sig: Uint8Array) {
     const f = await forge();
     const md = f.md.sha256.create();
     md.update(binary(b));
-    return f.pki
-      .publicKeyFromPem(pem)
-      .verify(
-        md.digest().bytes(),
-        binary(sig),
-        f.pss.create({
-          md: f.md.sha256.create(),
-          mgf: f.mgf.mgf1.create(f.md.sha256.create()),
-          saltLength: 222,
-        }),
-      );
+    return f.pki.publicKeyFromPem(pem).verify(
+      md.digest().bytes(),
+      binary(sig),
+      f.pss.create({
+        md: f.md.sha256.create(),
+        mgf: f.mgf.mgf1.create(f.md.sha256.create()),
+        saltLength: 222,
+      }),
+    );
   } catch {
     return false;
   }

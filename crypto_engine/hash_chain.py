@@ -80,20 +80,21 @@ BROKEN = "broken"
 
 def canonical_json(obj) -> bytes:
     """The one canonical JSON encoding used for signed/hashed data."""
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=True).encode("ascii")
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
 
 
 def canonical_record(sender, recipient, seq, timestamp, message, prev_hash) -> bytes:
     """Canonical bytes of one chat record -- what is signed and hashed."""
-    return canonical_json({
-        "sender": sender,
-        "recipient": recipient,
-        "seq": seq,
-        "timestamp": timestamp,
-        "message": message,
-        "prev_hash": prev_hash,
-    })
+    return canonical_json(
+        {
+            "sender": sender,
+            "recipient": recipient,
+            "seq": seq,
+            "timestamp": timestamp,
+            "message": message,
+            "prev_hash": prev_hash,
+        }
+    )
 
 
 def record_hash(record_bytes: bytes) -> str:
@@ -132,8 +133,8 @@ class ChainVerdict:
         self.expected_seq = expected_seq
         self.got_seq = got_seq
         self.detail = detail
-        self.missing = missing        # GAP: how many sequence numbers were skipped
-        self.explained = explained    # GAP: how many of them match messages rejected earlier
+        self.missing = missing  # GAP: how many sequence numbers were skipped
+        self.explained = explained  # GAP: how many of them match messages rejected earlier
 
     @property
     def ok(self):
@@ -171,16 +172,22 @@ class IncomingChain:
 
         if seq < self.expected_seq:
             return ChainVerdict(
-                BROKEN, self.expected_seq, seq,
+                BROKEN,
+                self.expected_seq,
+                seq,
                 f"sequence went backwards (got #{seq}, expected #{self.expected_seq}): "
-                f"chain broken, possible reordering, replay or injection")
+                f"chain broken, possible reordering, replay or injection",
+            )
 
         if seq == self.expected_seq:
             if prev_hash != self.head:
                 return ChainVerdict(
-                    BROKEN, self.expected_seq, seq,
+                    BROKEN,
+                    self.expected_seq,
+                    seq,
                     f"prev_hash does not match message #{seq - 1}: chain broken, "
-                    f"possible reordering or injection")
+                    f"possible reordering or injection",
+                )
             self.head = record_hash(record)
             self.expected_seq = seq + 1
             self._rejected_nonces.clear()
@@ -194,18 +201,24 @@ class IncomingChain:
         # means the count matches messages this client itself rejected and showed a card for;
         # the wording says so without claiming the gap is harmless.
         if explained == 0:
-            detail = (f"{missing} message(s) missing before #{seq} (expected "
-                      f"#{self.expected_seq}): possible deletion by the relay")
+            detail = (
+                f"{missing} message(s) missing before #{seq} (expected "
+                f"#{self.expected_seq}): possible deletion by the relay"
+            )
         elif explained == missing:
-            detail = (f"{missing} message(s) missing before #{seq} (expected "
-                      f"#{self.expected_seq}): matches {explained} message(s) rejected earlier, "
-                      f"which were never shown")
+            detail = (
+                f"{missing} message(s) missing before #{seq} (expected "
+                f"#{self.expected_seq}): matches {explained} message(s) rejected earlier, "
+                f"which were never shown"
+            )
         else:
-            detail = (f"{missing} message(s) missing before #{seq} (expected "
-                      f"#{self.expected_seq}): {explained} match message(s) rejected earlier, "
-                      f"{missing - explained} unaccounted for: possible deletion by the relay")
+            detail = (
+                f"{missing} message(s) missing before #{seq} (expected "
+                f"#{self.expected_seq}): {explained} match message(s) rejected earlier, "
+                f"{missing - explained} unaccounted for: possible deletion by the relay"
+            )
         verdict = ChainVerdict(GAP, self.expected_seq, seq, detail, missing, explained)
         self.head = record_hash(record)
         self.expected_seq = seq + 1
-        self._rejected_nonces.clear()      # resynchronised: the next message starts clean
+        self._rejected_nonces.clear()  # resynchronised: the next message starts clean
         return verdict

@@ -41,7 +41,7 @@ AES_KEY_SIZE = 32  # AES-256
 _HKDF_INFO = b"CNSProject secure-chat ECDH session key v1"
 
 
-def generate_keypair():
+def generate_keypair() -> tuple[X25519PrivateKey, bytes]:
     """Generate a fresh X25519 keypair.
 
     Call this once per chat session / per peer -- never reuse a keypair
@@ -59,7 +59,7 @@ def generate_keypair():
     return private_key, public_bytes
 
 
-def compute_shared_key(private_key, peer_public_key_bytes):
+def compute_shared_key(private_key: X25519PrivateKey, peer_public_key_bytes: bytes) -> bytes:
     """Compute the 32-byte AES session key shared with a peer.
 
     `private_key` is this side's own X25519PrivateKey from generate_keypair().
@@ -71,8 +71,7 @@ def compute_shared_key(private_key, peer_public_key_bytes):
     """
     if not isinstance(peer_public_key_bytes, (bytes, bytearray)):
         raise TypeError(
-            "peer_public_key_bytes must be bytes, got "
-            f"{type(peer_public_key_bytes).__name__}"
+            f"peer_public_key_bytes must be bytes, got {type(peer_public_key_bytes).__name__}"
         )
     if len(peer_public_key_bytes) != 32:
         raise ValueError(

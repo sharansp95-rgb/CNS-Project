@@ -86,6 +86,7 @@ def test_hash_does_not_contain_plaintext_password():
 
 # --- timing-safety: confirm hmac.compare_digest is actually used ----------
 
+
 def test_uses_constant_time_comparison_not_equality():
     """Inspect the source to confirm hmac.compare_digest is used for the
     final comparison rather than `==`, which is not constant-time. A direct
@@ -126,4 +127,5 @@ def test_compare_digest_is_actually_hmac_compare_digest():
     """Belt-and-suspenders: confirm the module imports hmac and never uses
     plain string/bytes equality for the final hash comparison."""
     import auth.password_hash as mod
+
     assert mod.hmac is hmac

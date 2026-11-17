@@ -2,6 +2,7 @@
 
 from http.cookies import SimpleCookie
 from pathlib import Path
+
 from fastapi.responses import FileResponse, JSONResponse
 
 
@@ -14,9 +15,7 @@ class LabAccessGate:
             path = scope.get("path")
             cookie = SimpleCookie()
             try:
-                cookie.load(
-                    dict(scope.get("headers", [])).get(b"cookie", b"").decode("latin-1")
-                )
+                cookie.load(dict(scope.get("headers", [])).get(b"cookie", b"").decode("latin-1"))
                 token = cookie["lab_session"].value if "lab_session" in cookie else None
             except Exception:
                 token = None

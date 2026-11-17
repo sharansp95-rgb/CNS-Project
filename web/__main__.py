@@ -1,7 +1,9 @@
 """HTTP/WS-only deployment entry point. No TCP listener or Attack Lab imports."""
 
 import os
+
 import uvicorn
+
 from .app import create_app
 
 

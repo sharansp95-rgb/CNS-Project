@@ -8,7 +8,9 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "demo"))
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "demo")
+)
 
 import layout  # noqa: E402
 from layout import CHAT_MIN, DASH_MIN, GAP, TITLE_BAR, compute_layout  # noqa: E402
@@ -48,14 +50,16 @@ def test_everything_is_inside_the_visible_screen_and_big_enough(name, presentati
     x0, y0, width, height = SCREENS[name]
     lay = compute_layout(SCREENS[name], presentation=presentation, simple=simple)
     scale = 1.25 if presentation else 1.0
-    for window, (l, t, r, b) in frames(lay).items():
-        inside = l >= x0 and t >= y0 and r <= x0 + width and b <= y0 + height
+    for window, (left, top, right, bottom) in frames(lay).items():
+        inside = left >= x0 and top >= y0 and right <= x0 + width and bottom <= y0 + height
         # a layout that cannot fit (1.25x on a short screen) must SAY so instead of hiding it
-        assert inside or lay["overlap"], (window, (l, t, r, b), SCREENS[name])
+        assert inside or lay["overlap"], (window, (left, top, right, bottom), SCREENS[name])
         if not presentation:
-            assert inside, (window, (l, t, r, b), SCREENS[name])
+            assert inside, (window, (left, top, right, bottom), SCREENS[name])
     for chat in ("chat_a", "chat_b"):
-        assert lay[chat]["w"] >= round(CHAT_MIN[0] * scale) and lay[chat]["h"] >= round(CHAT_MIN[1] * scale)
+        assert lay[chat]["w"] >= round(CHAT_MIN[0] * scale) and lay[chat]["h"] >= round(
+            CHAT_MIN[1] * scale
+        )
     if lay["dash"]:
         assert lay["dash"]["w"] >= round(DASH_MIN[0] * scale) and lay["dash"]["h"] >= DASH_MIN[1]
 
@@ -92,7 +96,7 @@ def test_a_1080p_projector_tiles_without_overlap_even_in_presentation_mode():
         lay = compute_layout(SCREENS["1920x1080"], presentation=presentation)
         assert not lay["overlap"], presentation
     big = compute_layout(SCREENS["1920x1080"], presentation=True)
-    assert big["chat_a"]["w"] >= 850          # 680 * 1.25
+    assert big["chat_a"]["w"] >= 850  # 680 * 1.25
 
 
 def test_a_screen_too_narrow_for_two_chats_overlaps_them_and_says_so():
@@ -109,12 +113,20 @@ def test_simple_mode_has_just_two_chats_using_the_full_height():
 
 
 def test_command_line_prints_the_variables_the_launcher_evals():
-    out = subprocess.run([sys.executable, layout.__file__, "0", "33", "1470", "923"],
-                         capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(
+        [sys.executable, layout.__file__, "0", "33", "1470", "923"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
     values = dict(line.split("=", 1) for line in out.strip().splitlines())
     assert set(values) == {"CHAT_A_GEOM", "CHAT_B_GEOM", "DASH_GEOM", "SERVER_BOUNDS", "OVERLAP"}
     assert values["CHAT_A_GEOM"].count("x") == 1 and values["CHAT_A_GEOM"].count("+") == 2
     assert len(values["SERVER_BOUNDS"].strip('"').split()) == 4
-    simple = subprocess.run([sys.executable, layout.__file__, "0", "33", "1470", "923", "--simple"],
-                            capture_output=True, text=True, check=True).stdout
+    simple = subprocess.run(
+        [sys.executable, layout.__file__, "0", "33", "1470", "923", "--simple"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
     assert "DASH_GEOM" not in simple and "SERVER_BOUNDS" not in simple

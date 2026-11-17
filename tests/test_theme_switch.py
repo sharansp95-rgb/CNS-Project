@@ -89,12 +89,22 @@ def _walk(widget):
 
 def test_switching_repaints_the_chat_window_live_and_keeps_the_conversation(chat):
     chat.username, chat.peer = "alice", "bob"
-    chat._handle_event("auth_success", {"username": "alice", "peer": "bob", "lab_mode": False,
-                                        "own_fingerprint": "AAAA", "peer_key_found": True})
+    chat._handle_event(
+        "auth_success",
+        {
+            "username": "alice",
+            "peer": "bob",
+            "lab_mode": False,
+            "own_fingerprint": "AAAA",
+            "peer_key_found": True,
+        },
+    )
     chat._handoff_to_chat()
     chat._handle_event("handshake_established", {"peer": "bob"})
-    chat._handle_event("message_received", {"sender": "bob", "message": "hi", "timestamp": time.time(),
-                                            "receipt": {}})
+    chat._handle_event(
+        "message_received",
+        {"sender": "bob", "message": "hi", "timestamp": time.time(), "receipt": {}},
+    )
     chat.update()
     items = list(chat._items)
     assert PALETTES["dark"]["bg_app"] in _colours(chat)
@@ -113,11 +123,11 @@ def test_switching_repaints_the_chat_window_live_and_keeps_the_conversation(chat
 
 
 def test_the_switch_is_in_the_menus_and_on_the_login_screen(chat):
-    labels = [chat.settings_menu.entrycget(i, "label")
-              for i in range(chat.settings_menu.index("end") + 1)
-]
-    assert any(l.startswith("Dark theme") for l in labels)
-    assert any(l.startswith("Light theme") for l in labels)
+    labels = [
+        chat.settings_menu.entrycget(i, "label") for i in range(chat.settings_menu.index("end") + 1)
+    ]
+    assert any(label.startswith("Dark theme") for label in labels)
+    assert any(label.startswith("Light theme") for label in labels)
     assert chat.login_theme_button.cget("text").endswith("Light mode")
     chat.login_theme_button.event_generate("<Button-1>")
     assert chat.theme.mode == "light" and chat.login_theme_button.cget("text").endswith("Dark mode")

@@ -31,13 +31,18 @@ def root():
 def test_contrast_ratio_matches_known_values():
     assert contrast_ratio("#000000", "#ffffff") == pytest.approx(21.0)
     assert contrast_ratio("#777777", "#777777") == pytest.approx(1.0)
-    assert contrast_ratio("#767676", "#ffffff") == pytest.approx(4.54, abs=0.02)  # the classic AA edge
+    assert contrast_ratio("#767676", "#ffffff") == pytest.approx(
+        4.54, abs=0.02
+    )  # the classic AA edge
 
 
 def test_every_text_pair_meets_wcag_aa(root):
     t = Theme(root)
-    failures = [(fg, bg, round(contrast_ratio(fg, bg), 2)) for fg, bg in t.TEXT_PAIRS
-                if contrast_ratio(fg, bg) < 4.5]
+    failures = [
+        (fg, bg, round(contrast_ratio(fg, bg), 2))
+        for fg, bg in t.TEXT_PAIRS
+        if contrast_ratio(fg, bg) < 4.5
+    ]
     assert not failures, f"text/background pairs below 4.5:1 -> {failures}"
 
 
@@ -51,8 +56,12 @@ def test_type_scale_has_the_required_roles(root):
     for role in ("title", "heading", "body", "caption", "mono"):
         assert role in TYPE_SCALE
     t = Theme(root)
-    assert t.font("title").cget("size") > t.font("heading").cget("size") > t.font("body").cget("size") \
+    assert (
+        t.font("title").cget("size")
+        > t.font("heading").cget("size")
+        > t.font("body").cget("size")
         > t.font("caption").cget("size")
+    )
     assert t.font("mono").actual("family") == t.mono_font
     assert t.font("body").actual("family") == t.ui_font
 
@@ -60,6 +69,7 @@ def test_type_scale_has_the_required_roles(root):
 def test_font_fallback_lands_on_an_installed_family(root):
     t = Theme(root)
     from tkinter import font as tkfont
+
     families = set(tkfont.families(root))
     assert t.ui_font in families or t.ui_font == tkfont.nametofont("TkDefaultFont").actual("family")
     assert t.ui_font in theme_module.UI_FONT_PRIORITY or t.ui_font not in families or True
@@ -79,12 +89,15 @@ def test_presentation_mode_scales_fonts_and_ttk_padding_by_25_percent(root):
     ratio = t.set_presentation(True)
     assert ratio == pytest.approx(1.25)
     for role, size in base.items():
-        assert t.font(role).cget("size") == round(size / 1.0 * 1.25) or \
-            abs(t.font(role).cget("size") - size * 1.25) <= 1, role
+        assert (
+            t.font(role).cget("size") == round(size / 1.0 * 1.25)
+            or abs(t.font(role).cget("size") - size * 1.25) <= 1
+        ), role
     assert t.sp("lg") == 20 and t.sp("xs") == 5
     assert style.lookup("TButton", "padding") != pad_before
     assert t.set_presentation(False) == pytest.approx(1 / 1.25)
     assert {r: t.font(r).cget("size") for r in TYPE_SCALE} == base
+
 
 def test_rescale_tree_scales_pack_and_grid_padding(root):
     outer = tk.Frame(root, padx=8, pady=4)
@@ -101,14 +114,17 @@ def test_rescale_tree_scales_pack_and_grid_padding(root):
 
 # ---- cross-platform helpers (Issue 1, 2, 3) -----------------------------------------
 
+
 def test_hand_cursor_returns_pointinghand_on_darwin(monkeypatch):
     from gui import theme as t
+
     monkeypatch.setattr(t, "_IS_MAC", True)
     assert t.hand_cursor() == "pointinghand"
 
 
 def test_hand_cursor_returns_hand2_off_darwin(monkeypatch):
     from gui import theme as t
+
     monkeypatch.setattr(t, "_IS_MAC", False)
     assert t.hand_cursor() == "hand2"
 
@@ -116,6 +132,7 @@ def test_hand_cursor_returns_hand2_off_darwin(monkeypatch):
 def test_hand_cursor_is_valid_on_this_platform(root):
     """The cursor returned by hand_cursor() must be accepted by Tk on THIS OS."""
     from gui.theme import hand_cursor
+
     label = tk.Label(root, text="x", cursor=hand_cursor())
     label.pack()
     root.update()  # would raise TclError if the cursor was invalid
@@ -123,24 +140,29 @@ def test_hand_cursor_is_valid_on_this_platform(root):
 
 def test_is_no_display_error_true_for_no_display():
     from gui.theme import is_no_display_error
+
     assert is_no_display_error(tk.TclError("no display name and no $DISPLAY environment variable"))
-    assert is_no_display_error(tk.TclError("couldn't connect to display \":0\""))
+    assert is_no_display_error(tk.TclError('couldn\'t connect to display ":0"'))
 
 
 def test_is_no_display_error_false_for_bad_cursor():
     from gui.theme import is_no_display_error
+
     assert not is_no_display_error(tk.TclError('bad cursor spec "pointinghand"'))
     assert not is_no_display_error(tk.TclError("some other error"))
 
 
 def test_presentation_shortcut_uses_command_on_mac_control_elsewhere(monkeypatch):
     from gui import widgets as w
+
     monkeypatch.setattr(w, "_MAC", True)
     assert w.presentation_accelerator() == "⌘⇧P"
     mac_calls = []
+
     class FakeWindow:
         def bind_all(self, seq, func):
             mac_calls.append(seq)
+
     w.install_presentation_shortcuts(FakeWindow(), lambda: None)
     assert any("Command" in c for c in mac_calls)
     assert not any("Control" in c for c in mac_calls)
@@ -148,9 +170,11 @@ def test_presentation_shortcut_uses_command_on_mac_control_elsewhere(monkeypatch
     monkeypatch.setattr(w, "_MAC", False)
     assert w.presentation_accelerator() == "Ctrl+Shift+P"
     calls = []
+
     class FakeWindow:
         def bind_all(self, seq, func):
             calls.append(seq)
+
     w.install_presentation_shortcuts(FakeWindow(), lambda: None)
     assert any("Control" in c for c in calls)
     assert not any("Command" in c for c in calls)

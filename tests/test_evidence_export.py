@@ -18,6 +18,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 import verify_transcript  # noqa: E402
+
 from client.client import SecureChatClient, b64  # noqa: E402
 from client.evidence import EvidenceError, build_evidence  # noqa: E402
 from crypto_engine.hash_chain import canonical_json  # noqa: E402
@@ -77,11 +78,11 @@ def failed_checks(report):
 
 
 def message_index(evidence, text):
-    return next(i for i, r in enumerate(evidence["records"], start=1)
-                if r["message"] == text)
+    return next(i for i, r in enumerate(evidence["records"], start=1) if r["message"] == text)
 
 
 # --- clean export ------------------------------------------------------------
+
 
 def test_clean_export_verifies_valid(convo):
     _, _, evidence = convo
@@ -119,7 +120,7 @@ def test_cannot_export_before_a_session_exists():
 
 def test_rejected_messages_are_listed_separately_never_in_records(convo):
     a, b, _ = convo
-    a.send_message("one the relay will drop")   # never delivered to bob
+    a.send_message("one the relay will drop")  # never delivered to bob
     a.send_message("delivered after the gap")
     b._handle_chat(a.sock.sent[-1])
     evidence = build_evidence(b)
@@ -134,6 +135,7 @@ def test_rejected_messages_are_listed_separately_never_in_records(convo):
 
 
 # --- tampering ---------------------------------------------------------------
+
 
 def test_editing_one_message_makes_it_invalid_and_names_that_message(convo):
     _, _, evidence = convo
@@ -152,7 +154,7 @@ def test_editing_a_message_is_caught_even_if_exporter_resigns(convo):
     a, b, evidence = convo
     tampered = copy.deepcopy(evidence)
     tampered["records"][0]["message"] = "Approve transfer of $9 to Acme"
-    resign(tampered, b.rsa_private_key)            # exporter signature now fine
+    resign(tampered, b.rsa_private_key)  # exporter signature now fine
     report = verify_transcript.verify_evidence(tampered)
     assert not report.valid
     assert (1, "signature") in failed_checks(report)
@@ -162,18 +164,19 @@ def test_editing_a_message_is_caught_even_if_exporter_resigns(convo):
 def test_deleting_a_record_is_caught_by_the_chain(convo):
     _, b, evidence = convo
     tampered = copy.deepcopy(evidence)
-    del tampered["records"][2]                     # alice's 2nd message
-    resign(tampered, b.rsa_private_key)            # even with a valid export signature
+    del tampered["records"][2]  # alice's 2nd message
+    resign(tampered, b.rsa_private_key)  # even with a valid export signature
     report = verify_transcript.verify_evidence(tampered)
     assert not report.valid
-    assert any(check == "chain" and "missing" in text
-               for _, check, text in report.failures), report.render()
+    assert any(check == "chain" and "missing" in text for _, check, text in report.failures), (
+        report.render()
+    )
 
 
 def test_deleting_the_last_record_is_caught_by_the_chain_head(convo):
     _, b, evidence = convo
     tampered = copy.deepcopy(evidence)
-    tampered["records"].pop()                      # alice's last message
+    tampered["records"].pop()  # alice's last message
     resign(tampered, b.rsa_private_key)
     report = verify_transcript.verify_evidence(tampered)
     assert not report.valid
@@ -184,7 +187,7 @@ def test_reordering_records_is_caught(convo):
     _, b, evidence = convo
     tampered = copy.deepcopy(evidence)
     recs = tampered["records"]
-    recs[0], recs[2] = recs[2], recs[0]            # swap two of alice's messages
+    recs[0], recs[2] = recs[2], recs[0]  # swap two of alice's messages
     resign(tampered, b.rsa_private_key)
     report = verify_transcript.verify_evidence(tampered)
     assert not report.valid
@@ -197,7 +200,7 @@ def test_editing_metadata_breaks_the_exporter_signature(convo):
     tampered["session"]["started_at"] += 3600
     report = verify_transcript.verify_evidence(tampered)
     assert not report.valid
-    assert ("export signature" in {c for _, c, _ in report.failures})
+    assert "export signature" in {c for _, c, _ in report.failures}
     # ... but every individual message is still genuinely signed.
     assert not any(check == "signature" for _, check, _ in report.failures)
 
@@ -206,8 +209,9 @@ def test_swapping_in_a_different_public_key_fails_the_signatures(convo):
     _, _, evidence = convo
     attacker_priv, attacker_pub = generate_keypair()
     tampered = copy.deepcopy(evidence)
-    tampered["participants"]["alice"]["public_key_pem"] = \
-        serialize_public_key(attacker_pub).decode("ascii")
+    tampered["participants"]["alice"]["public_key_pem"] = serialize_public_key(attacker_pub).decode(
+        "ascii"
+    )
     report = verify_transcript.verify_evidence(tampered)
     assert not report.valid
     checks = {c for _, c, _ in report.failures}
@@ -226,8 +230,10 @@ def test_fully_forged_file_is_only_caught_by_a_pinned_fingerprint(convo):
     forger.rsa_private_key, _ = generate_keypair()
     # A forger-made conversation under the same names but their own keys:
     other_priv_b, other_pub_b = generate_keypair()
-    forger.peer_public_key, forger.peer_public_key_pem = other_pub_b, \
-        serialize_public_key(other_pub_b).decode("ascii")
+    forger.peer_public_key, forger.peer_public_key_pem = (
+        other_pub_b,
+        serialize_public_key(other_pub_b).decode("ascii"),
+    )
     bob2 = SecureChatClient(FakeSocket(), "bob", "alice")
     bob2.rsa_private_key = other_priv_b
     bob2.peer_public_key = forger.rsa_private_key.public_key()
@@ -239,12 +245,14 @@ def test_fully_forged_file_is_only_caught_by_a_pinned_fingerprint(convo):
     bob2._handle_chat(forger.sock.sent[-1])
     fake = build_evidence(bob2)
 
-    assert verify_transcript.verify_evidence(fake).valid                       # self-consistent
+    assert verify_transcript.verify_evidence(fake).valid  # self-consistent
     assert not verify_transcript.verify_evidence(
-        fake, expect_fingerprints=[real_alice_fp]).valid                       # pin catches it
+        fake, expect_fingerprints=[real_alice_fp]
+    ).valid  # pin catches it
 
 
 # --- fingerprint pinning -----------------------------------------------------
+
 
 def test_expect_fingerprint_accepts_a_real_participant(convo):
     _, _, evidence = convo
@@ -274,6 +282,7 @@ def test_cli_exit_codes(convo, tmp_path):
 
 
 # --- independence ------------------------------------------------------------
+
 
 def test_verifier_imports_no_client_or_server_code():
     source = open(os.path.join(ROOT, "tools", "verify_transcript.py")).read()

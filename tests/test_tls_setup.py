@@ -26,8 +26,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from certs.generate_certs import generate as generate_certs  # noqa: E402
 from conftest import wait_until_offline  # noqa: E402
+
+from certs.generate_certs import generate as generate_certs  # noqa: E402
 
 HOST = "127.0.0.1"
 
@@ -44,6 +45,7 @@ def certs(tmp_path):
     # Reuse the real generator, just point it at a temp file pair via
     # monkeypatching its module-level paths for the duration of this call.
     import certs.generate_certs as gen_mod
+
     orig_key, orig_cert = gen_mod.KEY_PATH, gen_mod.CERT_PATH
     gen_mod.KEY_PATH, gen_mod.CERT_PATH = str(key_path), str(cert_path)
     try:
@@ -75,6 +77,7 @@ def _tls_client_socket(host, port, cafile):
 
 # --- 1. correctly-configured TLS client: full register/login round trip ---
 
+
 def test_tls_client_register_login_round_trip(running_server):
     _, host, port, cert_path = running_server
     # The user store is isolated per test (see tests/conftest.py), so no
@@ -83,9 +86,18 @@ def test_tls_client_register_login_round_trip(running_server):
     sock = _tls_client_socket(host, port, cert_path)
     try:
         with sock.makefile("r", encoding="utf-8", newline="\n") as stream:
-            sock.sendall((json.dumps({
-                "type": "register", "username": username, "password": "hunter2pw",
-            }) + "\n").encode("utf-8"))
+            sock.sendall(
+                (
+                    json.dumps(
+                        {
+                            "type": "register",
+                            "username": username,
+                            "password": "hunter2pw",
+                        }
+                    )
+                    + "\n"
+                ).encode("utf-8")
+            )
             result = json.loads(stream.readline())
             assert result["type"] == "register_result"
             assert result["success"] is True
@@ -103,9 +115,18 @@ def test_tls_client_wrong_password_login_rejected(running_server):
     sock = _tls_client_socket(host, port, cert_path)
     try:
         with sock.makefile("r", encoding="utf-8", newline="\n") as stream:
-            sock.sendall((json.dumps({
-                "type": "register", "username": username, "password": "correctpw",
-            }) + "\n").encode("utf-8"))
+            sock.sendall(
+                (
+                    json.dumps(
+                        {
+                            "type": "register",
+                            "username": username,
+                            "password": "correctpw",
+                        }
+                    )
+                    + "\n"
+                ).encode("utf-8")
+            )
             json.loads(stream.readline())  # register_result
     finally:
         sock.close()
@@ -117,9 +138,18 @@ def test_tls_client_wrong_password_login_rejected(running_server):
     sock2 = _tls_client_socket(host, port, cert_path)
     try:
         with sock2.makefile("r", encoding="utf-8", newline="\n") as stream:
-            sock2.sendall((json.dumps({
-                "type": "login", "username": username, "password": "wrongpw",
-            }) + "\n").encode("utf-8"))
+            sock2.sendall(
+                (
+                    json.dumps(
+                        {
+                            "type": "login",
+                            "username": username,
+                            "password": "wrongpw",
+                        }
+                    )
+                    + "\n"
+                ).encode("utf-8")
+            )
             result = json.loads(stream.readline())
             assert result["type"] == "login_result"
             assert result["success"] is False
@@ -130,6 +160,7 @@ def test_tls_client_wrong_password_login_rejected(running_server):
 
 # --- 2. a client that skips TLS entirely cannot get a usable conversation -
 
+
 def test_raw_non_tls_client_cannot_speak_the_protocol(running_server):
     _, host, port, _ = running_server
     raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -137,9 +168,18 @@ def test_raw_non_tls_client_cannot_speak_the_protocol(running_server):
     raw.connect((host, port))
     try:
         # Send what a plaintext client would have sent pre-Phase-6.
-        raw.sendall((json.dumps({
-            "type": "register", "username": "plaintext_attacker", "password": "x",
-        }) + "\n").encode("utf-8"))
+        raw.sendall(
+            (
+                json.dumps(
+                    {
+                        "type": "register",
+                        "username": "plaintext_attacker",
+                        "password": "x",
+                    }
+                )
+                + "\n"
+            ).encode("utf-8")
+        )
 
         # The server is doing a TLS handshake on its side and will not
         # understand this plaintext; it will not echo back a valid
@@ -180,6 +220,7 @@ def test_raw_non_tls_client_cannot_speak_the_protocol(running_server):
 
 # --- 3. a client trusting a different, unrelated cert fails verification --
 
+
 def test_client_trusting_different_cert_fails_verification(running_server, tmp_path):
     _, host, port, _real_cert_path = running_server
 
@@ -190,6 +231,7 @@ def test_client_trusting_different_cert_fails_verification(running_server, tmp_p
     other_cert_path = other_certs_dir / "other.crt"
 
     import certs.generate_certs as gen_mod
+
     orig_key, orig_cert = gen_mod.KEY_PATH, gen_mod.CERT_PATH
     gen_mod.KEY_PATH, gen_mod.CERT_PATH = str(other_key_path), str(other_cert_path)
     try:

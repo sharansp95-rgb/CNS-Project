@@ -10,13 +10,13 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from server.user_store import get_public_key, register_user, verify_user, DatabaseUserStore
-
 from certs.generate_certs import cert_fingerprint_from_file  # noqa: E402
+
 # Package imports are identical in script and module mode (server/__init__.py).
-from server.lockout import LockoutGuard
-from server.security_log import log_event
+from server.lockout import LockoutGuard as LockoutGuard
 from server.relay_core import RelayCore
+from server.security_log import log_event
+from server.user_store import DatabaseUserStore, get_public_key, register_user, verify_user
 from transport import LockedTLSSocket  # noqa: E402
 
 DEFAULT_HOST = "127.0.0.1"
@@ -70,20 +70,33 @@ def build_server_ssl_context(certfile=None, keyfile=None):
         ) from exc
     return context
 
+
 # Envelope types relayed verbatim to a specific "to" recipient without the
 # server inspecting their payload beyond routing fields.
 class ChatServer(RelayCore):
-    def __init__(self, host=DEFAULT_HOST, port=DEFAULT_PORT,
-                 certfile=None, keyfile=None,
-                 lockout=None, database=None, store=None, logger=None, interceptor=None):
+    def __init__(
+        self,
+        host=DEFAULT_HOST,
+        port=DEFAULT_PORT,
+        certfile=None,
+        keyfile=None,
+        lockout=None,
+        database=None,
+        store=None,
+        logger=None,
+        interceptor=None,
+    ):
         if database is not None and store is None:
             store = DatabaseUserStore(database)
-        super().__init__(lockout=lockout,
+        super().__init__(
+            lockout=lockout,
             register=store.register_user if store else lambda *a, **kw: register_user(*a, **kw),
             verify=store.verify_user if store else lambda *a, **kw: verify_user(*a, **kw),
             public_key=store.get_public_key if store else lambda *a, **kw: get_public_key(*a, **kw),
             logger=logger or (lambda *a, **kw: log_event(*a, **kw)),
-            database=database, interceptor=interceptor)
+            database=database,
+            interceptor=interceptor,
+        )
         self.host = host
         self.port = port
         default_certfile, default_keyfile = default_cert_paths()
@@ -166,8 +179,12 @@ class ChatServer(RelayCore):
                     try:
                         envelope = json.loads(line)
                     except json.JSONDecodeError:
-                        self.log_event("malformed_envelope", from_user=name, from_addr=addr[0],
-                                 length=len(line))
+                        self.log_event(
+                            "malformed_envelope",
+                            from_user=name,
+                            from_addr=addr[0],
+                            length=len(line),
+                        )
                         continue
 
                     if not isinstance(envelope, dict):
@@ -246,10 +263,12 @@ class ChatServer(RelayCore):
         self.listen()
         srv = self._srv
         srv.settimeout(0.2)  # so shutdown() is noticed promptly
-        print(f"[*] Server listening on {self.host}:{self.port} over TLS "
-              f"(cert fingerprint: {self.cert_fingerprint}) "
-              f"(routes handshake/chat envelopes; never sees plaintext app "
-              f"secrets or session keys)")
+        print(
+            f"[*] Server listening on {self.host}:{self.port} over TLS "
+            f"(cert fingerprint: {self.cert_fingerprint}) "
+            f"(routes handshake/chat envelopes; never sees plaintext app "
+            f"secrets or session keys)"
+        )
         try:
             while not self._stop.is_set():
                 try:
@@ -280,7 +299,9 @@ def main():
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--certfile", default=None)
     parser.add_argument("--keyfile", default=None)
-    parser.add_argument("--web-port", type=int, help="also serve HTTP/WebSocket clients on this port")
+    parser.add_argument(
+        "--web-port", type=int, help="also serve HTTP/WebSocket clients on this port"
+    )
     args = parser.parse_args()
     try:
         server = ChatServer(args.host, args.port, args.certfile, args.keyfile)
@@ -289,14 +310,20 @@ def main():
         sys.exit(1)
     if args.web_port is not None:
         import uvicorn
+
         from web.app import create_app
+
         tcp_thread = threading.Thread(target=server.serve_forever, daemon=True)
         # Bind before starting HTTP so a TCP failure cannot silently split the demo.
         server.listen()
         tcp_thread.start()
         try:
-            uvicorn.run(create_app(server), host=args.host, port=args.web_port,
-                        ws_max_size=int(os.environ.get("SECURECHAT_WS_MAX_BYTES", "65536")))
+            uvicorn.run(
+                create_app(server),
+                host=args.host,
+                port=args.web_port,
+                ws_max_size=int(os.environ.get("SECURECHAT_WS_MAX_BYTES", "65536")),
+            )
         finally:
             server.shutdown()
             tcp_thread.join(timeout=5)

@@ -82,6 +82,7 @@ def test_rejects_non_bytes_public_key():
 
 # --- integration with the Phase 2 AES-GCM engine ---------------------------
 
+
 def test_derived_key_works_with_aes_gcm_round_trip():
     priv_a, pub_a = generate_keypair()
     priv_b, pub_b = generate_keypair()
@@ -106,5 +107,6 @@ def test_derived_key_from_different_session_cannot_decrypt():
 
     box = encrypt(key_ab, b"secret for B only")
     from crypto_engine.aes_gcm import DecryptionError
+
     with pytest.raises(DecryptionError):
         decrypt(key_ac, box["nonce"], box["ciphertext"], box["tag"])

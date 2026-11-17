@@ -11,8 +11,19 @@ const ascii = (b: Uint8Array, at: number, len: number) =>
 const startsWith = (b: Uint8Array, sig: number[]) =>
   b.length >= sig.length && sig.every((v, i) => b[i] === v);
 const MP4_BRANDS = new Set([
-  "isom", "iso2", "iso3", "iso4", "iso5", "iso6", "mp41", "mp42", "avc1",
-  "dash", "M4V ", "mmp4", "f4v ",
+  "isom",
+  "iso2",
+  "iso3",
+  "iso4",
+  "iso5",
+  "iso6",
+  "mp41",
+  "mp42",
+  "avc1",
+  "dash",
+  "M4V ",
+  "mmp4",
+  "f4v ",
 ]);
 /** Decide the type from content alone. The declared MIME / extension are ignored. */
 export function sniff(b: Uint8Array): Sniffed | null {
@@ -24,7 +35,11 @@ export function sniff(b: Uint8Array): Sniffed | null {
     return { kind: "image", mime: "image/gif", ext: "gif" };
   if (b.length > 12 && ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 4) === "WEBP")
     return { kind: "image", mime: "image/webp", ext: "webp" };
-  if (b.length > 12 && ascii(b, 4, 4) === "ftyp" && MP4_BRANDS.has(ascii(b, 8, 4)))
+  if (
+    b.length > 12 &&
+    ascii(b, 4, 4) === "ftyp" &&
+    MP4_BRANDS.has(ascii(b, 8, 4))
+  )
     return { kind: "video", mime: "video/mp4", ext: "mp4" };
   if (startsWith(b, [0x1a, 0x45, 0xdf, 0xa3])) {
     // EBML: accept the "webm" DocType only (Matroska .mkv is not allowed).
@@ -35,7 +50,12 @@ export function sniff(b: Uint8Array): Sniffed | null {
   return null;
 }
 export const ALLOWED_MIME = [
-  "image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/webm",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "video/mp4",
+  "video/webm",
 ];
 
 const concatBytes = (parts: Uint8Array[]) => {
@@ -73,8 +93,32 @@ function exifOrientation(app1: Uint8Array): number {
 function orientationSegment(value: number): Uint8Array {
   // APP1 "Exif\0\0" + big-endian TIFF with exactly one IFD0 entry (Orientation).
   const tiff = [
-    0x4d, 0x4d, 0x00, 0x2a, 0, 0, 0, 8, 0, 1,
-    0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, value, 0, 0, 0, 0, 0, 0,
+    0x4d,
+    0x4d,
+    0x00,
+    0x2a,
+    0,
+    0,
+    0,
+    8,
+    0,
+    1,
+    0x01,
+    0x12,
+    0,
+    3,
+    0,
+    0,
+    0,
+    1,
+    0,
+    value,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
   ];
   const payload = [0x45, 0x78, 0x69, 0x66, 0, 0, ...tiff];
   const len = payload.length + 2;
@@ -107,7 +151,7 @@ export function stripJpeg(b: Uint8Array): Uint8Array {
       marker === 0xe0 ||
       marker === 0xee ||
       (marker === 0xe2 && ascii(payload, 0, 11) === "ICC_PROFILE") ||
-      !(marker >= 0xe1 && marker <= 0xef) && marker !== 0xfe;
+      (!(marker >= 0xe1 && marker <= 0xef) && marker !== 0xfe);
     if (marker === 0xe1 && ascii(payload, 0, 4) === "Exif")
       orientation = exifOrientation(payload);
     if (keep) out.push(segment);
@@ -117,7 +161,11 @@ export function stripJpeg(b: Uint8Array): Uint8Array {
   const result = concatBytes(out);
   if (orientation === 1) return result;
   // Keep display orientation (no location, no camera data) right after SOI.
-  return concatBytes([result.slice(0, 2), orientationSegment(orientation), result.slice(2)]);
+  return concatBytes([
+    result.slice(0, 2),
+    orientationSegment(orientation),
+    result.slice(2),
+  ]);
 }
 
 // ---- PNG ----
@@ -227,12 +275,17 @@ export function jpegHasGps(b: Uint8Array): boolean {
     if (b[i + 1] === 0xe1) {
       if (ascii(payload, 0, 4) === "Exif") {
         const little = ascii(payload, 6, 2) === "II";
-        const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+        const dv = new DataView(
+          payload.buffer,
+          payload.byteOffset,
+          payload.byteLength,
+        );
         const ifd = 6 + dv.getUint32(10, little);
         const count = dv.getUint16(ifd, little);
         for (let n = 0; n < count; n++)
           if (dv.getUint16(ifd + 2 + n * 12, little) === 0x8825) return true;
-      } else if (new TextDecoder("latin1").decode(payload).includes("GPS")) return true;
+      } else if (new TextDecoder("latin1").decode(payload).includes("GPS"))
+        return true;
     }
     i += 2 + len;
   }
@@ -244,10 +297,17 @@ export function sanitizeFilename(name: string, ext: string): string {
   let base = String(name ?? "")
     .normalize("NFC")
     .replace(/[\\/]+/g, "_")
-    .replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩​-‏﻿]/g, "")
+    .replace(
+      // eslint-disable-next-line no-control-regex -- Strip control and bidi characters intentionally.
+      /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069\u200b-\u200f\ufeff]/g,
+      "",
+    )
     .replace(/[<>:"|?*]/g, "_")
     .trim();
-  base = base.replace(/\.[A-Za-z0-9]{1,5}$/, "").replace(/^\.+/, "").trim();
+  base = base
+    .replace(/\.[A-Za-z0-9]{1,5}$/, "")
+    .replace(/^\.+/, "")
+    .trim();
   base = Array.from(base).slice(0, 80).join("");
   if (!base) base = "attachment";
   return `${base}.${ext}`;

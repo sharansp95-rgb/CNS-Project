@@ -12,13 +12,13 @@ the endpoint degrades to STUN only and says so; calls still work when a direct
 path exists.
 """
 
-from collections import defaultdict, deque
 import logging
 import os
 import re
 import secrets
 import threading
 import time
+from collections import defaultdict, deque
 
 import httpx
 from fastapi import HTTPException, Request
@@ -78,7 +78,10 @@ class CallsAPI:
             servers += self._turn_servers()
             return {"iceServers": servers, "turn": "available"}
         except Exception as exc:  # never include the exception text: it can contain the URL
-            log.warning("TURN credentials unavailable (%s); calls fall back to direct only", type(exc).__name__)
+            log.warning(
+                "TURN credentials unavailable (%s); calls fall back to direct only",
+                type(exc).__name__,
+            )
             return {"iceServers": servers, "turn": "unavailable"}
 
     def _turn_servers(self):
@@ -99,14 +102,27 @@ class CallsAPI:
             listed = client.get(f"{base}/credentials", params={"apiKey": api_key})
             if listed.status_code == 200 and isinstance(listed.json(), list):
                 servers = [
-                    {"urls": s["urls"], "username": s.get("username", username), "credential": s.get("credential", password)}
+                    {
+                        "urls": s["urls"],
+                        "username": s.get("username", username),
+                        "credential": s.get("credential", password),
+                    }
                     for s in listed.json()
-                    if isinstance(s, dict) and "urls" in s and str(s["urls"]).startswith(("turn:", "turns:"))
+                    if isinstance(s, dict)
+                    and "urls" in s
+                    and str(s["urls"]).startswith(("turn:", "turns:"))
                 ]
                 if servers:
                     return servers
-        return [{
-            "urls": ["turn:global.relay.metered.ca:80", "turn:global.relay.metered.ca:80?transport=tcp",
-                     "turn:global.relay.metered.ca:443", "turns:global.relay.metered.ca:443?transport=tcp"],
-            "username": username, "credential": password,
-        }]
+        return [
+            {
+                "urls": [
+                    "turn:global.relay.metered.ca:80",
+                    "turn:global.relay.metered.ca:80?transport=tcp",
+                    "turn:global.relay.metered.ca:443",
+                    "turns:global.relay.metered.ca:443?transport=tcp",
+                ],
+                "username": username,
+                "credential": password,
+            }
+        ]

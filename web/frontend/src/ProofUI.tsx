@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import { Session, type Envelope } from "./session";
 import * as c from "./crypto";
 import {
@@ -58,15 +58,24 @@ function AttachmentCheck({ bytes }: { bytes: Uint8Array }) {
   try {
     const evidence = JSON.parse(new TextDecoder().decode(bytes));
     list = (Array.isArray(evidence.records) ? evidence.records : [])
-      .map((r: any, i: number) => ({ index: i + 1, d: parseDescriptor(String(r?.message)) }))
-      .filter((x: any) => x.d);
+      .map((r: Envelope | null, i: number) => ({
+        index: i + 1,
+        d: parseDescriptor(String(r?.message)),
+      }))
+      .filter(
+        (x: {
+          index: number;
+          d: Descriptor | null;
+        }): x is { index: number; d: Descriptor } => !!x.d,
+      );
   } catch {
     return null;
   }
   if (!list.length) return null;
   async function check(file?: File) {
     if (!file) return;
-    if (file.size > 80 * 1024 * 1024) return setResult("File is too large to check here");
+    if (file.size > 80 * 1024 * 1024)
+      return setResult("File is too large to check here");
     const digest = c.hex(await c.sha(new Uint8Array(await file.arrayBuffer())));
     const hit = list.flatMap(({ index, d }) =>
       (["pt_sha256", "ct_sha256"] as const)
@@ -277,16 +286,16 @@ export function EvidencePanel({
       bytes: Uint8Array;
       receipt: Envelope;
     }>();
-  async function refresh() {
+  const refresh = useCallback(async () => {
     try {
       setRows(await vaultRequest(session.apiToken));
     } catch (e) {
       setError((e as Error).message);
     }
-  }
+  }, [session.apiToken]);
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refresh]);
   async function save() {
     setBusy(true);
     setError("");

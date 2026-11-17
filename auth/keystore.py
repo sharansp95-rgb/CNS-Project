@@ -20,6 +20,7 @@ rather than key-wrapping, not something we didn't think about.
 import os
 
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+from cryptography.hazmat.primitives.asymmetric.types import PrivateKeyTypes
 
 from crypto_engine.signatures import deserialize_private_key, serialize_private_key
 
@@ -32,7 +33,7 @@ def _private_key_path(username, keys_dir=DEFAULT_KEYS_DIR):
     return os.path.join(keys_dir, f"{username}_private.pem")
 
 
-def save_private_key(username: str, private_key: RSAPrivateKey, keys_dir=DEFAULT_KEYS_DIR):
+def save_private_key(username: str, private_key: RSAPrivateKey, keys_dir=DEFAULT_KEYS_DIR) -> str:
     """Write `private_key` to data/keys/<username>_private.pem as an
     unencrypted PEM file (see the module docstring for why that's an
     accepted simplification here)."""
@@ -46,7 +47,7 @@ def save_private_key(username: str, private_key: RSAPrivateKey, keys_dir=DEFAULT
     return path
 
 
-def load_private_key(username: str, keys_dir=DEFAULT_KEYS_DIR):
+def load_private_key(username: str, keys_dir=DEFAULT_KEYS_DIR) -> PrivateKeyTypes | None:
     """Load the previously-saved private key for `username`, or None if this
     client has never generated/stored one for that username."""
     path = _private_key_path(username, keys_dir)
@@ -57,4 +58,5 @@ def load_private_key(username: str, keys_dir=DEFAULT_KEYS_DIR):
 
 
 def has_private_key(username: str, keys_dir=DEFAULT_KEYS_DIR) -> bool:
+    """Return whether this username has a saved local identity PEM."""
     return os.path.exists(_private_key_path(username, keys_dir))

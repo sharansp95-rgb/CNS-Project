@@ -26,20 +26,19 @@ import sys
 import threading
 import time
 
+from attack_lab.relay import RogueRelay as ChatServer
 from attack_lab.scripts._demo_common import (
-    isolate_demo_state,
     banner,
     check,
     demo_username,
     establish_signed_handshake,
     free_port,
+    isolate_demo_state,
     register_client,
     run_step,
     wait_for_port,
 )
-
 from server.server import CertsMissingError
-from attack_lab.relay import RogueRelay as ChatServer
 
 
 class _DroppingRelay(ChatServer):
@@ -56,14 +55,16 @@ class _DroppingRelay(ChatServer):
         if envelope.get("type") == "chat" and self.drop_next_chat:
             self.drop_next_chat = False
             self.dropped_count += 1
-            print("    [MALICIOUS RELAY] silently dropped a valid chat message "
-                  "(it is never forwarded, and nobody is told).")
+            print(
+                "    [MALICIOUS RELAY] silently dropped a valid chat message "
+                "(it is never forwarded, and nobody is told)."
+            )
             return
         super().route(envelope, sender_name)
 
 
 def main():
-    isolate_demo_state()   # temp user store / keys / log / exports: never your real data/
+    isolate_demo_state()  # temp user store / keys / log / exports: never your real data/
     banner("DEMO 4: hash-chained log detects a message silently dropped by the relay")
 
     try:
@@ -88,8 +89,11 @@ def main():
     print("[*] Both clients registered with fresh RSA-2048 identities.")
 
     ok = establish_signed_handshake(alice, bob)
-    if not check(ok, "RSA-signed ECDH handshake completed on both sides.",
-                 "Handshake did not complete -- aborting demo."):
+    if not check(
+        ok,
+        "RSA-signed ECDH handshake completed on both sides.",
+        "Handshake did not complete -- aborting demo.",
+    ):
         sys.exit(1)
 
     def send(text, drop=False):
@@ -97,37 +101,51 @@ def main():
         alice.send_message(text)
         time.sleep(1.0)
 
-    _, out1 = run_step("STEP 1: alice sends message #1 -- delivered normally",
-                       lambda: send("Patient 4411: start 5mg."))
-    _, out2 = run_step("STEP 2: alice sends message #2 -- but the relay silently DROPS it",
-                       lambda: send("Patient 4411: STOP, allergic reaction.", drop=True))
-    _, out3 = run_step("STEP 3: alice sends message #3 -- delivered; bob's chain check fires",
-                       lambda: send("Patient 4411: confirm you received my last order."))
+    _, out1 = run_step(
+        "STEP 1: alice sends message #1 -- delivered normally",
+        lambda: send("Patient 4411: start 5mg."),
+    )
+    _, out2 = run_step(
+        "STEP 2: alice sends message #2 -- but the relay silently DROPS it",
+        lambda: send("Patient 4411: STOP, allergic reaction.", drop=True),
+    )
+    _, out3 = run_step(
+        "STEP 3: alice sends message #3 -- delivered; bob's chain check fires",
+        lambda: send("Patient 4411: confirm you received my last order."),
+    )
 
     banner("RESULTS")
     all_ok = True
-    all_ok &= check("start 5mg" in out1 and "WARNING" not in out1,
-                    "Message #1 displayed with no warning.",
-                    "Message #1 was not displayed cleanly.")
-    all_ok &= check(server.dropped_count == 1,
-                    "Confirmed the relay really dropped message #2 (not a no-op).",
-                    "The relay never dropped anything -- demo setup is broken.")
-    all_ok &= check("STOP, allergic" not in out2 + out3,
-                    "The dropped message never reached bob (the attack worked at the "
-                    "network level).",
-                    "The dropped message somehow arrived.")
-    all_ok &= check("1 message(s) missing" in out3
-                    and "possible deletion by the relay" in out3,
-                    "Bob's client detected the gap: '1 message(s) missing ... "
-                    "possible deletion by the relay'.",
-                    "NO gap warning was printed -- the drop went undetected!")
-    all_ok &= check("confirm you received" in out3,
-                    "The authentic message #3 was still delivered (flagged, not lost).",
-                    "Message #3 was not delivered.")
-    all_ok &= check(any(e["reason"] == "chain_gap" for e in bob.rejected_events),
-                    "The gap was recorded in bob's rejected-events list for the "
-                    "evidence export.",
-                    "The gap was not recorded for the evidence export.")
+    all_ok &= check(
+        "start 5mg" in out1 and "WARNING" not in out1,
+        "Message #1 displayed with no warning.",
+        "Message #1 was not displayed cleanly.",
+    )
+    all_ok &= check(
+        server.dropped_count == 1,
+        "Confirmed the relay really dropped message #2 (not a no-op).",
+        "The relay never dropped anything -- demo setup is broken.",
+    )
+    all_ok &= check(
+        "STOP, allergic" not in out2 + out3,
+        "The dropped message never reached bob (the attack worked at the network level).",
+        "The dropped message somehow arrived.",
+    )
+    all_ok &= check(
+        "1 message(s) missing" in out3 and "possible deletion by the relay" in out3,
+        "Bob's client detected the gap: '1 message(s) missing ... possible deletion by the relay'.",
+        "NO gap warning was printed -- the drop went undetected!",
+    )
+    all_ok &= check(
+        "confirm you received" in out3,
+        "The authentic message #3 was still delivered (flagged, not lost).",
+        "Message #3 was not delivered.",
+    )
+    all_ok &= check(
+        any(e["reason"] == "chain_gap" for e in bob.rejected_events),
+        "The gap was recorded in bob's rejected-events list for the evidence export.",
+        "The gap was not recorded for the evidence export.",
+    )
 
     banner("DEMO 4 " + ("PASSED" if all_ok else "FAILED"))
     sys.exit(0 if all_ok else 1)

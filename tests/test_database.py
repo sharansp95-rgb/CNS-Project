@@ -1,16 +1,17 @@
 """Persistence contracts, real TLS chat confidentiality, and legacy import."""
+
 import json
-from pathlib import Path
 import subprocess
 import sys
 import time
+from pathlib import Path
 from unittest.mock import patch
 
+import _demo_common as dc
 import pytest
 from sqlalchemy import MetaData, insert, select
 from sqlalchemy.exc import IntegrityError
 
-import _demo_common as dc
 from server import db, user_store
 from server.lockout import LockoutGuard
 from server.security_log import log_event
@@ -78,21 +79,29 @@ def test_chat_round_trip_stores_no_plaintext_in_any_column(net):
     received = []
     server, _, port = net.start_server()
     alice = net.register_client(port, "db_alice", "db_bob")
-    bob = net.register_client(port, "db_bob", "db_alice",
-                              event_callback=lambda kind, data: received.append((kind, data)))
+    bob = net.register_client(
+        port, "db_bob", "db_alice", event_callback=lambda kind, data: received.append((kind, data))
+    )
     assert dc.establish_signed_handshake(alice, bob)
     message = "DATABASE_PLAINTEXT_SENTINEL_9d5d6430_hello"
     alice.send_message(message)
     deadline = time.time() + 10
+
     def delivered():
-        return any(kind == "message_received" and data.get("message") == message
-                   for kind, data in received)
+        return any(
+            kind == "message_received" and data.get("message") == message for kind, data in received
+        )
+
     while time.time() < deadline and not delivered():
         time.sleep(0.02)
     assert delivered(), "real receiver must decrypt, verify and display"
     archived = rows(db.relayed_envelopes)
     assert any(r["envelope_type"] == "chat" and r["ciphertext_b64"] for r in archived)
-    assert {r["envelope_type"] for r in archived} >= {"handshake_init", "handshake_response", "chat"}
+    assert {r["envelope_type"] for r in archived} >= {
+        "handshake_init",
+        "handshake_response",
+        "chat",
+    }
     reflected = MetaData()
     reflected.reflect(bind=db.get_database().engine)
     for table in reflected.sorted_tables:
@@ -108,14 +117,24 @@ def test_chat_round_trip_stores_no_plaintext_in_any_column(net):
 
 def test_migration_cli_imports_unchanged_hashes_and_is_idempotent(tmp_path):
     from auth.password_hash import hash_password
+
     encoded = hash_password("original_password")
     source = tmp_path / "users.json"
-    source.write_text(json.dumps({"legacy": {"password_hash": encoded, "public_key": "PUBLIC PEM"}}))
+    source.write_text(
+        json.dumps({"legacy": {"password_hash": encoded, "public_key": "PUBLIC PEM"}})
+    )
     events = tmp_path / "events.jsonl"
     record = {"ts": 123.5, "event": "failed_login", "username": "legacy", "from_addr": "127.0.0.1"}
     # Identical repeated lines represent two real events, preserved on import.
     events.write_text((json.dumps(record) + "\n") * 2)
-    command = [sys.executable, "tools/migrate_json_to_db.py", "--users", str(source), "--events", str(events)]
+    command = [
+        sys.executable,
+        "tools/migrate_json_to_db.py",
+        "--users",
+        str(source),
+        "--events",
+        str(events),
+    ]
     first = subprocess.run(command, capture_output=True, text=True, check=True)
     assert "users_imported=1" in first.stdout and "events_imported=2" in first.stdout
     second = subprocess.run(command, capture_output=True, text=True, check=True)
@@ -148,7 +167,9 @@ def test_migration_invalid_input_is_atomic(tmp_path):
 
 def test_event_metadata_written_to_database_and_jsonl(tmp_path):
     path = tmp_path / "events.jsonl"
-    record = log_event("failed_login", path=str(path), username="a", from_addr="127.0.0.1", retry_after=2)
+    record = log_event(
+        "failed_login", path=str(path), username="a", from_addr="127.0.0.1", retry_after=2
+    )
     event = rows(db.security_events)[0]
     assert event["event_type"] == "failed_login" and event["ts"] == record["ts"]
     assert event["username"] == "a" and event["peer_addr"] == "127.0.0.1"
@@ -159,7 +180,9 @@ def test_event_metadata_written_to_database_and_jsonl(tmp_path):
 def test_relay_retention_flag_and_allowlist(monkeypatch):
     monkeypatch.setenv("SECURECHAT_ENVELOPE_MAX_ROWS", "2")
     for i in range(5):
-        db.record_relay({"type": "chat", "to": "b", "ciphertext": "YWJj", "message": "DO_NOT_STORE"}, "a")
+        db.record_relay(
+            {"type": "chat", "to": "b", "ciphertext": "YWJj", "message": "DO_NOT_STORE"}, "a"
+        )
     archived = rows(db.relayed_envelopes)
     assert len(archived) == 2
     assert "DO_NOT_STORE" not in str(archived)
@@ -183,6 +206,7 @@ def test_legacy_path_argument_selects_isolated_database(tmp_path):
 
 def test_independent_guards_cannot_lose_concurrent_failures():
     from concurrent.futures import ThreadPoolExecutor
+
     guards = [LockoutGuard(threshold=5) for _ in range(5)]
     with ThreadPoolExecutor(max_workers=5) as executor:
         results = list(executor.map(lambda guard: guard.record_failure("concurrent"), guards))
@@ -192,6 +216,7 @@ def test_independent_guards_cannot_lose_concurrent_failures():
 
 def test_concurrent_registration_has_one_winner():
     from concurrent.futures import ThreadPoolExecutor
+
     with ThreadPoolExecutor(max_workers=4) as executor:
         results = list(executor.map(lambda _: user_store.register_user("race", "pw"), range(4)))
     assert results.count(True) == 1
@@ -200,6 +225,7 @@ def test_concurrent_registration_has_one_winner():
 
 def test_schema_version_is_checked():
     from sqlalchemy import update
+
     database = db.get_database()
     with database.transaction() as conn:
         conn.execute(update(db.schema_version).values(version=999))
@@ -211,6 +237,7 @@ def test_schema_version_is_checked():
 def test_postgresql_driver_and_schema_compile_without_sqlite_specific_sql():
     from sqlalchemy import create_engine
     from sqlalchemy.schema import CreateTable
+
     engine = create_engine("postgresql+psycopg://user:password@localhost/test")
     try:
         assert engine.dialect.driver == "psycopg"
@@ -222,6 +249,7 @@ def test_postgresql_driver_and_schema_compile_without_sqlite_specific_sql():
 
 def test_sqlite_v2_to_v3_upgrade_is_additive_and_atomic(tmp_path):
     import sqlite3
+
     path = tmp_path / "v2.db"
     with sqlite3.connect(path) as conn:
         conn.executescript("""CREATE TABLE schema_version (version INTEGER PRIMARY KEY);

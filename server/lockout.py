@@ -44,14 +44,15 @@ import time
 from dataclasses import dataclass
 
 from sqlalchemy import delete, insert, select, update
+
 try:
     from .db import get_database, login_lockouts
 except ImportError:
     from db import get_database, login_lockouts
 
 DEFAULT_THRESHOLD = 5
-DEFAULT_WINDOW_SECONDS = 300          # failures must fall within this window to count
-DEFAULT_BACKOFF_SCHEDULE = (30, 60, 120, 300, 900)   # seconds; last entry is the cap (15 min)
+DEFAULT_WINDOW_SECONDS = 300  # failures must fall within this window to count
+DEFAULT_BACKOFF_SCHEDULE = (30, 60, 120, 300, 900)  # seconds; last entry is the cap (15 min)
 DEFAULT_ADDR_LIMIT = 20
 DEFAULT_ADDR_WINDOW_SECONDS = 60
 
@@ -59,17 +60,23 @@ DEFAULT_ADDR_WINDOW_SECONDS = 60
 @dataclass
 class LockStatus:
     locked: bool
-    retry_after: float = 0.0       # seconds remaining, if locked
-    newly_locked: bool = False     # True only on the record_failure() call that triggered it
-    lock_level: int = 0            # which backoff tier was used (0-indexed)
+    retry_after: float = 0.0  # seconds remaining, if locked
+    newly_locked: bool = False  # True only on the record_failure() call that triggered it
+    lock_level: int = 0  # which backoff tier was used (0-indexed)
 
 
 class LockoutGuard:
     """Persistent per-account lockout; source-address limits remain per process."""
 
-    def __init__(self, threshold=DEFAULT_THRESHOLD, window=DEFAULT_WINDOW_SECONDS,
-                 backoff_schedule=DEFAULT_BACKOFF_SCHEDULE,
-                 addr_limit=DEFAULT_ADDR_LIMIT, addr_window=DEFAULT_ADDR_WINDOW_SECONDS, database=None):
+    def __init__(
+        self,
+        threshold=DEFAULT_THRESHOLD,
+        window=DEFAULT_WINDOW_SECONDS,
+        backoff_schedule=DEFAULT_BACKOFF_SCHEDULE,
+        addr_limit=DEFAULT_ADDR_LIMIT,
+        addr_window=DEFAULT_ADDR_WINDOW_SECONDS,
+        database=None,
+    ):
         self.threshold = threshold
         self.window = window
         self.backoff_schedule = tuple(backoff_schedule)
@@ -77,35 +84,50 @@ class LockoutGuard:
         self.addr_window = addr_window
         self._lock = threading.Lock()
         self.database = database if database is not None else get_database()
-        self._by_addr = {}       # addr -> [timestamp, ...]
+        self._by_addr = {}  # addr -> [timestamp, ...]
 
     # --- per-account lockout -------------------------------------------------
 
-    def status(self, username, now=None):
+    def status(self, username: str, now: float | None = None) -> LockStatus:
         """Current lock state for `username`, WITHOUT recording an attempt.
         The caller checks this BEFORE verifying a password, so a locked
         account's PBKDF2 is never run."""
         now = time.time() if now is None else now
         with self.database.engine.connect() as conn:
-            st = conn.execute(select(login_lockouts).where(
-                login_lockouts.c.username == username)).mappings().first()
+            st = (
+                conn.execute(select(login_lockouts).where(login_lockouts.c.username == username))
+                .mappings()
+                .first()
+            )
         if st is None or st["locked_until"] <= now:
             return LockStatus(locked=False)
-        return LockStatus(locked=True, retry_after=st["locked_until"] - now,
-                          lock_level=max(st["lock_level"] - 1, 0))
+        return LockStatus(
+            locked=True,
+            retry_after=st["locked_until"] - now,
+            lock_level=max(st["lock_level"] - 1, 0),
+        )
 
-    def record_failure(self, username, addr=None, now=None):
+    def record_failure(
+        self, username: str, addr: str | None = None, now: float | None = None
+    ) -> LockStatus:
         """Persist the exact sliding-window streak and escalating backoff tier."""
         now = time.time() if now is None else now
         with self.database.transaction() as conn:
-            st = conn.execute(select(login_lockouts).where(
-                login_lockouts.c.username == username)).mappings().first()
+            st = (
+                conn.execute(select(login_lockouts).where(login_lockouts.c.username == username))
+                .mappings()
+                .first()
+            )
             # A concurrent failure may already have locked this account.
             if st and st["locked_until"] > now:
-                return LockStatus(locked=True, retry_after=st["locked_until"] - now,
-                                  lock_level=max(st["lock_level"] - 1, 0))
-            failures = [t for t in (st["failure_timestamps"] if st else [])
-                        if now - t <= self.window]
+                return LockStatus(
+                    locked=True,
+                    retry_after=st["locked_until"] - now,
+                    lock_level=max(st["lock_level"] - 1, 0),
+                )
+            failures = [
+                t for t in (st["failure_timestamps"] if st else []) if now - t <= self.window
+            ]
             failures.append(now)
             level = st["lock_level"] if st else 0
             until = st["locked_until"] if st else 0.0
@@ -116,36 +138,53 @@ class LockoutGuard:
                 until = now + duration
                 level += 1
                 failures = []
-                result = LockStatus(locked=True, retry_after=duration,
-                                    newly_locked=True, lock_level=tier)
-            values = dict(failure_count=len(failures), locked_until=until,
-                          last_failure_at=now, lock_level=level,
-                          failure_timestamps=failures)
+                result = LockStatus(
+                    locked=True, retry_after=duration, newly_locked=True, lock_level=tier
+                )
+            values = dict(
+                failure_count=len(failures),
+                locked_until=until,
+                last_failure_at=now,
+                lock_level=level,
+                failure_timestamps=failures,
+            )
             if st:
-                conn.execute(update(login_lockouts).where(
-                    login_lockouts.c.username == username).values(**values))
+                conn.execute(
+                    update(login_lockouts)
+                    .where(login_lockouts.c.username == username)
+                    .values(**values)
+                )
             else:
                 conn.execute(insert(login_lockouts).values(username=username, **values))
         return result
 
-    def record_success(self, username):
+    def record_success(self, username: str) -> None:
         """Reset failures and backoff tier on successful login."""
         with self.database.transaction() as conn:
             conn.execute(delete(login_lockouts).where(login_lockouts.c.username == username))
 
-    def locked_accounts(self, now=None):
+    def locked_accounts(self, now: float | None = None) -> list[dict[str, str | float | int]]:
         """Read currently locked accounts, including locks from earlier processes."""
         now = time.time() if now is None else now
         with self.database.engine.connect() as conn:
-            rows = conn.execute(select(login_lockouts).where(
-                login_lockouts.c.locked_until > now)).mappings().all()
-        return [{"username": st["username"], "locked_until": st["locked_until"],
-                 "remaining": st["locked_until"] - now, "lock_level": st["lock_level"]}
-                for st in rows]
+            rows = (
+                conn.execute(select(login_lockouts).where(login_lockouts.c.locked_until > now))
+                .mappings()
+                .all()
+            )
+        return [
+            {
+                "username": st["username"],
+                "locked_until": st["locked_until"],
+                "remaining": st["locked_until"] - now,
+                "lock_level": st["lock_level"],
+            }
+            for st in rows
+        ]
 
     # --- per-source-address rate limit ---------------------------------------
 
-    def check_address_rate(self, addr, now=None):
+    def check_address_rate(self, addr: str, now: float | None = None) -> bool:
         """True if `addr` may make another register/login attempt right
         now; False if it has exceeded `addr_limit` attempts within
         `addr_window` seconds. Every call that returns True also counts as

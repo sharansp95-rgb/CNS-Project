@@ -24,22 +24,21 @@ forged content never displayed.
 """
 
 import sys
+import threading
 
+from attack_lab.relay import RogueRelay as ChatServer
 from attack_lab.scripts._demo_common import (
-    isolate_demo_state,
     banner,
     check,
     demo_username,
     establish_signed_handshake,
     free_port,
+    isolate_demo_state,
     register_client,
     run_step,
     wait_for_port,
 )
-
-import threading
 from server.server import CertsMissingError
-from attack_lab.relay import RogueRelay as ChatServer
 
 
 class _TamperingRelay(ChatServer):
@@ -58,17 +57,20 @@ class _TamperingRelay(ChatServer):
             self.tamper_next_chat = False
             self.tampered_count += 1
             import base64
+
             raw = bytearray(base64.b64decode(envelope["ciphertext"]))
             raw[0] ^= 0xFF  # flip every bit of the first ciphertext byte
             envelope = dict(envelope)
             envelope["ciphertext"] = base64.b64encode(bytes(raw)).decode("ascii")
-            print(f"    [MALICIOUS RELAY] flipped a byte in this chat "
-                  f"envelope's ciphertext before forwarding it.")
+            print(
+                "    [MALICIOUS RELAY] flipped a byte in this chat "
+                "envelope's ciphertext before forwarding it."
+            )
         super().route(envelope, sender_name)
 
 
 def main():
-    isolate_demo_state()   # temp user store / keys / log / exports: never your real data/
+    isolate_demo_state()  # temp user store / keys / log / exports: never your real data/
     banner("DEMO 1: AES-GCM tamper detection (malicious relay flips a bit)")
 
     try:
@@ -90,11 +92,14 @@ def main():
 
     alice = register_client("127.0.0.1", port, alice_name, bob_name)
     bob = register_client("127.0.0.1", port, bob_name, alice_name)
-    print(f"[*] Both clients registered with fresh RSA-2048 identities.")
+    print("[*] Both clients registered with fresh RSA-2048 identities.")
 
     ok = establish_signed_handshake(alice, bob)
-    if not check(ok, "RSA-signed ECDH handshake completed on both sides.",
-                 "Handshake did not complete -- aborting demo."):
+    if not check(
+        ok,
+        "RSA-signed ECDH handshake completed on both sides.",
+        "Handshake did not complete -- aborting demo.",
+    ):
         sys.exit(1)
 
     results = {}
@@ -102,6 +107,7 @@ def main():
     def send_normal():
         alice.send_message("This is a completely normal, untampered message.")
         import time
+
         time.sleep(1.0)
 
     _, out_normal = run_step(
@@ -114,11 +120,11 @@ def main():
         server.tamper_next_chat = True
         alice.send_message("Transfer $1000 to Mallory's account.")
         import time
+
         time.sleep(1.0)
 
     _, out_tampered = run_step(
-        "STEP 2: alice sends another message, but the (malicious) relay tampers "
-        "with it in transit",
+        "STEP 2: alice sends another message, but the (malicious) relay tampers with it in transit",
         send_tampered,
     )
     results["tampered_message_shown"] = "Transfer $1000" in out_tampered
@@ -129,19 +135,26 @@ def main():
 
     banner("RESULTS")
     all_ok = True
-    all_ok &= check(results["normal_displayed"],
-                     "Normal message displayed correctly.",
-                     "Normal message was NOT displayed (unexpected failure).")
-    all_ok &= check(results["relay_actually_tampered"],
-                     "Confirmed the malicious relay actually flipped a byte "
-                     "(this wasn't a no-op).",
-                     "The relay never tampered anything -- test setup is broken.")
-    all_ok &= check(not results["tampered_message_shown"],
-                     "Tampered message content was NEVER displayed to bob.",
-                     "TAMPERED MESSAGE WAS DISPLAYED -- tamper detection failed!")
-    all_ok &= check(results["tamper_rejected"],
-                     "Bob's client printed a clear tamper-detection warning.",
-                     "No tamper warning was printed -- silent failure!")
+    all_ok &= check(
+        results["normal_displayed"],
+        "Normal message displayed correctly.",
+        "Normal message was NOT displayed (unexpected failure).",
+    )
+    all_ok &= check(
+        results["relay_actually_tampered"],
+        "Confirmed the malicious relay actually flipped a byte (this wasn't a no-op).",
+        "The relay never tampered anything -- test setup is broken.",
+    )
+    all_ok &= check(
+        not results["tampered_message_shown"],
+        "Tampered message content was NEVER displayed to bob.",
+        "TAMPERED MESSAGE WAS DISPLAYED -- tamper detection failed!",
+    )
+    all_ok &= check(
+        results["tamper_rejected"],
+        "Bob's client printed a clear tamper-detection warning.",
+        "No tamper warning was printed -- silent failure!",
+    )
 
     banner("DEMO 1 " + ("PASSED" if all_ok else "FAILED"))
     sys.exit(0 if all_ok else 1)

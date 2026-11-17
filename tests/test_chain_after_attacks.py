@@ -8,15 +8,16 @@ import os
 import sys
 
 import pytest
-
-import _demo_common as dc
 from conftest import ROOT  # noqa: F401
+from test_attack_lab import pair, wait  # shared isolated relay fixture
+from test_attack_lab import rogue as rogue
+
 from crypto_engine.hash_chain import GAP, OK, IncomingChain
-from test_attack_lab import rogue, pair, wait  # shared isolated relay fixture
 
 
 def wait_until(predicate, what):
     wait(predicate, timeout=15)
+
 
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import verify_transcript  # noqa: E402
@@ -92,9 +93,9 @@ def test_messages_after_a_gap_are_verified_again(session):
     received = reports(b_events, "message_received")
     by_text = {d["message"]: d["receipt"]["chain_link"] for d in received}
     assert by_text["m1 first normal message"] == "ok"
-    assert by_text["r a normal message after the tamper"] == "gap"       # flagged: it follows the tamper
-    assert by_text["n1 first message after the drop"] == "gap"           # flagged: it follows the drop
-    assert by_text["n2 second normal message"] == "ok"                   # resynchronised
+    assert by_text["r a normal message after the tamper"] == "gap"  # flagged: it follows the tamper
+    assert by_text["n1 first message after the drop"] == "gap"  # flagged: it follows the drop
+    assert by_text["n2 second normal message"] == "ok"  # resynchronised
     assert by_text["n3 third normal message"] == "ok"
     assert not shown(bob, "t this one is tampered in transit")
     assert not shown(bob, "d this message is dropped by the relay")
@@ -109,7 +110,10 @@ def test_evidence_records_the_gaps_and_the_verifier_explains_them(session, tmp_p
     kinds_recorded = [(e["kind"], e["reason"]) for e in data["rejected_events"]]
     assert kinds_recorded.count(("chain_warning", "chain_gap")) == 2
     assert ("message_rejected", "decryption_failed") in kinds_recorded
-    assert any("matches 1 message(s) rejected earlier" in (e["detail"] or "") for e in data["rejected_events"])
+    assert any(
+        "matches 1 message(s) rejected earlier" in (e["detail"] or "")
+        for e in data["rejected_events"]
+    )
 
     report = verify_transcript.verify_evidence(data)
     chain_failures = [f for f in report.failures if f[1] == "chain"]
@@ -117,13 +121,15 @@ def test_evidence_records_the_gaps_and_the_verifier_explains_them(session, tmp_p
     assert not [f for f in report.failures if f[1] != "chain"], "signatures and hashes all verify"
     assert not report.valid, "a gap keeps the file INVALID: the missing messages are not in it"
     assert all("GAP: 1 message(s) from" in f[2] for f in chain_failures)
-    assert all("records 1 rejected message(s)" in f[2] for f in chain_failures), \
+    assert all("records 1 rejected message(s)" in f[2] for f in chain_failures), (
         "the verifier tells the reader the export itself recorded the rejected message"
+    )
     # the records after the second gap verify cleanly
     assert any("n3 third normal message" in line and "chain ✔" in line for line in report.lines)
 
 
 # ---- pure chain logic ---------------------------------------------------------------------
+
 
 def make_chain():
     return IncomingChain("alice", "0" * 64)
@@ -135,8 +141,9 @@ def feed(chain, seq, prev, text="x"):
 
 def test_a_dropped_message_is_one_missing_not_three():
     from crypto_engine.hash_chain import canonical_record, record_hash
+
     chain = make_chain()
-    v = feed(chain, 4, "whatever")        # #1..#3 never arrived and nothing was rejected
+    v = feed(chain, 4, "whatever")  # #1..#3 never arrived and nothing was rejected
     assert v.status == GAP and (v.missing, v.explained) == (3, 0)
     # the very next message links to the received one: back to normal
     prev = record_hash(canonical_record("alice", "bob", 4, 1.0, "x", "whatever"))
@@ -146,8 +153,8 @@ def test_a_dropped_message_is_one_missing_not_three():
 def test_rejected_messages_explain_gaps_but_never_hide_them():
     chain = make_chain()
     chain.note_rejected("n1")
-    chain.note_rejected("n1")             # the same bad message delivered twice counts once
-    v = feed(chain, 3, "p")               # #1 and #2 missing, one rejected message to account for
+    chain.note_rejected("n1")  # the same bad message delivered twice counts once
+    v = feed(chain, 3, "p")  # #1 and #2 missing, one rejected message to account for
     assert v.status == GAP, "an explained gap is still reported"
     assert (v.missing, v.explained) == (2, 1)
     assert "1 match message(s) rejected earlier, 1 unaccounted for" in v.detail
@@ -156,10 +163,11 @@ def test_rejected_messages_explain_gaps_but_never_hide_them():
 
 def test_a_rejection_does_not_leak_into_a_later_unrelated_gap():
     from crypto_engine.hash_chain import canonical_record, record_hash
+
     chain = make_chain()
     chain.note_rejected("bad")
     prev = chain.head
-    assert feed(chain, 1, prev).status == OK       # the next message is in order
+    assert feed(chain, 1, prev).status == OK  # the next message is in order
     prev2 = record_hash(canonical_record("alice", "bob", 1, 1.0, "x", prev))
-    v = feed(chain, 3, prev2)                      # now one is really missing
+    v = feed(chain, 3, prev2)  # now one is really missing
     assert (v.missing, v.explained) == (1, 0), "the old rejection must not explain this gap"

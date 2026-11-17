@@ -16,38 +16,53 @@ import json
 import os
 import threading
 import time
+from collections.abc import Mapping
+from typing import Any
 
 from sqlalchemy import func, insert, select
+from sqlalchemy.engine import Connection
+
 try:
-    from .db import get_database, security_events
+    from .db import Database, get_database, security_events
 except ImportError:
-    from db import get_database, security_events
+    from db import Database, get_database, security_events
 
 
-def event_digest(record):
-    return hashlib.sha256(json.dumps(record, sort_keys=True, default=str,
-                                     separators=(",", ":")).encode()).hexdigest()
+def event_digest(record: Mapping[str, Any]) -> str:
+    """Return the stable digest used to identify repeated structured audit events."""
+    return hashlib.sha256(
+        json.dumps(record, sort_keys=True, default=str, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
-def store_event(conn, record, import_key=None):
+def store_event(conn: Connection, record: Mapping[str, Any], import_key: str | None = None) -> None:
     """Write the same structured metadata as JSONL, never a raw envelope."""
     record = json.loads(json.dumps(record, default=str))
     details = {k: v for k, v in record.items() if k not in ("ts", "event")}
-    conn.execute(insert(security_events).values(
-        ts=record["ts"], event_type=record["event"],
-        username=record.get("username") or record.get("from_user") or record.get("reported_by"),
-        peer_addr=record.get("from_addr"), details=details, import_key=import_key))
+    conn.execute(
+        insert(security_events).values(
+            ts=record["ts"],
+            event_type=record["event"],
+            username=record.get("username") or record.get("from_user") or record.get("reported_by"),
+            peer_addr=record.get("from_addr"),
+            details=details,
+            import_key=import_key,
+        )
+    )
 
 
 DEFAULT_LOG_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "security_events.jsonl")
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "security_events.jsonl"
+)
 
 # One process-wide lock: multiple client-handler threads can log concurrently,
 # and a plain append is not atomic across threads without it.
 _lock = threading.Lock()
 
 
-def log_event(event: str, path: str = DEFAULT_LOG_PATH, database=None, **fields) -> dict:
+def log_event(
+    event: str, path: str = DEFAULT_LOG_PATH, database: Database | None = None, **fields: Any
+) -> dict[str, Any]:
     """Append one event and return the record that was written (useful for
     tests). `fields` are arbitrary metadata -- callers must not pass
     passwords, keys, or plaintext message content."""
@@ -57,8 +72,11 @@ def log_event(event: str, path: str = DEFAULT_LOG_PATH, database=None, **fields)
     with _lock:
         with (database if database is not None else get_database()).transaction() as conn:
             digest = event_digest(record)
-            ordinal = conn.execute(select(func.count()).select_from(security_events).where(
-                security_events.c.import_key.like(digest + ":%"))).scalar_one()
+            ordinal = conn.execute(
+                select(func.count())
+                .select_from(security_events)
+                .where(security_events.c.import_key.like(digest + ":%"))
+            ).scalar_one()
             store_event(conn, record, f"{digest}:{ordinal + 1}")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
@@ -66,7 +84,7 @@ def log_event(event: str, path: str = DEFAULT_LOG_PATH, database=None, **fields)
     return record
 
 
-def read_events(path: str = DEFAULT_LOG_PATH):
+def read_events(path: str = DEFAULT_LOG_PATH) -> list[dict[str, Any]]:
     """Read every event currently in the log, skipping any trailing partial
     line (e.g. a writer caught mid-append). Used by tests and the dashboard's
     initial load; the dashboard otherwise tails new lines as they appear."""

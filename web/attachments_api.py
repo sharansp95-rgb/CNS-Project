@@ -8,12 +8,12 @@ quota / rate limits and expires objects lazily (no cron, no background thread).
 """
 
 import asyncio
-from collections import defaultdict, deque
 import os
 import re
 import secrets
 import threading
 import time
+from collections import defaultdict, deque
 
 from fastapi import HTTPException, Request, Response
 from sqlalchemy import func, insert, select, update
@@ -147,9 +147,7 @@ class AttachmentAPI:
         if done:
             with self.database.transaction() as conn:
                 conn.execute(
-                    update(attachments)
-                    .where(attachments.c.id.in_(done))
-                    .values(deleted_at=now)
+                    update(attachments).where(attachments.c.id.in_(done)).values(deleted_at=now)
                 )
         return len(done)
 
@@ -170,11 +168,15 @@ class AttachmentAPI:
             att_id, recipient, kind = data["id"], data["recipient"], data["kind"]
             size, digest = data["ciphertext_size"], data["ciphertext_sha256"]
             ok = (
-                isinstance(att_id, str) and HEX32.match(att_id)
-                and isinstance(recipient, str) and 0 < len(recipient) <= 200
+                isinstance(att_id, str)
+                and HEX32.match(att_id)
+                and isinstance(recipient, str)
+                and 0 < len(recipient) <= 200
                 and kind in ("image", "video")
-                and type(size) is int and 0 < size
-                and isinstance(digest, str) and HEX64.match(digest)
+                and type(size) is int
+                and 0 < size
+                and isinstance(digest, str)
+                and HEX64.match(digest)
             )
         except KeyError:
             ok = False
@@ -212,9 +214,15 @@ class AttachmentAPI:
             expires = now + cfg.pending_ttl
             conn.execute(
                 insert(attachments).values(
-                    id=att_id, uploader=owner, recipient=recipient, kind=kind,
-                    object_key=key, ciphertext_size=size, ciphertext_sha256=digest,
-                    created_at=now, expires_at=expires,
+                    id=att_id,
+                    uploader=owner,
+                    recipient=recipient,
+                    kind=kind,
+                    object_key=key,
+                    ciphertext_size=size,
+                    ciphertext_sha256=digest,
+                    created_at=now,
+                    expires_at=expires,
                 )
             )
         upload = self.storage.presign_put(key, size, cfg.url_ttl)
@@ -309,7 +317,9 @@ class AttachmentAPI:
                 size = int(q.get("size", ""))
             except ValueError:
                 raise HTTPException(403, "Invalid signed URL")
-            if not HEX32.match(name) or not storage.verify("put", key, q.get("exp"), q.get("sig"), size):
+            if not HEX32.match(name) or not storage.verify(
+                "put", key, q.get("exp"), q.get("sig"), size
+            ):
                 raise HTTPException(403, "Invalid or expired signed URL")
             body = bytearray()
             async for chunk in request.stream():

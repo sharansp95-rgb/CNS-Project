@@ -13,7 +13,16 @@ import re
 PREFIX = "securechat-call/v1:"
 PLACEHOLDER = "[call — web client only]"
 TYPES = ("invite", "accept", "decline", "busy", "cancel", "hangup", "record")
-OUTCOMES = ("completed", "no_answer", "missed", "declined", "busy", "canceled", "failed", "security_alert")
+OUTCOMES = (
+    "completed",
+    "no_answer",
+    "missed",
+    "declined",
+    "busy",
+    "canceled",
+    "failed",
+    "security_alert",
+)
 _HEX32 = re.compile(r"[0-9a-f]{32}")
 _FP = re.compile(r"^a=fingerprint:([A-Za-z0-9-]+) ([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2})+)\s*$", re.M)
 
@@ -34,7 +43,9 @@ def valid_sdp(sdp):
     if not isinstance(sdp, str) or not sdp.startswith("v=0") or len(sdp) > 24 * 1024:
         return False
     media = [line for line in sdp.splitlines() if line.startswith("m=")]
-    return len(media) == 1 and media[0].startswith("m=audio ") and signed_fingerprint(sdp) is not None
+    return (
+        len(media) == 1 and media[0].startswith("m=audio ") and signed_fingerprint(sdp) is not None
+    )
 
 
 def parse_signal(message):
@@ -42,7 +53,7 @@ def parse_signal(message):
     if not is_call_message(message) or len(message) > 40 * 1024:
         return None
     try:
-        s = json.loads(message[len(PREFIX):])
+        s = json.loads(message[len(PREFIX) :])
         if not isinstance(s, dict) or s.get("v") != 1 or s.get("type") not in TYPES:
             return None
         if not isinstance(s.get("call"), str) or not _HEX32.fullmatch(s["call"]):
@@ -55,11 +66,21 @@ def parse_signal(message):
         elif "sdp" in s:
             return None
         if s["type"] == "record":
-            isint = lambda v: type(v) is int and v >= 0
-            ok = (s.get("role") in ("caller", "callee") and s.get("outcome") in OUTCOMES
-                  and isint(s.get("started")) and isint(s.get("ended")) and isint(s.get("duration"))
-                  and s["duration"] <= 86400 and s.get("fp_match") in ("yes", "no", "n/a")
-                  and isinstance(s.get("sas_confirmed"), bool) and s.get("conn") in ("direct", "relay", "none"))
+
+            def isint(v):
+                return type(v) is int and v >= 0
+
+            ok = (
+                s.get("role") in ("caller", "callee")
+                and s.get("outcome") in OUTCOMES
+                and isint(s.get("started"))
+                and isint(s.get("ended"))
+                and isint(s.get("duration"))
+                and s["duration"] <= 86400
+                and s.get("fp_match") in ("yes", "no", "n/a")
+                and isinstance(s.get("sas_confirmed"), bool)
+                and s.get("conn") in ("direct", "relay", "none")
+            )
             if not ok:
                 return None
         return s

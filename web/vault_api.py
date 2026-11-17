@@ -3,12 +3,13 @@
 import asyncio
 import base64
 import json
-import secrets
 import threading
 import time
 import uuid
+
 from fastapi import HTTPException, Request
-from sqlalchemy import select, insert, delete, func
+from sqlalchemy import delete, func, insert, select
+
 from crypto_engine.evidence_tools import valid_hash
 from server.db import evidence_bundles
 from server.timestamp import TimestampSigner
@@ -56,9 +57,7 @@ class VaultAPI(TokenStore):
                     or (version == 1 and hashes)
                 ):
                     raise ValueError()
-                if not all(valid_hash(h) for h in hashes) or not valid_hash(
-                    body["file_sha256"]
-                ):
+                if not all(valid_hash(h) for h in hashes) or not valid_hash(body["file_sha256"]):
                     raise ValueError()
                 title = body["title"]
                 if not isinstance(title, str) or not 1 <= len(title.strip()) <= 120:
@@ -92,9 +91,7 @@ class VaultAPI(TokenStore):
                 if not 17 <= len(cipher) <= 8 * 1024 * 1024:
                     raise ValueError()
             except (ValueError, TypeError, KeyError, RecursionError):
-                raise HTTPException(
-                    400, "Invalid encrypted evidence package or manifest"
-                )
+                raise HTTPException(400, "Invalid encrypted evidence package or manifest")
 
             def store():
                 with self.database.transaction() as conn:
@@ -136,13 +133,7 @@ class VaultAPI(TokenStore):
                     return [
                         dict(row)
                         for row in conn.execute(
-                            select(
-                                *[
-                                    c
-                                    for c in evidence_bundles.c
-                                    if c.name != "ciphertext_b64"
-                                ]
-                            )
+                            select(*[c for c in evidence_bundles.c if c.name != "ciphertext_b64"])
                             .where(evidence_bundles.c.owner == owner)
                             .order_by(evidence_bundles.c.created_at.desc())
                         ).mappings()

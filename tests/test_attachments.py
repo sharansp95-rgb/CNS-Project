@@ -11,7 +11,7 @@ from sqlalchemy import MetaData, select, update
 
 from server import db
 from server.relay_core import RelayCore
-from server.storage import LocalStorage, S3Storage, storage_from_env, StorageError
+from server.storage import LocalStorage, S3Storage, StorageError, storage_from_env
 from web.app import create_app
 
 ORIGIN = "http://localhost:8080"
@@ -38,7 +38,9 @@ class World:
 
     def __init__(self, client):
         self.client = client
-        self.sockets = [client.websocket_connect("/ws", headers={"origin": ORIGIN}) for _ in range(3)]
+        self.sockets = [
+            client.websocket_connect("/ws", headers={"origin": ORIGIN}) for _ in range(3)
+        ]
         self.ws = [s.__enter__() for s in self.sockets]
         self.alice, self.bob, self.mallory = (
             authed(ws, n) for ws, n in zip(self.ws, ("alice", "bob", "mallory"))
@@ -88,7 +90,10 @@ def full_flow(w, data=None):
 
 def test_roundtrip_and_authorization(world):
     body, data = full_flow(world)
-    url = lambda h: world.client.get(f"/api/attachments/{body['id']}/download", headers=h)
+
+    def url(h):
+        return world.client.get(f"/api/attachments/{body['id']}/download", headers=h)
+
     for allowed in (world.alice, world.bob):
         r = url(allowed)
         assert r.status_code == 200
@@ -96,14 +101,21 @@ def test_roundtrip_and_authorization(world):
         assert world.client.get(r.json()["url"]).content == data
     # A third party gets the same 404 as for a nonexistent id.
     assert url(world.mallory).status_code == 404
-    missing = world.client.get(f"/api/attachments/{uuid.uuid4().hex}/download", headers=world.mallory)
+    missing = world.client.get(
+        f"/api/attachments/{uuid.uuid4().hex}/download", headers=world.mallory
+    )
     assert missing.status_code == 404 and missing.json() == url(world.mallory).json()
     # Anonymous requests are rejected everywhere.
     assert world.client.get(f"/api/attachments/{body['id']}/download").status_code == 401
     assert world.client.post("/api/attachments", json={}).status_code == 401
     # Only the uploader may finalize or delete.
-    assert world.client.delete(f"/api/attachments/{body['id']}", headers=world.bob).status_code == 404
-    assert world.client.delete(f"/api/attachments/{body['id']}", headers=world.alice).status_code == 200
+    assert (
+        world.client.delete(f"/api/attachments/{body['id']}", headers=world.bob).status_code == 404
+    )
+    assert (
+        world.client.delete(f"/api/attachments/{body['id']}", headers=world.alice).status_code
+        == 200
+    )
     assert url(world.bob).status_code == 404
     assert world.storage.keys() == []
 
@@ -112,25 +124,43 @@ def test_unfinalized_upload_is_not_downloadable(world):
     data = os.urandom(100)
     body, r = init(world, world.alice, data)
     upload(world, r, data)
-    assert world.client.get(f"/api/attachments/{body['id']}/download", headers=world.bob).status_code == 404
+    assert (
+        world.client.get(f"/api/attachments/{body['id']}/download", headers=world.bob).status_code
+        == 404
+    )
 
 
 def test_finalize_rejects_missing_or_wrong_size_and_discards(world):
     data = os.urandom(100)
     body, r = init(world, world.alice, data)
-    assert world.client.post(f"/api/attachments/{body['id']}/finalize", headers=world.alice).status_code == 409
+    assert (
+        world.client.post(
+            f"/api/attachments/{body['id']}/finalize", headers=world.alice
+        ).status_code
+        == 409
+    )
     # Local backend: a signed URL cannot write a different size either.
     body, r = init(world, world.alice, data)
     up = r.json()["upload"]
     assert world.client.put(up["url"], content=data[:50]).status_code == 400
     # Bypass the storage layer: an object of the wrong size appears at the key.
-    key = world.app.state.attachments.database.engine.connect().execute(
-        select(db.attachments.c.object_key).where(db.attachments.c.id == body["id"])
-    ).scalar_one()
+    key = (
+        world.app.state.attachments.database.engine.connect()
+        .execute(select(db.attachments.c.object_key).where(db.attachments.c.id == body["id"]))
+        .scalar_one()
+    )
     world.storage.write(key, b"x" * 7)
-    assert world.client.post(f"/api/attachments/{body['id']}/finalize", headers=world.alice).status_code == 409
+    assert (
+        world.client.post(
+            f"/api/attachments/{body['id']}/finalize", headers=world.alice
+        ).status_code
+        == 409
+    )
     assert world.storage.head(key) is None  # discarded
-    assert world.client.get(f"/api/attachments/{body['id']}/download", headers=world.bob).status_code == 404
+    assert (
+        world.client.get(f"/api/attachments/{body['id']}/download", headers=world.bob).status_code
+        == 404
+    )
 
 
 def test_signed_url_tampering_expiry_and_reuse_rules(world):
@@ -141,10 +171,16 @@ def test_signed_url_tampering_expiry_and_reuse_rules(world):
     assert world.client.put(up.replace("size=100", "size=101"), content=data).status_code == 403
     expired = world.storage.presign_put("att/" + "a" * 32, 100, expires_in=-5)
     assert world.client.put(expired["url"], content=data).status_code == 403
-    assert world.client.get("/api/attachments/object/" + "b" * 32 + "?op=get&exp=1&sig=x").status_code == 403
+    assert (
+        world.client.get("/api/attachments/object/" + "b" * 32 + "?op=get&exp=1&sig=x").status_code
+        == 403
+    )
     # A GET signature cannot be used as a PUT signature.
     get_url = world.storage.presign_get("att/" + "c" * 32)
-    assert world.client.put(get_url.replace("op=get", "op=put") + "&size=1", content=b"x").status_code == 403
+    assert (
+        world.client.put(get_url.replace("op=get", "op=put") + "&size=1", content=b"x").status_code
+        == 403
+    )
 
 
 def test_validation_limits_and_recipient(world):
@@ -213,9 +249,12 @@ def test_expiry_and_lazy_cleanup(world):
     assert r.status_code == 200
     assert len(world.storage.keys()) == 0
     with database.engine.connect() as conn:
-        assert conn.execute(
-            select(db.attachments.c.deleted_at).where(db.attachments.c.id == body["id"])
-        ).scalar_one() is not None
+        assert (
+            conn.execute(
+                select(db.attachments.c.deleted_at).where(db.attachments.c.id == body["id"])
+            ).scalar_one()
+            is not None
+        )
 
 
 def test_retention_is_configurable(monkeypatch):
@@ -238,6 +277,7 @@ def test_no_plaintext_in_database_or_stored_objects(world):
     # must never receive the marker unless the (simulated) client sent it, and
     # the metadata tables never contain names or keys.
     import secrets
+
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     key, nonce = AESGCM.generate_key(256), secrets.token_bytes(12)
@@ -254,8 +294,17 @@ def test_no_plaintext_in_database_or_stored_objects(world):
                     assert marker.decode() not in str(value)
     columns = {c.name for c in db.attachments.columns}
     assert columns == {
-        "id", "uploader", "recipient", "kind", "object_key", "ciphertext_size",
-        "ciphertext_sha256", "created_at", "finalized_at", "expires_at", "deleted_at",
+        "id",
+        "uploader",
+        "recipient",
+        "kind",
+        "object_key",
+        "ciphertext_size",
+        "ciphertext_sha256",
+        "created_at",
+        "finalized_at",
+        "expires_at",
+        "deleted_at",
     }
     assert not {"name", "filename", "mime", "key", "file_key", "thumbnail"} & columns
 
@@ -268,14 +317,22 @@ def test_token_revoked_on_disconnect_blocks_attachment_api(world):
 
 
 def test_large_envelope_ciphertext_is_not_duplicated_in_sql():
-    envelope = {"type": "chat", "from": "a", "to": "b", "nonce": "x", "tag": "y",
-                "ciphertext": "QUFB" * 4000}
+    envelope = {
+        "type": "chat",
+        "from": "a",
+        "to": "b",
+        "nonce": "x",
+        "tag": "y",
+        "ciphertext": "QUFB" * 4000,
+    }
     database = db.get_database()
     db.record_relay(envelope, "a", database)
     small = dict(envelope, ciphertext="QUFB" * 10)
     db.record_relay(small, "a", database)
     with database.engine.connect() as conn:
-        rows = conn.execute(select(db.relayed_envelopes.c.ciphertext_b64, db.relayed_envelopes.c.envelope_sha256)).all()
+        rows = conn.execute(
+            select(db.relayed_envelopes.c.ciphertext_b64, db.relayed_envelopes.c.envelope_sha256)
+        ).all()
     assert rows[0][0] is None and len(rows[0][1]) == 64
     assert rows[1][0] == "QUFB" * 10
 
@@ -293,10 +350,16 @@ def test_storage_configuration_from_environment():
         storage_from_env({"STORAGE_BACKEND": "gcs"})
     with pytest.raises(ValueError, match="STORAGE_BACKEND=s3"):
         storage_from_env({"STORAGE_BACKEND": "local"}, production=True)
-    s3 = storage_from_env({
-        "STORAGE_BACKEND": "s3", "S3_ENDPOINT": "https://s.example", "S3_BUCKET": "b",
-        "S3_REGION": "r", "S3_ACCESS_KEY_ID": "AK", "S3_SECRET_ACCESS_KEY": "SK",
-    })
+    s3 = storage_from_env(
+        {
+            "STORAGE_BACKEND": "s3",
+            "S3_ENDPOINT": "https://s.example",
+            "S3_BUCKET": "b",
+            "S3_REGION": "r",
+            "S3_ACCESS_KEY_ID": "AK",
+            "S3_SECRET_ACCESS_KEY": "SK",
+        }
+    )
     url = s3.presign_get("att/" + "a" * 32)
     assert url.startswith("https://s.example/b/att/") and "X-Amz-Signature=" in url
     assert "SK" not in url and "X-Amz-Expires=300" in url
@@ -311,8 +374,13 @@ def test_sigv4_presign_matches_aws_documented_example():
     class Fixed(S3Storage):
         pass
 
-    s = S3Storage("https://examplebucket.s3.amazonaws.com", "x", "us-east-1",
-                  _AWS_DOC_KEY_ID, "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+    s = S3Storage(
+        "https://examplebucket.s3.amazonaws.com",
+        "x",
+        "us-east-1",
+        _AWS_DOC_KEY_ID,
+        "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    )
     # Virtual-hosted example: bucket is in the host and the path is /test.txt.
     s.bucket = ""
     now = dt.datetime(2013, 5, 24, tzinfo=dt.timezone.utc)

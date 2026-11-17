@@ -21,23 +21,22 @@ relay (or a network-level attacker who captured the envelope) resending it.
 """
 
 import sys
+import threading
 import time
 
+from attack_lab.relay import RogueRelay as ChatServer
 from attack_lab.scripts._demo_common import (
-    isolate_demo_state,
     banner,
     check,
     demo_username,
     establish_signed_handshake,
     free_port,
+    isolate_demo_state,
     register_client,
     run_step,
     wait_for_port,
 )
-
-import threading
 from server.server import CertsMissingError
-from attack_lab.relay import RogueRelay as ChatServer
 
 
 class _ReplayingRelay(ChatServer):
@@ -56,13 +55,15 @@ class _ReplayingRelay(ChatServer):
         if envelope.get("type") == "chat" and self.replay_next_chat:
             self.replay_next_chat = False
             self.replayed_count += 1
-            print(f"    [MALICIOUS RELAY] forwarding that SAME chat envelope "
-                  f"to the recipient a second time (replay).")
+            print(
+                "    [MALICIOUS RELAY] forwarding that SAME chat envelope "
+                "to the recipient a second time (replay)."
+            )
             super().route(envelope, sender_name)
 
 
 def main():
-    isolate_demo_state()   # temp user store / keys / log / exports: never your real data/
+    isolate_demo_state()  # temp user store / keys / log / exports: never your real data/
     banner("DEMO 2: Replay protection (relay resends a captured message)")
 
     try:
@@ -87,8 +88,11 @@ def main():
     print("[*] Both clients registered with fresh RSA-2048 identities.")
 
     ok = establish_signed_handshake(alice, bob)
-    if not check(ok, "RSA-signed ECDH handshake completed on both sides.",
-                 "Handshake did not complete -- aborting demo."):
+    if not check(
+        ok,
+        "RSA-signed ECDH handshake completed on both sides.",
+        "Handshake did not complete -- aborting demo.",
+    ):
         sys.exit(1)
 
     def send_replayed():
@@ -97,8 +101,7 @@ def main():
         time.sleep(1.0)  # let both the original delivery AND the replay land
 
     _, out = run_step(
-        "STEP: alice sends one message; the (malicious) relay forwards it "
-        "to bob TWICE",
+        "STEP: alice sends one message; the (malicious) relay forwards it to bob TWICE",
         send_replayed,
     )
 
@@ -109,18 +112,21 @@ def main():
 
     banner("RESULTS")
     all_ok = True
-    all_ok &= check(server.replayed_count == 1,
-                     "Confirmed the malicious relay actually double-sent the envelope.",
-                     "The relay never replayed anything -- test setup is broken.")
-    all_ok &= check(occurrences == 1,
-                     f"The message content was displayed exactly once ({occurrences} "
-                     f"occurrence(s)), not twice.",
-                     f"The message was displayed {occurrences} time(s) -- replay was "
-                     f"NOT blocked!")
-    all_ok &= check(replay_rejected,
-                     "Bob's client printed a clear duplicate/replay rejection warning "
-                     "for the second delivery.",
-                     "No replay-rejection warning was printed -- silent failure!")
+    all_ok &= check(
+        server.replayed_count == 1,
+        "Confirmed the malicious relay actually double-sent the envelope.",
+        "The relay never replayed anything -- test setup is broken.",
+    )
+    all_ok &= check(
+        occurrences == 1,
+        f"The message content was displayed exactly once ({occurrences} occurrence(s)), not twice.",
+        f"The message was displayed {occurrences} time(s) -- replay was NOT blocked!",
+    )
+    all_ok &= check(
+        replay_rejected,
+        "Bob's client printed a clear duplicate/replay rejection warning for the second delivery.",
+        "No replay-rejection warning was printed -- silent failure!",
+    )
 
     banner("DEMO 2 " + ("PASSED" if all_ok else "FAILED"))
     sys.exit(0 if all_ok else 1)

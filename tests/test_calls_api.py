@@ -34,11 +34,25 @@ class Metered:
         if self.fail:
             return httpx.Response(self.fail, json={"error": "quota"})
         if request.method == "POST":
-            return httpx.Response(200, json={"username": "u-temp", "password": "p-temp", "apiKey": "key-for-this-credential"})
-        return httpx.Response(200, json=[
-            {"urls": "stun:stun.relay.metered.ca:80"},
-            {"urls": "turn:global.relay.metered.ca:443", "username": "u-temp", "credential": "p-temp"},
-        ])
+            return httpx.Response(
+                200,
+                json={
+                    "username": "u-temp",
+                    "password": "p-temp",
+                    "apiKey": "key-for-this-credential",
+                },
+            )
+        return httpx.Response(
+            200,
+            json=[
+                {"urls": "stun:stun.relay.metered.ca:80"},
+                {
+                    "urls": "turn:global.relay.metered.ca:443",
+                    "username": "u-temp",
+                    "credential": "p-temp",
+                },
+            ],
+        )
 
     def factory(self):
         return httpx.Client(transport=httpx.MockTransport(self.handler))
@@ -47,7 +61,10 @@ class Metered:
 def make(monkeypatch, metered=None, **env):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
-    app = create_app(RelayCore(logger=lambda *a, **kw: None), call_client_factory=metered.factory if metered else None)
+    app = create_app(
+        RelayCore(logger=lambda *a, **kw: None),
+        call_client_factory=metered.factory if metered else None,
+    )
     return TestClient(app)
 
 
@@ -58,21 +75,38 @@ def test_requires_login(monkeypatch):
 
 def test_stun_only_when_turn_is_not_configured(monkeypatch):
     monkeypatch.setenv("CALL_STUN_URLS", "stun:stun.example:3478")
-    with make(monkeypatch) as client, client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws:
+    with (
+        make(monkeypatch) as client,
+        client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws,
+    ):
         r = client.get("/api/calls/ice", headers=authed(ws, "alice"))
         assert r.status_code == 200
-        assert r.json() == {"iceServers": [{"urls": "stun:stun.example:3478"}], "turn": "not_configured"}
+        assert r.json() == {
+            "iceServers": [{"urls": "stun:stun.example:3478"}],
+            "turn": "not_configured",
+        }
 
 
 def test_no_stun_configured_gives_host_only(monkeypatch):
-    with make(monkeypatch, CALL_STUN_URLS="") as client, client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws:
+    with (
+        make(monkeypatch, CALL_STUN_URLS="") as client,
+        client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws,
+    ):
         assert client.get("/api/calls/ice", headers=authed(ws, "alice")).json()["iceServers"] == []
 
 
 def test_short_lived_credentials_secret_never_returned(monkeypatch):
     metered = Metered()
-    with make(monkeypatch, metered, METERED_APP="team15-test", METERED_SECRET_KEY=SECRET,
-              CALL_TURN_TTL_SECONDS="999999") as client, client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws:
+    with (
+        make(
+            monkeypatch,
+            metered,
+            METERED_APP="team15-test",
+            METERED_SECRET_KEY=SECRET,
+            CALL_TURN_TTL_SECONDS="999999",
+        ) as client,
+        client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws,
+    ):
         r = client.get("/api/calls/ice", headers=authed(ws, "alice"))
         body = r.json()
         assert body["turn"] == "available"
@@ -82,8 +116,8 @@ def test_short_lived_credentials_secret_never_returned(monkeypatch):
         post = next(x for x in metered.requests if x.method == "POST")
         assert post.url.host == "team15-test.metered.live"
         sent = json.loads(post.content)
-        assert 0 < sent["expiryInSeconds"] <= 600          # capped even though the env asked for 999999
-        assert "alice" not in post.content.decode()       # no user identity goes to the provider
+        assert 0 < sent["expiryInSeconds"] <= 600  # capped even though the env asked for 999999
+        assert "alice" not in post.content.decode()  # no user identity goes to the provider
         assert sent["label"].startswith("call-")
         # The secret goes only to the credential-creation call; the list call uses the per-credential key.
         listing = next(x for x in metered.requests if x.method == "GET")
@@ -94,8 +128,10 @@ def test_short_lived_credentials_secret_never_returned(monkeypatch):
 def test_provider_failure_degrades_to_direct_only_and_leaks_nothing(monkeypatch, caplog, fail):
     caplog.set_level(logging.DEBUG)
     metered = Metered(fail)
-    with make(monkeypatch, metered, METERED_APP="team15-test", METERED_SECRET_KEY=SECRET) as client, \
-            client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws:
+    with (
+        make(monkeypatch, metered, METERED_APP="team15-test", METERED_SECRET_KEY=SECRET) as client,
+        client.websocket_connect("/ws", headers={"origin": ORIGIN}) as ws,
+    ):
         r = client.get("/api/calls/ice", headers=authed(ws, "alice"))
         assert r.status_code == 200 and r.json()["turn"] == "unavailable"
         assert all(not str(s["urls"]).startswith("turn") for s in r.json()["iceServers"])
@@ -105,9 +141,11 @@ def test_provider_failure_degrades_to_direct_only_and_leaks_nothing(monkeypatch,
 
 
 def test_rate_limit_is_per_user(monkeypatch):
-    with make(monkeypatch, CALL_ICE_PER_MINUTE="3") as client, \
-            client.websocket_connect("/ws", headers={"origin": ORIGIN}) as a, \
-            client.websocket_connect("/ws", headers={"origin": ORIGIN}) as b:
+    with (
+        make(monkeypatch, CALL_ICE_PER_MINUTE="3") as client,
+        client.websocket_connect("/ws", headers={"origin": ORIGIN}) as a,
+        client.websocket_connect("/ws", headers={"origin": ORIGIN}) as b,
+    ):
         ha, hb = authed(a, "alice"), authed(b, "bob")
         codes = [client.get("/api/calls/ice", headers=ha).status_code for _ in range(5)]
         assert codes == [200, 200, 200, 429, 429]

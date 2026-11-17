@@ -37,6 +37,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from crypto_engine.attachment_tools import is_attachment_message, parse_descriptor
+from crypto_engine.call_tools import is_call_message, parse_signal
+from crypto_engine.evidence_tools import V1, V2, sha256, valid_hash, verify_receipt
 from crypto_engine.hash_chain import (  # noqa: E402
     canonical_json,
     canonical_record,
@@ -44,10 +47,6 @@ from crypto_engine.hash_chain import (  # noqa: E402
     record_hash,
 )
 from crypto_engine.signatures import deserialize_public_key, fingerprint, verify  # noqa: E402
-
-from crypto_engine.evidence_tools import V1, V2, valid_hash, verify_receipt, sha256
-from crypto_engine.attachment_tools import is_attachment_message, parse_descriptor
-from crypto_engine.call_tools import is_call_message, parse_signal
 
 FORMAT = V1
 OK_MARK, BAD_MARK = "✔", "✘"
@@ -76,13 +75,17 @@ class Report:
         out = list(self.lines)
         out.append("")
         if self.valid:
-            out.append(f"RESULT: VALID {OK_MARK}  every signature, chain link and the "
-                       f"export signature checked out.")
+            out.append(
+                f"RESULT: VALID {OK_MARK}  every signature, chain link and the "
+                f"export signature checked out."
+            )
         else:
             first = self.failures[0]
             where = f"record #{first[0]}" if first[0] is not None else "the file as a whole"
-            out.append(f"RESULT: INVALID {BAD_MARK}  {len(self.failures)} check(s) failed; "
-                       f"first failure: {where} -- {first[1]}.")
+            out.append(
+                f"RESULT: INVALID {BAD_MARK}  {len(self.failures)} check(s) failed; "
+                f"first failure: {where} -- {first[1]}."
+            )
         return "\n".join(out)
 
 
@@ -107,14 +110,16 @@ def verify_evidence(data, expect_fingerprints=()):
         exporter = data["exported_by"]
         exporter_sig = data["exporter_signature"]
         names = list(participants)
-        assert len(names) == 2 and all(n in participants for n in
-                                       (session["initiator"], session["responder"]))
+        assert len(names) == 2 and all(
+            n in participants for n in (session["initiator"], session["responder"])
+        )
     except (KeyError, TypeError, AssertionError):
-        r.bad("missing or malformed fields (session/participants/records/...)",
-              check="structure")
+        r.bad("missing or malformed fields (session/participants/records/...)", check="structure")
         return r
-    r.ok(f"format {FORMAT}; participants {names[0]} and {names[1]}; "
-         f"{len(records)} record(s); exported by {exporter}")
+    r.ok(
+        f"format {FORMAT}; participants {names[0]} and {names[1]}; "
+        f"{len(records)} record(s); exported by {exporter}"
+    )
 
     # --- keys and fingerprints ---------------------------------------------
     r.heading("Participant keys")
@@ -129,18 +134,26 @@ def verify_evidence(data, expect_fingerprints=()):
         if actual == info.get("fingerprint"):
             r.ok(f"{name}: fingerprint {actual} matches the embedded public key")
         else:
-            r.bad(f"{name}: claimed fingerprint {info.get('fingerprint')} does NOT match "
-                  f"the embedded key ({actual})", check="fingerprint")
+            r.bad(
+                f"{name}: claimed fingerprint {info.get('fingerprint')} does NOT match "
+                f"the embedded key ({actual})",
+                check="fingerprint",
+            )
     for pin in expect_fingerprints:
         want = pin.strip().upper()
         if any(fingerprint(p["public_key_pem"]) == want for p in participants.values()):
             r.ok(f"pinned fingerprint {want} belongs to a participant")
         else:
-            r.bad(f"pinned fingerprint {want} matches NO participant's key -- these may "
-                  f"not be the identities you expected", check="pinned fingerprint")
+            r.bad(
+                f"pinned fingerprint {want} matches NO participant's key -- these may "
+                f"not be the identities you expected",
+                check="pinned fingerprint",
+            )
     if not expect_fingerprints:
-        r.lines.append("  (no --expect-fingerprint given: keys are only checked for "
-                       "consistency with this file itself)")
+        r.lines.append(
+            "  (no --expect-fingerprint given: keys are only checked for "
+            "consistency with this file itself)"
+        )
 
     # --- handshake and genesis ---------------------------------------------
     r.heading("Handshake")
@@ -155,14 +168,18 @@ def verify_evidence(data, expect_fingerprints=()):
         r.bad("handshake values missing or not valid base64", check="handshake")
         handshake_ok = False
     if handshake_ok:
-        for role, pub, sig in (("initiator", init_pub, init_sig),
-                               ("responder", resp_pub, resp_sig)):
+        for role, pub, sig in (
+            ("initiator", init_pub, init_sig),
+            ("responder", resp_pub, resp_sig),
+        ):
             who = session[role]
             if who in keys and verify(keys[who], pub, sig):
                 r.ok(f"{role} {who}: ECDH public key carries a valid RSA signature")
             else:
-                r.bad(f"{role} {who}: ECDH public key signature is INVALID",
-                      check="handshake signature")
+                r.bad(
+                    f"{role} {who}: ECDH public key signature is INVALID",
+                    check="handshake signature",
+                )
         for name in names:
             genesis[name] = genesis_hash(init_pub, resp_pub, name)
 
@@ -172,29 +189,50 @@ def verify_evidence(data, expect_fingerprints=()):
     # really sent, so it explains a missing sequence number -- but the file still lacks it, so
     # a gap stays a failure; the annotation just says what the export itself recorded.
     rejected_total = sum(
-        1 for e in (data.get("rejected_events") or []) if isinstance(e, dict)
+        1
+        for e in (data.get("rejected_events") or [])
+        if isinstance(e, dict)
         and e.get("kind") == "message_rejected"
-        and e.get("reason") in ("decryption_failed", "signature_failed", "stale_timestamp",
-                                "malformed", "unknown_peer_key"))
-    gap_note = (f"; this export also records {rejected_total} rejected message(s) that were never "
-                f"shown, which may account for some of the missing ones") if rejected_total else ""
+        and e.get("reason")
+        in (
+            "decryption_failed",
+            "signature_failed",
+            "stale_timestamp",
+            "malformed",
+            "unknown_peer_key",
+        )
+    )
+    gap_note = (
+        (
+            f"; this export also records {rejected_total} rejected message(s) that were never "
+            f"shown, which may account for some of the missing ones"
+        )
+        if rejected_total
+        else ""
+    )
     expected = {n: {"seq": 1, "head": genesis.get(n)} for n in names}
     for index, rec in enumerate(records, start=1):
         label = None
         try:
             sender, recipient = rec["sender"], rec["recipient"]
             seq, prev = rec["seq"], rec["prev_hash"]
-            label = f"#{index} {sender}→{recipient} seq {seq} \"{_clip(rec['message'])}\""
-            signable = canonical_record(sender, recipient, seq, rec["timestamp"],
-                                        rec["message"], prev)
+            label = f'#{index} {sender}→{recipient} seq {seq} "{_clip(rec["message"])}"'
+            signable = canonical_record(
+                sender, recipient, seq, rec["timestamp"], rec["message"], prev
+            )
             problems = []
             if data["format"] == V2 and not valid_hash(rec.get("envelope_sha256")):
                 problems.append(("envelope hash", "missing or malformed envelope_sha256"))
             if sender not in keys or recipient not in participants or sender == recipient:
                 problems.append(("participants", "sender/recipient are not the two participants"))
             elif not verify(keys[sender], signable, _unb64(rec["signature"])):
-                problems.append(("signature", "RSA signature does NOT verify (message or "
-                                              "chain fields were altered, or wrong key)"))
+                problems.append(
+                    (
+                        "signature",
+                        "RSA signature does NOT verify (message or "
+                        "chain fields were altered, or wrong key)",
+                    )
+                )
             real_hash = record_hash(signable)
             if real_hash != rec.get("record_hash"):
                 problems.append(("record hash", "record_hash does not match the record's content"))
@@ -203,16 +241,31 @@ def verify_evidence(data, expect_fingerprints=()):
                 if seq == state["seq"] and prev == state["head"]:
                     pass
                 elif isinstance(seq, int) and seq > state["seq"]:
-                    problems.append(("chain", f"GAP: {seq - state['seq']} message(s) from "
-                                              f"{sender} missing before seq {seq} "
-                                              f"(expected {state['seq']}){gap_note}"))
+                    problems.append(
+                        (
+                            "chain",
+                            f"GAP: {seq - state['seq']} message(s) from "
+                            f"{sender} missing before seq {seq} "
+                            f"(expected {state['seq']}){gap_note}",
+                        )
+                    )
                 elif isinstance(seq, int) and seq < state["seq"]:
-                    problems.append(("chain", f"seq {seq} appears after seq "
-                                              f"{state['seq'] - 1}: reordered or duplicated"))
+                    problems.append(
+                        (
+                            "chain",
+                            f"seq {seq} appears after seq "
+                            f"{state['seq'] - 1}: reordered or duplicated",
+                        )
+                    )
                 else:
-                    problems.append(("chain", "prev_hash does not link to the previous "
-                                              "record: an earlier message was edited, "
-                                              "removed or replaced"))
+                    problems.append(
+                        (
+                            "chain",
+                            "prev_hash does not link to the previous "
+                            "record: an earlier message was edited, "
+                            "removed or replaced",
+                        )
+                    )
                 # Resync to this record so one defect is reported once, not
                 # as a cascade over every later message.
                 if isinstance(seq, int):
@@ -236,8 +289,11 @@ def verify_evidence(data, expect_fingerprints=()):
         if claimed == state["head"]:
             r.ok(f"{name}: final chain head matches ({state['seq'] - 1} message(s) sent)")
         else:
-            r.bad(f"{name}: claimed final chain head does not match the records "
-                  f"(a trailing message was removed or altered)", check="chain head")
+            r.bad(
+                f"{name}: claimed final chain head does not match the records "
+                f"(a trailing message was removed or altered)",
+                check="chain head",
+            )
 
     # --- attachments (informational; their messages are signed/chained above) --
     r.attachments = []
@@ -251,10 +307,14 @@ def verify_evidence(data, expect_fingerprints=()):
             continue
         r.attachments.append((index, desc))
     if r.attachments:
-        r.heading("Attachments (end-to-end encrypted; file key and hashes are inside signed messages)")
+        r.heading(
+            "Attachments (end-to-end encrypted; file key and hashes are inside signed messages)"
+        )
         for index, d in r.attachments:
-            r.ok(f"#{index} {d['name']} ({d['mime']}, {d['size']} bytes) "
-                 f"plaintext sha256 {d['pt_sha256']}, ciphertext sha256 {d['ct_sha256']}")
+            r.ok(
+                f"#{index} {d['name']} ({d['mime']}, {d['size']} bytes) "
+                f"plaintext sha256 {d['pt_sha256']}, ciphertext sha256 {d['ct_sha256']}"
+            )
 
     # --- voice calls (metadata only; signalling messages are signed/chained above) --
     r.calls = []
@@ -269,23 +329,29 @@ def verify_evidence(data, expect_fingerprints=()):
         r.calls.append((index, rec.get("sender"), sig))
     records = [(i, who, s) for i, who, s in r.calls if s["type"] == "record"]
     if r.calls:
-        r.heading("Voice calls (audio is never recorded; these are signed signalling/metadata messages)")
+        r.heading(
+            "Voice calls (audio is never recorded; these are signed signalling/metadata messages)"
+        )
         r.ok(f"{len(r.calls)} call message(s) in {len({s['call'] for _, _, s in r.calls})} call(s)")
         for index, who, s in records:
-            r.ok(f"#{index} {who} ({s['role']}) call {s['call'][:8]}: {s['outcome']}, {s['duration']}s, "
-                 f"connection {s['conn']}, fingerprint check {s['fp_match']}, "
-                 f"words confirmed {'yes' if s['sas_confirmed'] else 'no'}")
+            r.ok(
+                f"#{index} {who} ({s['role']}) call {s['call'][:8]}: {s['outcome']}, {s['duration']}s, "
+                f"connection {s['conn']}, fingerprint check {s['fp_match']}, "
+                f"words confirmed {'yes' if s['sas_confirmed'] else 'no'}"
+            )
 
     # --- exporter signature -------------------------------------------------
     r.heading("Export signature")
     body = {k: v for k, v in data.items() if k != "exporter_signature"}
     try:
-        if exporter in keys and verify(keys[exporter], canonical_json(body),
-                                       _unb64(exporter_sig)):
+        if exporter in keys and verify(keys[exporter], canonical_json(body), _unb64(exporter_sig)):
             r.ok(f"whole file is signed by {exporter}; nothing was changed after export")
         else:
-            r.bad(f"exporter signature by {exporter} is INVALID -- the file was edited "
-                  f"after export (or was not signed by {exporter})", check="export signature")
+            r.bad(
+                f"exporter signature by {exporter} is INVALID -- the file was edited "
+                f"after export (or was not signed by {exporter})",
+                check="export signature",
+            )
     except (ValueError, TypeError):
         r.bad("exporter signature is not valid base64", check="export signature")
     return r
@@ -293,20 +359,32 @@ def verify_evidence(data, expect_fingerprints=()):
 
 def _clip(text, n=40):
     text = str(text).replace("\n", " ")
-    return text if len(text) <= n else text[:n - 1] + "…"
+    return text if len(text) <= n else text[: n - 1] + "…"
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Verify a Secure Chat evidence file offline.")
     parser.add_argument("file", help="path to an exports/*.json evidence file")
-    parser.add_argument("--expect-fingerprint", action="append", default=[], metavar="FP",
-                        help="a participant fingerprint you trust (repeatable); the file "
-                             "is INVALID if no participant has it")
-    parser.add_argument("--check-file", action="append", default=[], metavar="PATH",
-                        help="an attachment file (original or stored ciphertext) to compare "
-                             "against the hashes recorded in the evidence (repeatable)")
+    parser.add_argument(
+        "--expect-fingerprint",
+        action="append",
+        default=[],
+        metavar="FP",
+        help="a participant fingerprint you trust (repeatable); the file "
+        "is INVALID if no participant has it",
+    )
+    parser.add_argument(
+        "--check-file",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="an attachment file (original or stored ciphertext) to compare "
+        "against the hashes recorded in the evidence (repeatable)",
+    )
     parser.add_argument("--receipt", help="optional timestamp receipt JSON")
-    parser.add_argument("--tsa-pubkey", help="trusted TSA Ed25519 public PEM (required with --receipt)")
+    parser.add_argument(
+        "--tsa-pubkey", help="trusted TSA Ed25519 public PEM (required with --receipt)"
+    )
     args = parser.parse_args(argv)
     try:
         with open(args.file, "r", encoding="utf-8") as f:
@@ -321,14 +399,16 @@ def main(argv=None):
             print("--receipt requires --tsa-pubkey", file=sys.stderr)
             return 2
         try:
-            with open(args.receipt, encoding='utf-8') as stream:
+            with open(args.receipt, encoding="utf-8") as stream:
                 receipt = json.load(stream)
-            with open(args.tsa_pubkey, 'rb') as stream:
+            with open(args.tsa_pubkey, "rb") as stream:
                 public_pem = stream.read()
-            with open(args.file, 'rb') as stream:
+            with open(args.file, "rb") as stream:
                 file_bytes = stream.read()
             if verify_receipt(receipt, file_bytes, public_pem):
-                report.ok("timestamp receipt signature and exact file SHA-256 match (trust the pinned TSA key/clock)")
+                report.ok(
+                    "timestamp receipt signature and exact file SHA-256 match (trust the pinned TSA key/clock)"
+                )
             else:
                 report.bad("timestamp receipt is INVALID", check="timestamp receipt")
         except (OSError, ValueError) as exc:
@@ -341,16 +421,25 @@ def main(argv=None):
         except OSError as exc:
             print(f"Cannot read attachment file: {exc}", file=sys.stderr)
             return 2
-        hits = [(i, d, kind) for i, d in report.attachments for kind in ("pt_sha256", "ct_sha256")
-                if d[kind] == digest]
+        hits = [
+            (i, d, kind)
+            for i, d in report.attachments
+            for kind in ("pt_sha256", "ct_sha256")
+            if d[kind] == digest
+        ]
         report.heading(f"Attachment file check: {os.path.basename(path)}")
         if hits:
             for i, d, kind in hits:
-                what = "original (decrypted) file" if kind == "pt_sha256" else "stored encrypted object"
+                what = (
+                    "original (decrypted) file"
+                    if kind == "pt_sha256"
+                    else "stored encrypted object"
+                )
                 report.ok(f"matches the recorded hash of {what} for message #{i} ({d['name']})")
         else:
-            report.bad("file matches NO attachment hash recorded in this evidence",
-                       check="attachment file")
+            report.bad(
+                "file matches NO attachment hash recorded in this evidence", check="attachment file"
+            )
     print(report.render())
     return 0 if report.valid else 1
 

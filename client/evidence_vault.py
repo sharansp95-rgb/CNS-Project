@@ -7,9 +7,10 @@ PBKDF2-SHA256 / 600000, 16 random salt bytes + purpose bytes, AES-256-GCM,
 import base64
 import hashlib
 import os
+
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives import hashes
 
 FORMAT = "securechat-vault/v1"
 PURPOSE = b"CNSProject evidence vault v1\x00"
@@ -28,7 +29,10 @@ def encrypt_evidence(file_bytes, password):
     ciphertext = AESGCM(_key(password, salt)).encrypt(
         nonce, file_bytes, (FORMAT + "\x00" + digest).encode("ascii")
     )
-    enc = lambda b: base64.b64encode(b).decode("ascii")
+
+    def enc(b):
+        return base64.b64encode(b).decode("ascii")
+
     return dict(
         format=FORMAT,
         iterations=ITERATIONS,
@@ -42,7 +46,10 @@ def encrypt_evidence(file_bytes, password):
 def decrypt_evidence(package, password):
     if package.get("format") != FORMAT or package.get("iterations") != ITERATIONS:
         raise ValueError("Unsupported vault format/parameters")
-    dec = lambda name: base64.b64decode(package[name], validate=True)
+
+    def dec(name):
+        return base64.b64decode(package[name], validate=True)
+
     salt, nonce = dec("salt"), dec("nonce")
     if len(salt) != 16 or len(nonce) != 12:
         raise ValueError("Invalid vault salt/nonce")

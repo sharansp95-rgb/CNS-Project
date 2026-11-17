@@ -8,26 +8,22 @@ reported separately. No history is rewritten and nothing is uploaded.
 import argparse
 import base64
 import json
-from pathlib import Path
 import re
 import subprocess
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PEM = re.compile(
     rb"-----BEGIN ((?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY)-----\s+[A-Za-z0-9+/=\s]{80,}-----END \1-----"
 )
 PATTERNS = {
-    "github_token": re.compile(
-        rb"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,})\b"
-    ),
+    "github_token": re.compile(rb"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,})\b"),
     "aws_access_key": re.compile(rb"\bAKIA[0-9A-Z]{16}\b"),
     "provider_api_key": re.compile(
         rb"\b(?:sk-(?:proj-|ant-)?[A-Za-z0-9_-]{32,}|rnd_[A-Za-z0-9]{24,}|xox[baprs]-[A-Za-z0-9-]{24,})\b"
     ),
 }
-URL = re.compile(
-    rb"postgres(?:ql)?(?:\+psycopg)?://[^\s/:]+:([^\s/@]+)@([^\s/\x22\x27<>]+)"
-)
+URL = re.compile(rb"postgres(?:ql)?(?:\+psycopg)?://[^\s/:]+:([^\s/@]+)@([^\s/\x22\x27<>]+)")
 PATH = re.compile(
     r"(^|/)(data|logs|exports)/|(^|/)\.env(?:$|\.)|certs/.*\.(key|crt|pem)$|\.(db|sqlite|sqlite3|key)$",
     re.I,
@@ -46,9 +42,7 @@ def scan():
     blobs = 0
     entries = [
         line.split(" ", 1)
-        for line in run("rev-list", "--objects", "--all", "--reflog")
-        .decode()
-        .splitlines()
+        for line in run("rev-list", "--objects", "--all", "--reflog").decode().splitlines()
         if " " in line
     ]
 
@@ -79,11 +73,7 @@ def scan():
                 placeholders.add(path)
             else:
                 matches.append("database_password_url")
-        if (
-            path.endswith(".pem")
-            and b"-----BEGIN PUBLIC KEY-----" in data
-            and not matches
-        ):
+        if path.endswith(".pem") and b"-----BEGIN PUBLIC KEY-----" in data and not matches:
             public_pems.add(path)
         for kind in set(matches):
             findings.append(dict(kind=kind, path=path, object=oid))
@@ -97,9 +87,7 @@ def scan():
     try:
         for oid, path in entries:
             if PATH.search(path):
-                findings.append(
-                    dict(kind="sensitive_history_path", path=path, object=oid[:12])
-                )
+                findings.append(dict(kind="sensitive_history_path", path=path, object=oid[:12]))
             if oid in seen:
                 continue
             seen.add(oid)
@@ -117,9 +105,7 @@ def scan():
         process.stdin.close()
         process.wait()
     current = (
-        run("ls-files", "--cached", "--others", "--exclude-standard", "-z")
-        .decode()
-        .split("\0")
+        run("ls-files", "--cached", "--others", "--exclude-standard", "-z").decode().split("\0")
     )
     current_count = 0
     for path in sorted(set(current) - {""}):
@@ -128,17 +114,13 @@ def scan():
             current_count += 1
             if PATH.search(path):
                 findings.append(
-                    dict(
-                        kind="sensitive_worktree_path", path=path, object="working-tree"
-                    )
+                    dict(kind="sensitive_worktree_path", path=path, object="working-tree")
                 )
             content(file.read_bytes(), path, "working-tree")
     return dict(
         scope="all refs, local reflogs and non-ignored working-tree files",
         reachable_commits=len(run("rev-list", "--all").splitlines()),
-        commits_including_reflogs=len(
-            run("rev-list", "--all", "--reflog").splitlines()
-        ),
+        commits_including_reflogs=len(run("rev-list", "--all", "--reflog").splitlines()),
         historical_blobs=blobs,
         working_tree_files=current_count,
         public_test_pems=sorted(public_pems),

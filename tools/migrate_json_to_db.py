@@ -4,16 +4,18 @@
 Existing DB accounts win (never overwrite credentials). Malformed input aborts
 before writing; missing files are allowed. Source files are left untouched.
 """
+
 import argparse
-from collections import Counter
 import json
-from pathlib import Path
 import sys
 import time
+from collections import Counter
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import insert, select
+
 from server.db import PROJECT_ROOT, get_database, security_events, users
 from server.security_log import event_digest, store_event
 
@@ -23,7 +25,11 @@ def migrate(users_path, events_path, database=None):
     if not isinstance(accounts, dict):
         raise ValueError("users.json must contain an object")
     for username, record in accounts.items():
-        if not username or not isinstance(record, dict) or not isinstance(record.get("password_hash"), str):
+        if (
+            not username
+            or not isinstance(record, dict)
+            or not isinstance(record.get("password_hash"), str)
+        ):
             raise ValueError("each account must have a username and encoded password_hash")
     events = []
     if Path(events_path).exists():
@@ -32,7 +38,11 @@ def migrate(users_path, events_path, database=None):
                 continue
             try:
                 record = json.loads(line)
-                if not isinstance(record, dict) or not isinstance(record.get("ts"), (int, float)) or not isinstance(record.get("event"), str):
+                if (
+                    not isinstance(record, dict)
+                    or not isinstance(record.get("ts"), (int, float))
+                    or not isinstance(record.get("event"), str)
+                ):
                     raise ValueError("expected ts and event")
             except (ValueError, TypeError) as exc:
                 raise ValueError(f"invalid security event on line {number}: {exc}") from exc
@@ -45,17 +55,23 @@ def migrate(users_path, events_path, database=None):
             if username in existing:
                 counts["users_skipped"] += 1
                 continue
-            conn.execute(insert(users).values(username=username,
-                password_hash=record["password_hash"],
-                public_key_pem=record.get("public_key"), created_at=time.time()))
+            conn.execute(
+                insert(users).values(
+                    username=username,
+                    password_hash=record["password_hash"],
+                    public_key_pem=record.get("public_key"),
+                    created_at=time.time(),
+                )
+            )
             counts["users_imported"] += 1
         occurrences = Counter()
         for record in events:
             digest = event_digest(record)
             occurrences[digest] += 1
             key = f"{digest}:{occurrences[digest]}"
-            if conn.execute(select(security_events.c.id).where(
-                    security_events.c.import_key == key)).first():
+            if conn.execute(
+                select(security_events.c.id).where(security_events.c.import_key == key)
+            ).first():
                 counts["events_skipped"] += 1
                 continue
             store_event(conn, record, key)

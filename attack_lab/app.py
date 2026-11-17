@@ -1,26 +1,28 @@
 """Separate sandbox site; product clients are embedded as opaque unchanged assets."""
 
 import asyncio
-from collections import deque
-from contextlib import asynccontextmanager
-import json
 import hmac
+import json
 import os
-from pathlib import Path
 import secrets
 import threading
 import time
+from collections import deque
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, insert, select, update
-from auth.password_hash import hash_password
-from server.db import attachments, metadata, users, PROJECT_ROOT
-from web.app import create_app as product_gateway, STATIC as PRODUCT_STATIC
-from attack_lab.relay import RogueRelay, lab_database
+
 from attack_lab.access import LabAccessGate
+from attack_lab.relay import RogueRelay, lab_database
+from auth.password_hash import hash_password
+from server.db import PROJECT_ROOT, attachments, metadata, users
 from server.storage import LocalStorage
+from web.app import STATIC as PRODUCT_STATIC
+from web.app import create_app as product_gateway
 from web.settings import Settings, install_transport
 
 ROOT = Path(__file__).resolve().parent
@@ -30,12 +32,13 @@ PASSWORD = "Lab-Password-1234!"
 
 def certificates(root):
     """Own TLS certificate for optional local TCP; no mutable cert-module globals."""
-    from datetime import datetime, timedelta, timezone
     import ipaddress
+    from datetime import datetime, timedelta, timezone
+
     from cryptography import x509
-    from cryptography.x509.oid import NameOID
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
 
     root.mkdir(parents=True, exist_ok=True)
     key_path, cert_path = root / "server.key", root / "server.crt"
@@ -79,9 +82,7 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
     port = int(os.environ.get("PORT", "8090"))
     settings = Settings.load(
         origins,
-        os.environ.get(
-            "LAB_ALLOWED_ORIGINS", f"http://localhost:{port},http://127.0.0.1:{port}"
-        ),
+        os.environ.get("LAB_ALLOWED_ORIGINS", f"http://localhost:{port},http://127.0.0.1:{port}"),
     )
     origins = set(settings.origins)
     access_code = os.environ.get("LAB_ACCESS_CODE", "")
@@ -91,9 +92,7 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
                 "A strong LAB_ACCESS_CODE (at least 24 bytes) is required in production"
             )
         if not os.environ.get("MAIN_SITE_ORIGIN"):
-            raise ValueError(
-                "MAIN_SITE_ORIGIN is required to enforce separate lab origins"
-            )
+            raise ValueError("MAIN_SITE_ORIGIN is required to enforce separate lab origins")
         Settings.load([os.environ["MAIN_SITE_ORIGIN"]])
         if os.environ.get("DATABASE_URL"):
             raise ValueError("Do not give the sandbox the main DATABASE_URL")
@@ -101,18 +100,13 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
 
         if (
             make_url(
-                database_url
-                or os.environ.get("LAB_DATABASE_URL", "sqlite:///data/attack_lab.db")
+                database_url or os.environ.get("LAB_DATABASE_URL", "sqlite:///data/attack_lab.db")
             ).get_backend_name()
             != "sqlite"
         ):
-            raise ValueError(
-                "Production sandbox must use its own ephemeral SQLite database"
-            )
+            raise ValueError("Production sandbox must use its own ephemeral SQLite database")
         if tcp_port is not None:
-            raise ValueError(
-                "Production sandbox exposes HTTP/WS only; TCP is a local demo"
-            )
+            raise ValueError("Production sandbox exposes HTTP/WS only; TCP is a local demo")
     real_origins = {
         x.strip()
         for x in os.environ.get(
@@ -123,13 +117,9 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
     if os.environ.get("MAIN_SITE_ORIGIN"):
         real_origins.add(os.environ["MAIN_SITE_ORIGIN"])
     if not origins or "*" in origins or origins & real_origins:
-        raise ValueError(
-            "Lab origins must be explicit and different from the real service"
-        )
+        raise ValueError("Lab origins must be explicit and different from the real service")
     database = lab_database(database_url)
-    state = Path(
-        state_dir or os.environ.get("LAB_STATE_DIR") or PROJECT_ROOT / "data/attack_lab"
-    )
+    state = Path(state_dir or os.environ.get("LAB_STATE_DIR") or PROJECT_ROOT / "data/attack_lab")
     cert, key = (
         certificates(state / "certs")
         if tcp_port is not None or not settings.production
@@ -137,9 +127,11 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
     )
     from server.security_log import log_event
 
-    logger = lambda event, **fields: log_event(
-        event, path=str(state / "security_events.jsonl"), database=database, **fields
-    )
+    def logger(event, **fields):
+        return log_event(
+            event, path=str(state / "security_events.jsonl"), database=database, **fields
+        )
+
     # The rogue TLS adapter needs a context even with no listener; local sandbox
     # certificates are separate from identity/TSA keys and may be ephemeral.
     if cert is None:
@@ -188,9 +180,7 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
     # Seed on first start; all identities remain browser-generated, never uploaded privately.
     with database.engine.connect() as conn:
         initialized = all(
-            conn.execute(
-                select(users.c.username).where(users.c.username == name)
-            ).first()
+            conn.execute(select(users.c.username).where(users.c.username == name)).first()
             for name in ACCOUNTS + ("lab_lockout",)
         )
     if not initialized:
@@ -363,14 +353,10 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
             raise HTTPException(400, "Invalid public key")
         with relay._lock:
             if username in relay.clients:
-                raise HTTPException(
-                    409, "Disconnect the victim before replacing its identity"
-                )
+                raise HTTPException(409, "Disconnect the victim before replacing its identity")
             with database.transaction() as conn:
                 conn.execute(
-                    update(users)
-                    .where(users.c.username == username)
-                    .values(public_key_pem=pem)
+                    update(users).where(users.c.username == username).values(public_key_pem=pem)
                 )
         return {"ready": True}
 
@@ -381,9 +367,7 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
         if data.get("target") not in ACCOUNTS:
             raise HTTPException(400, "Sandbox targets only")
         try:
-            return await asyncio.to_thread(
-                relay.arm, data.get("action"), data["target"]
-            )
+            return await asyncio.to_thread(relay.arm, data.get("action"), data["target"])
         except ValueError as exc:
             raise HTTPException(400, str(exc))
 
@@ -400,7 +384,9 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
             with database.engine.connect() as conn:
                 rows = conn.execute(
                     select(attachments.c.id, attachments.c.object_key)
-                    .where(attachments.c.finalized_at.is_not(None), attachments.c.deleted_at.is_(None))
+                    .where(
+                        attachments.c.finalized_at.is_not(None), attachments.c.deleted_at.is_(None)
+                    )
                     .order_by(attachments.c.created_at.desc())
                 ).all()
             if not rows:
@@ -462,23 +448,17 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
                     ),
                 )
                 results.append(probe.sent[0])
-            return dict(
-                results=results, locked=relay.lockout.status("lab_lockout").locked
-            )
+            return dict(results=results, locked=relay.lockout.status("lab_lockout").locked)
 
         return await asyncio.to_thread(run)
 
     if (ROOT / "static/console-assets").exists():
-        app.mount(
-            "/console-assets", StaticFiles(directory=ROOT / "static/console-assets")
-        )
+        app.mount("/console-assets", StaticFiles(directory=ROOT / "static/console-assets"))
     # Reuse the real gateway unchanged, scoped to this relay and origin. The lab
     # disables the unrelated evidence vault; no real receipt keys are touched.
     app.mount(
         "/",
-        product_gateway(
-            relay, origins=origins, include_vault=False, attachment_storage=storage
-        ),
+        product_gateway(relay, origins=origins, include_vault=False, attachment_storage=storage),
     )
     install_transport(app, settings)
     return app

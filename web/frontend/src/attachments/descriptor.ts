@@ -24,20 +24,32 @@ export function parseDescriptor(message: string): Descriptor | null {
   try {
     const d = JSON.parse(message.slice(PREFIX.length));
     const ok =
-      d && typeof d === "object" && d.v === 1 &&
-      typeof d.id === "string" && HEX(32).test(d.id) &&
-      typeof d.key === "string" && d.key.length === 44 &&
-      typeof d.name === "string" && d.name.length <= 200 &&
+      d &&
+      typeof d === "object" &&
+      d.v === 1 &&
+      typeof d.id === "string" &&
+      HEX(32).test(d.id) &&
+      typeof d.key === "string" &&
+      d.key.length === 44 &&
+      typeof d.name === "string" &&
+      d.name.length <= 200 &&
       ALLOWED_MIME.includes(d.mime) &&
       (d.kind === "image" || d.kind === "video") &&
       d.mime.startsWith(d.kind + "/") &&
-      Number.isSafeInteger(d.size) && d.size > 0 &&
-      Number.isSafeInteger(d.chunk) && d.chunk >= 4096 && d.chunk <= 8 * CHUNK &&
+      Number.isSafeInteger(d.size) &&
+      d.size > 0 &&
+      Number.isSafeInteger(d.chunk) &&
+      d.chunk >= 4096 &&
+      d.chunk <= 8 * CHUNK &&
       d.ct_size === ciphertextSize(d.size, d.chunk) &&
-      typeof d.ct_sha256 === "string" && HEX(64).test(d.ct_sha256) &&
-      typeof d.pt_sha256 === "string" && HEX(64).test(d.pt_sha256) &&
+      typeof d.ct_sha256 === "string" &&
+      HEX(64).test(d.ct_sha256) &&
+      typeof d.pt_sha256 === "string" &&
+      HEX(64).test(d.pt_sha256) &&
       (d.thumb === undefined ||
-        (typeof d.thumb === "string" && d.thumb.length <= Math.ceil((MAX_THUMB * 4) / 3) + 4 && /^[A-Za-z0-9+/=]*$/.test(d.thumb)));
+        (typeof d.thumb === "string" &&
+          d.thumb.length <= Math.ceil((MAX_THUMB * 4) / 3) + 4 &&
+          /^[A-Za-z0-9+/=]*$/.test(d.thumb)));
     return ok ? (d as Descriptor) : null;
   } catch {
     return null;

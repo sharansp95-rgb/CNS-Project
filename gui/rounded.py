@@ -14,14 +14,13 @@ Presentation only -- nothing here knows about the protocol, crypto or security c
 import base64
 import math
 import struct
-import zlib
-
 import tkinter as tk
+import zlib
 
 
 def _rgb(color):
     color = color.lstrip("#")
-    return tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
+    return tuple(int(color[i : i + 2], 16) for i in (0, 2, 4))
 
 
 def _coverage(x, y, w, h, r):
@@ -60,8 +59,11 @@ def rounded_png(width, height, radius, fill=None, outline=None, outline_width=1)
             if outer <= 0:
                 row += b"\x00\x00\x00\x00"
                 continue
-            inner = (_coverage(x - ow, y - ow, width - 2 * ow, height - 2 * ow, max(radius - ow, 0))
-                     if ow else outer)
+            inner = (
+                _coverage(x - ow, y - ow, width - 2 * ow, height - 2 * ow, max(radius - ow, 0))
+                if ow
+                else outer
+            )
             inner = min(inner, outer)
             ring = outer - inner
             if f and o:
@@ -76,12 +78,20 @@ def rounded_png(width, height, radius, fill=None, outline=None, outline_width=1)
         rows.append(bytes(row))
 
     def chunk(tag, data):
-        return (struct.pack(">I", len(data)) + tag + data
-                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
 
-    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)   # 8-bit RGBA
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
-            + chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b""))
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)  # 8-bit RGBA
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(b"".join(rows), 9))
+        + chunk(b"IEND", b"")
+    )
 
 
 class ImageCache:
@@ -119,5 +129,5 @@ class ImageCache:
 
     def nine_slice(self, radius, fill=None, outline=None, outline_width=1):
         """A small square image meant for a ttk image element with border=radius."""
-        size = 2 * (round(radius) + 2) + 4      # crisp corners + a stretchable middle
+        size = 2 * (round(radius) + 2) + 4  # crisp corners + a stretchable middle
         return self.get(size, size, radius, fill, outline, outline_width)

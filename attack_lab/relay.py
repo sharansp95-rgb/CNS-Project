@@ -1,18 +1,17 @@
 """Rogue relay attacks, outside all product transports and cryptographic clients."""
 
 import base64
-from copy import deepcopy
 import os
-from pathlib import Path
 import threading
+from copy import deepcopy
+from pathlib import Path
 
-from sqlalchemy.engine import make_url
+from crypto_engine.dh_exchange import generate_keypair
 from server.db import DEFAULT_DATABASE_URL, PROJECT_ROOT, get_database, normalize_url
-from server.server import ChatServer
-from server.user_store import DatabaseUserStore
 from server.lockout import LockoutGuard
 from server.security_log import log_event
-from crypto_engine.dh_exchange import generate_keypair
+from server.server import ChatServer
+from server.user_store import DatabaseUserStore
 
 ACTIONS = frozenset(
     (
@@ -93,9 +92,7 @@ class RogueRelay(ChatServer):
         logger=None,
     ):
         if database is not None:
-            lab_database(
-                database.engine.url
-            )  # enforce the same isolation guard for injections
+            lab_database(database.engine.url)  # enforce the same isolation guard for injections
         database = database if database is not None else lab_database()
         if lockout is not None and lockout.database.engine.url != database.engine.url:
             raise ValueError("Lab lockout must use the sandbox database")
@@ -121,10 +118,7 @@ class RogueRelay(ChatServer):
                 log_event(
                     event,
                     path=str(
-                        Path(
-                            os.environ.get("LAB_STATE_DIR")
-                            or PROJECT_ROOT / "data/attack_lab"
-                        )
+                        Path(os.environ.get("LAB_STATE_DIR") or PROJECT_ROOT / "data/attack_lab")
                         / "security_events.jsonl"
                     ),
                     database=database,
@@ -156,7 +150,9 @@ class RogueRelay(ChatServer):
                 if not peers:
                     raise ValueError("Connect the second victim first")
                 forged = dict(
-                    type="chat", **{"from": target}, to=peers[0],
+                    type="chat",
+                    **{"from": target},
+                    to=peers[0],
                     nonce=base64.b64encode(os.urandom(12)).decode(),
                     ciphertext=base64.b64encode(os.urandom(2600)).decode(),
                     tag=base64.b64encode(os.urandom(16)).decode(),
@@ -266,22 +262,14 @@ class RogueRelay(ChatServer):
                 )
                 self._send(
                     conn,
-                    dict(
-                        type="lab_control_result", armed=False, reason="localhost only"
-                    ),
+                    dict(type="lab_control_result", armed=False, reason="localhost only"),
                 )
                 return
             try:
-                result = self.arm(
-                    envelope.get("action"), envelope.get("target") or name
-                )
+                result = self.arm(envelope.get("action"), envelope.get("target") or name)
             except ValueError as exc:
-                result = dict(
-                    armed=False, action=envelope.get("action"), reason=str(exc)
-                )
-                self.log_event(
-                    "lab_control_rejected", requested_by=name, reason=str(exc)
-                )
+                result = dict(armed=False, action=envelope.get("action"), reason=str(exc))
+                self.log_event("lab_control_rejected", requested_by=name, reason=str(exc))
             self._send(conn, dict(type="lab_control_result", **result))
             return
         return super().handle_authenticated(conn, addr, name, envelope)

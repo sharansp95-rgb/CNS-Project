@@ -4,18 +4,26 @@ evidence tooling. Browser <-> Python byte compatibility is covered in Vitest."""
 import contextlib
 import io
 import json
-from pathlib import Path
 import subprocess
 import sys
 import tkinter as tk
+from pathlib import Path
 
 import pytest
 
 from client.client import SecureChatClient
 from client.evidence import build_evidence
 from crypto_engine.attachment_tools import (
-    PLACEHOLDER, PREFIX, AttachmentError, chunk_count, ciphertext_size, decrypt_file,
-    display_text, encode_descriptor, encrypt_file, parse_descriptor,
+    PLACEHOLDER,
+    PREFIX,
+    AttachmentError,
+    chunk_count,
+    ciphertext_size,
+    decrypt_file,
+    display_text,
+    encode_descriptor,
+    encrypt_file,
+    parse_descriptor,
 )
 from crypto_engine.signatures import generate_keypair, serialize_public_key
 from tools import verify_transcript
@@ -34,7 +42,11 @@ def descriptor(plain=b"x" * 5000, **over):
 def test_file_roundtrip_sizes_and_tamper_detection():
     plain = bytes(range(256)) * 50
     ct, s = encrypt_file(plain, chunk=SMALL)
-    assert len(ct) == ciphertext_size(len(plain), SMALL) == len(plain) + chunk_count(len(plain), SMALL) * 28
+    assert (
+        len(ct)
+        == ciphertext_size(len(plain), SMALL)
+        == len(plain) + chunk_count(len(plain), SMALL) * 28
+    )
     assert decrypt_file(ct, s) == plain
     bad = bytearray(ct)
     bad[100] ^= 1
@@ -42,6 +54,7 @@ def test_file_roundtrip_sizes_and_tamper_detection():
         decrypt_file(bytes(bad), s)
     assert e.value.code == "ciphertext_hash"
     import hashlib
+
     forged = dict(s, ct_sha256=hashlib.sha256(bytes(bad)).hexdigest())
     with pytest.raises(AttachmentError) as e:
         decrypt_file(bytes(bad), forged)
@@ -50,16 +63,22 @@ def test_file_roundtrip_sizes_and_tamper_detection():
 
 def test_reorder_and_truncation_are_rejected():
     import hashlib
+
     plain = b"p" * (SMALL * 3)
     ct, s = encrypt_file(plain, chunk=SMALL)
     rec = SMALL + 28
-    swapped = ct[rec:2 * rec] + ct[:rec] + ct[2 * rec:]
+    swapped = ct[rec : 2 * rec] + ct[:rec] + ct[2 * rec :]
     with pytest.raises(AttachmentError) as e:
         decrypt_file(swapped, dict(s, ct_sha256=hashlib.sha256(swapped).hexdigest()))
     assert e.value.code == "chunk_auth"
-    short = ct[:2 * rec]
-    forged = dict(s, size=SMALL * 2, ct_size=len(short), ct_sha256=hashlib.sha256(short).hexdigest(),
-                  pt_sha256=hashlib.sha256(plain[:SMALL * 2]).hexdigest())
+    short = ct[: 2 * rec]
+    forged = dict(
+        s,
+        size=SMALL * 2,
+        ct_size=len(short),
+        ct_sha256=hashlib.sha256(short).hexdigest(),
+        pt_sha256=hashlib.sha256(plain[: SMALL * 2]).hexdigest(),
+    )
     with pytest.raises(AttachmentError) as e:
         decrypt_file(short, forged)
     assert e.value.code == "chunk_auth"
@@ -69,8 +88,17 @@ def test_descriptor_validation():
     _, _, d = descriptor()
     assert parse_descriptor(encode_descriptor(d)) == d
     assert parse_descriptor("hello") is None
-    for patch in (dict(mime="image/svg+xml"), dict(kind="video"), dict(id="../x"), dict(size=0),
-                  dict(ct_size=1), dict(thumb="<script>"), dict(v=2), dict(key="short"), dict(chunk=1)):
+    for patch in (
+        dict(mime="image/svg+xml"),
+        dict(kind="video"),
+        dict(id="../x"),
+        dict(size=0),
+        dict(ct_size=1),
+        dict(thumb="<script>"),
+        dict(v=2),
+        dict(key="short"),
+        dict(chunk=1),
+    ):
         assert parse_descriptor(PREFIX + json.dumps({**d, **patch})) is None, patch
     assert parse_descriptor(PREFIX + "{bad json") is None
 
@@ -96,7 +124,10 @@ def test_real_clients_keep_chain_and_evidence_valid_with_an_attachment_message()
     a.rsa_private_key, ap = generate_keypair()
     b.rsa_private_key, bp = generate_keypair()
     a.peer_public_key, b.peer_public_key = bp, ap
-    a.peer_public_key_pem, b.peer_public_key_pem = serialize_public_key(bp).decode(), serialize_public_key(ap).decode()
+    a.peer_public_key_pem, b.peer_public_key_pem = (
+        serialize_public_key(bp).decode(),
+        serialize_public_key(ap).decode(),
+    )
     events = []
     b.on_event = lambda kind, data: events.append((kind, data))
     _, _, d = descriptor()
@@ -119,14 +150,22 @@ def test_real_clients_keep_chain_and_evidence_valid_with_an_attachment_message()
 
 
 def run(*args):
-    return subprocess.run([sys.executable, "tools/verify_transcript.py", *map(str, args)],
-                          capture_output=True, text=True)
+    return subprocess.run(
+        [sys.executable, "tools/verify_transcript.py", *map(str, args)],
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_verify_cli_lists_attachments_and_checks_files(tmp_path):
     evidence = CORPUS / "valid_v2_attachment.json"
-    result = run(evidence, "--check-file", CORPUS / "attachment_sample.png",
-                 "--check-file", CORPUS / "attachment_sample.enc")
+    result = run(
+        evidence,
+        "--check-file",
+        CORPUS / "attachment_sample.png",
+        "--check-file",
+        CORPUS / "attachment_sample.enc",
+    )
     assert result.returncode == 0, result.stdout
     assert "sample.png" in result.stdout and "original (decrypted) file" in result.stdout
     assert "stored encrypted object" in result.stdout
@@ -151,6 +190,7 @@ def test_corpus_attachment_object_decrypts_with_the_recorded_descriptor():
 def test_gui_bubble_shows_placeholder_not_descriptor():
     import gui.chat_gui as chat_gui
     from gui.theme import is_no_display_error
+
     try:
         window = chat_gui.ChatGUI()
     except tk.TclError as exc:
@@ -161,12 +201,27 @@ def test_gui_bubble_shows_placeholder_not_descriptor():
         window.geometry("1040x660+10000+10000")
         window.update()
         window.username, window.peer = "alice", "bob"
-        window._handle_event("auth_success", {"username": "alice", "peer": "bob", "lab_mode": True,
-                                              "own_fingerprint": "AAAA", "peer_key_found": True})
+        window._handle_event(
+            "auth_success",
+            {
+                "username": "alice",
+                "peer": "bob",
+                "lab_mode": True,
+                "own_fingerprint": "AAAA",
+                "peer_key_found": True,
+            },
+        )
         window._handoff_to_chat()
         _, _, d = descriptor()
-        window._handle_event("message_received", {"message": encode_descriptor(d), "sender": "bob",
-                                                  "timestamp": 1, "receipt": {"chain_link": "ok"}})
+        window._handle_event(
+            "message_received",
+            {
+                "message": encode_descriptor(d),
+                "sender": "bob",
+                "timestamp": 1,
+                "receipt": {"chain_link": "ok"},
+            },
+        )
         window.update()
         texts = []
 
@@ -175,8 +230,11 @@ def test_gui_bubble_shows_placeholder_not_descriptor():
                 if isinstance(child, tk.Label):
                     texts.append(str(child.cget("text")))
                 elif isinstance(child, tk.Canvas):
-                    texts.extend(str(child.itemcget(i, "text")) for i in child.find_all()
-                                 if child.type(i) == "text")
+                    texts.extend(
+                        str(child.itemcget(i, "text"))
+                        for i in child.find_all()
+                        if child.type(i) == "text"
+                    )
                 walk(child)
 
         walk(window.bubble_list)

@@ -11,9 +11,18 @@ import { b64, hex, raw, sha, un64, utf8 } from "../crypto";
 
 export const CHUNK = 1024 * 1024;
 export const OVERHEAD = 28; // nonce + tag
-export type Failure = "ciphertext_hash" | "chunk_auth" | "plaintext_hash" | "size" | "download" | "type";
+export type Failure =
+  | "ciphertext_hash"
+  | "chunk_auth"
+  | "plaintext_hash"
+  | "size"
+  | "download"
+  | "type";
 export class AttachmentError extends Error {
-  constructor(public code: Failure, message: string) {
+  constructor(
+    public code: Failure,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -30,8 +39,7 @@ export const chunkCount = (size: number, chunk = CHUNK) =>
   Math.max(1, Math.ceil(size / chunk));
 export const ciphertextSize = (size: number, chunk = CHUNK) =>
   size + chunkCount(size, chunk) * OVERHEAD;
-export const newFileId = () =>
-  hex(crypto.getRandomValues(new Uint8Array(16)));
+export const newFileId = () => hex(crypto.getRandomValues(new Uint8Array(16)));
 const aad = (id: string, index: number, last: boolean) =>
   utf8(`securechat-attachment/v1\0${id}\0${index}\0${last ? 1 : 0}`);
 const importKey = (key: Uint8Array, use: KeyUsage) =>
@@ -56,11 +64,19 @@ export async function encryptFile(
   let at = 0;
   for (let i = 0; i < n; i++) {
     if (opts.signal?.aborted) throw new DOMException("Cancelled", "AbortError");
-    const part = plain.subarray(i * chunk, Math.min((i + 1) * chunk, plain.length));
+    const part = plain.subarray(
+      i * chunk,
+      Math.min((i + 1) * chunk, plain.length),
+    );
     const nonce = crypto.getRandomValues(new Uint8Array(12));
     const box = new Uint8Array(
       await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv: nonce, tagLength: 128, additionalData: raw(aad(id, i, i === n - 1)) },
+        {
+          name: "AES-GCM",
+          iv: nonce,
+          tagLength: 128,
+          additionalData: raw(aad(id, i, i === n - 1)),
+        },
         key,
         raw(part),
       ),
@@ -88,12 +104,24 @@ export async function encryptFile(
 export async function decryptFile(
   ciphertext: Uint8Array,
   s: FileSecrets,
-  opts: { onProgress?: (done: number, total: number) => void; signal?: AbortSignal } = {},
+  opts: {
+    onProgress?: (done: number, total: number) => void;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<Uint8Array> {
-  if (ciphertext.length !== s.ct_size || s.ct_size !== ciphertextSize(s.size, s.chunk))
-    throw new AttachmentError("size", "Attachment tampered or corrupted: size does not match the signed message");
+  if (
+    ciphertext.length !== s.ct_size ||
+    s.ct_size !== ciphertextSize(s.size, s.chunk)
+  )
+    throw new AttachmentError(
+      "size",
+      "Attachment tampered or corrupted: size does not match the signed message",
+    );
   if (hex(await sha(ciphertext)) !== s.ct_sha256)
-    throw new AttachmentError("ciphertext_hash", "Attachment tampered or corrupted: ciphertext hash mismatch");
+    throw new AttachmentError(
+      "ciphertext_hash",
+      "Attachment tampered or corrupted: ciphertext hash mismatch",
+    );
   const key = await importKey(un64(s.key), "decrypt");
   const n = chunkCount(s.size, s.chunk);
   const plain = new Uint8Array(s.size);
@@ -107,7 +135,12 @@ export async function decryptFile(
     try {
       const part = new Uint8Array(
         await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv: raw(nonce), tagLength: 128, additionalData: raw(aad(s.id, i, i === n - 1)) },
+          {
+            name: "AES-GCM",
+            iv: raw(nonce),
+            tagLength: 128,
+            additionalData: raw(aad(s.id, i, i === n - 1)),
+          },
           key,
           raw(box),
         ),
@@ -115,13 +148,19 @@ export async function decryptFile(
       plain.set(part, out);
       out += part.length;
     } catch {
-      throw new AttachmentError("chunk_auth", `Attachment tampered or corrupted: chunk ${i + 1} failed authentication`);
+      throw new AttachmentError(
+        "chunk_auth",
+        `Attachment tampered or corrupted: chunk ${i + 1} failed authentication`,
+      );
     }
     at += 12 + plainLen + 16;
     opts.onProgress?.(i + 1, n);
     await tick();
   }
   if (hex(await sha(plain)) !== s.pt_sha256)
-    throw new AttachmentError("plaintext_hash", "Attachment tampered or corrupted: plaintext hash mismatch");
+    throw new AttachmentError(
+      "plaintext_hash",
+      "Attachment tampered or corrupted: plaintext hash mismatch",
+    );
   return plain;
 }

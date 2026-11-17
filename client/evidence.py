@@ -36,7 +36,8 @@ from crypto_engine.signatures import fingerprint, serialize_public_key, sign
 
 FORMAT = "securechat-evidence/v1"
 DEFAULT_EXPORT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "exports")
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "exports"
+)
 
 
 class EvidenceError(Exception):
@@ -64,7 +65,8 @@ def build_evidence(client, now=None, format_version=1):
     if record is None or client.rsa_private_key is None or client.peer_public_key_pem is None:
         raise EvidenceError(
             "No established, signed session yet -- complete the handshake "
-            "before exporting evidence.")
+            "before exporting evidence."
+        )
 
     now = int(now if now is not None else time.time())
     own_pem = serialize_public_key(client.rsa_private_key.public_key()).decode("ascii")
@@ -91,10 +93,8 @@ def build_evidence(client, now=None, format_version=1):
             },
         },
         "participants": {
-            client.username: {"public_key_pem": own_pem,
-                              "fingerprint": fingerprint(own_pem)},
-            client.peer: {"public_key_pem": peer_pem,
-                          "fingerprint": fingerprint(peer_pem)},
+            client.username: {"public_key_pem": own_pem, "fingerprint": fingerprint(own_pem)},
+            client.peer: {"public_key_pem": peer_pem, "fingerprint": fingerprint(peer_pem)},
         },
         "records": transcript,
         "chain_heads": {client.username: out_head, client.peer: in_head},
@@ -103,8 +103,12 @@ def build_evidence(client, now=None, format_version=1):
     if format_version == 2:
         body["format"] = "securechat-evidence/v2"
         body["format_version"] = 2
-    body["exporter_signature"] = b64(sign(client.rsa_private_key, canonical_json(
-        {k: v for k, v in body.items() if k != "exporter_signature"})))
+    body["exporter_signature"] = b64(
+        sign(
+            client.rsa_private_key,
+            canonical_json({k: v for k, v in body.items() if k != "exporter_signature"}),
+        )
+    )
     return body
 
 
@@ -114,8 +118,7 @@ def export_evidence(client, directory=DEFAULT_EXPORT_DIR, now=None, format_versi
     evidence = build_evidence(client, now=now, format_version=format_version)
     os.makedirs(directory, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(evidence["exported_at"]))
-    path = os.path.join(directory,
-                        f"evidence_{client.username}_{client.peer}_{stamp}.json")
+    path = os.path.join(directory, f"evidence_{client.username}_{client.peer}_{stamp}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(evidence, f, indent=2, ensure_ascii=False)
         f.write("\n")
