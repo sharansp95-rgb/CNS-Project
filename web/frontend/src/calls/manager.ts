@@ -105,12 +105,30 @@ export class CallManager {
   private signal(s: Omit<Signal, "v">) {
     void this.s.send(encodeSignal({ v: 1, ...s } as Signal)).catch(() => {});
   }
-  private async ice(): Promise<IceConfig> {
-    try {
-      return await api<IceConfig>(this.s.apiToken, "GET", "/api/calls/ice");
-    } catch {
-      return { iceServers: [], turn: "unavailable" };
-    }
+  // Metered needs up to ~2 minutes before a NEW TURN credential works, so the ICE
+  // configuration is fetched as soon as the secure session exists and reused for any call
+  // within CACHE_MS (credentials live 10 minutes). A call placed right after login simply
+  // may not get a relay candidate yet and then relies on a direct path.
+  private cache?: { cfg: IceConfig; at: number };
+  private fetching?: Promise<IceConfig>;
+  static readonly CACHE_MS = 8 * 60 * 1000;
+  prefetch() {
+    void this.ice().catch(() => {});
+  }
+  private ice(): Promise<IceConfig> {
+    if (this.cache && Date.now() - this.cache.at < CallManager.CACHE_MS) return Promise.resolve(this.cache.cfg);
+    this.fetching ??= api<IceConfig>(this.s.apiToken, "GET", "/api/calls/ice")
+      .catch((): IceConfig => ({ iceServers: [], turn: "unavailable" }))
+      .then((cfg) => {
+        if (cfg.turn !== "unavailable" || !this.cache) this.cache = { cfg, at: Date.now() };
+        return cfg;
+      })
+      .finally(() => (this.fetching = undefined));
+    return this.fetching;
+  }
+  /** Drop the cache when the session ends: credentials belong to this login. */
+  forgetIce() {
+    this.cache = undefined;
   }
   private newInfo(id: string, role: "caller" | "callee", cfg: IceConfig): CallInfo {
     return {
@@ -463,6 +481,7 @@ export class CallManager {
   }
   /** Session lost (socket closed, peer left): end without sending anything. */
   teardown(reason: string) {
+    this.forgetIce();
     if (!this.info) return;
     this.ended = true;
     this.releaseMedia();

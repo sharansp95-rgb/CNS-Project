@@ -394,6 +394,7 @@ export class Session {
     this.transcript = [];
     this.startedAt = Math.floor(Date.now() / 1000);
     this.status = "Secure session established";
+    this.calls.prefetch();
   }
   reject(kind: string, reason: string, e: Envelope, missing = 0) {
     this.rejected.push({

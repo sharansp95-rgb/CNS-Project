@@ -160,6 +160,7 @@ test("an unanswered incoming call times out after 30 seconds", async () => {
 
 // Live only: with TURN configured, a relay-only call must connect and report "via relay".
 test("relay-only call goes through TURN (live, when TURN is available)", async ({ browser, browserName }) => {
+  test.setTimeout(300000);
   test.skip(!process.env.BASE_URL || !process.env.LIVE_TURN || browserName !== "chromium", "needs live TURN (set LIVE_TURN=1) and a fake microphone");
   const prefix = `${browserName}_${runId}_relay_`;
   const make = async (me: string, peer: string) => {
@@ -175,6 +176,8 @@ test("relay-only call goes through TURN (live, when TURN is available)", async (
   const [a, b] = await Promise.all([make("alice", "bob"), make("bob", "alice")]);
   await expect(a.page.getByLabel("Message", { exact: true })).toBeEnabled();
   await expect(b.page.getByLabel("Message", { exact: true })).toBeEnabled();
+  // Metered credentials need up to 2 minutes to propagate; the client fetched them at login.
+  await a.page.waitForTimeout(130000);
   await a.page.getByRole("button", { name: "Start voice call" }).click();
   await b.page.getByRole("dialog", { name: "Voice call" }).getByRole("button", { name: "Accept" }).click();
   for (const p of [a.page, b.page]) {
