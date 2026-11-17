@@ -157,3 +157,32 @@ test("an unanswered incoming call times out after 30 seconds", async () => {
   await expect(pb.getByTestId("call-log").last()).toContainText("Missed call");
 });
 
+
+// Live only: with TURN configured, a relay-only call must connect and report "via relay".
+test("relay-only call goes through TURN (live, when TURN is available)", async ({ browser, browserName }) => {
+  test.skip(!process.env.BASE_URL || browserName !== "chromium", "needs live TURN and a fake microphone");
+  const prefix = `${browserName}_${runId}_relay_`;
+  const make = async (me: string, peer: string) => {
+    const ctx = await browser.newContext({ permissions: ["microphone"] });
+    const page = await ctx.newPage();
+    await page.goto("/?relay=1");
+    await page.getByLabel("Username", { exact: true }).fill(prefix + me);
+    await page.getByLabel("Password", { exact: true }).fill(password);
+    await page.getByLabel("Peer username", { exact: true }).fill(prefix + peer);
+    await page.getByRole("button", { name: "Create an identity" }).click();
+    return { page, ctx };
+  };
+  const [a, b] = await Promise.all([make("alice", "bob"), make("bob", "alice")]);
+  await expect(a.page.getByLabel("Message", { exact: true })).toBeEnabled();
+  await expect(b.page.getByLabel("Message", { exact: true })).toBeEnabled();
+  await a.page.getByRole("button", { name: "Start voice call" }).click();
+  await b.page.getByRole("dialog", { name: "Voice call" }).getByRole("button", { name: "Accept" }).click();
+  for (const p of [a.page, b.page]) {
+    await expect(panel(p)).toHaveAttribute("data-state", "active", { timeout: 40000 });
+    await expect(panel(p).getByTestId("call-conn")).toContainText("via relay (TURN)", { timeout: 20000 });
+    await expect(panel(p).getByTestId("call-fp")).toContainText("matches", { timeout: 20000 });
+    await expect.poll(() => bytes(p), { timeout: 20000 }).toBeGreaterThan(1000);
+  }
+  await a.ctx.close();
+  await b.ctx.close();
+});

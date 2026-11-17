@@ -126,7 +126,15 @@ export class CallManager {
     });
   }
   private connect(cfg: IceConfig) {
-    const pc = new RTCPeerConnection({ iceServers: cfg.iceServers, bundlePolicy: "max-bundle" });
+    // Open the site as /?relay=1 to force every media path through the TURN relay
+    // (hides your IP address from the peer; the relay still only sees encrypted SRTP).
+    const relayOnly = new URLSearchParams(location.search).get("relay") === "1";
+    const pc = new RTCPeerConnection({
+      iceServers: cfg.iceServers,
+      bundlePolicy: "max-bundle",
+      iceTransportPolicy: relayOnly ? "relay" : "all",
+    });
+    if (relayOnly && this.info) this.info.note = "Relay-only mode: all audio goes through the TURN relay.";
     this.pc = pc;
     for (const track of this.local!.getAudioTracks()) pc.addTrack(track, this.local!);
     const audio = (this.audio = document.createElement("audio"));
