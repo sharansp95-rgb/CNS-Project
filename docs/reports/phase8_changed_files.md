@@ -1,7 +1,8 @@
 # Phase 8 changed files
 
 Relative to `pre-phase8`; R denotes a rename and its similarity score. Built assets
-are included. This inventory omits its own later report-only updates.
+are included. The final report records meaningful test-fixture changes separately
+from formatting.
 
 ```text
 M	.gitignore
@@ -68,6 +69,7 @@ R097	docs/deployment_phase_report.md	docs/reports/deployment_phase_report.md
 A	docs/reports/final_report.md
 R098	docs/live_deployment_report.md	docs/reports/live_deployment_report.md
 R096	docs/media_phase_report.md	docs/reports/media_phase_report.md
+A	docs/reports/phase8_changed_files.md
 R097	docs/voice_phase_report.md	docs/reports/voice_phase_report.md
 A	docs/screenshots/README.md
 A	docs/screenshots/current/01-chat-wire-dark.png
@@ -95,6 +97,7 @@ R100	docs/screenshots/09_server_and_tls_fingerprint.png	docs/screenshots/history
 R100	docs/screenshots/10_evaluation_results.png	docs/screenshots/history/10_evaluation_results.png
 R100	docs/screenshots/12_wireshark_tls13_packets.png	docs/screenshots/history/12_wireshark_tls13_packets.png
 R100	docs/screenshots/13_wireshark_hex_ciphertext.png	docs/screenshots/history/13_wireshark_hex_ciphertext.png
+M	docs/secret_scan_report.json
 A	eslint.config.mjs
 M	gui/chat_gui.py
 M	gui/explain.py

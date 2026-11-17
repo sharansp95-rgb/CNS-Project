@@ -228,7 +228,14 @@ keyboard focus. ESLint’s isolated pinned parser uses TypeScript 6; the applica
 still builds/types with pinned TypeScript 7. The Starlette test adapter uses httpx2
 and no longer emits the deprecated-httpx warning.
 
-Measured baselines and final totals appear in [the final report](docs/reports/final_report.md).
+Current local results: **464 pytest passed / 2 opt-in Postgres skips**, **85 disposable
+Neon tests passed**, **83 Vitest passed**, **43 main browser tests passed / 7 skips**
+and **26 lab browser tests passed / 4 skips** (Chromium + WebKit). Live results:
+**42 main passed / 8 skips**, **26 lab passed / 4 skips**, including a real
+TURN-relayed call. The evaluator
+detected **120/120 attacks**, with **0/200 false rejections**.
+
+Measured baselines and live totals appear in [the final report](docs/reports/final_report.md).
 [Security evaluation](docs/evaluation_results.md) runs the real clients/relay, with
 120 attack trials and 200 normal messages. [Current screenshots](docs/screenshots/README.md)
 use local throwaway users, including valid/tampered evidence and verified calls.
