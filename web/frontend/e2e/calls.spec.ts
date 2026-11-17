@@ -177,7 +177,14 @@ test("relay-only call goes through TURN (live, when TURN is available)", async (
   await expect(a.page.getByLabel("Message", { exact: true })).toBeEnabled();
   await expect(b.page.getByLabel("Message", { exact: true })).toBeEnabled();
   // Metered credentials need up to 2 minutes to propagate; the client fetched them at login.
-  await a.page.waitForTimeout(130000);
+  // The gateway closes sockets idle for 120 s, so keep both sessions busy with chat while waiting.
+  for (let i = 0; i < 3; i++) {
+    await a.page.waitForTimeout(45000);
+    for (const p of [a.page, b.page]) {
+      await p.getByLabel("Message", { exact: true }).fill("keepalive " + i);
+      await p.getByRole("button", { name: "Send message" }).click();
+    }
+  }
   await a.page.getByRole("button", { name: "Start voice call" }).click();
   await b.page.getByRole("dialog", { name: "Voice call" }).getByRole("button", { name: "Accept" }).click();
   for (const p of [a.page, b.page]) {

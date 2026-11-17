@@ -65,6 +65,15 @@ export function micMessage(e: unknown): string {
     return "The microphone is in use by another app or could not be started.";
   return "Could not access the microphone: " + ((e as Error)?.message || name || "unknown error");
 }
+/** Count candidate types in an SDP ("host", "srflx", "relay"): shown in the Wire Log. */
+export function candidateSummary(sdp: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const m of sdp.matchAll(/^a=candidate:\S+ \d+ (\w+) \d+ \S+ \d+ typ (\w+)/gm)) {
+    const k = `${m[2]}/${m[1].toLowerCase()}`;
+    out[k] = (out[k] ?? 0) + 1;
+  }
+  return out;
+}
 function gathered(pc: RTCPeerConnection, ms = 4000) {
   return new Promise<void>((resolve) => {
     if (pc.iceGatheringState === "complete") return resolve();
@@ -235,6 +244,7 @@ export class CallManager {
       const err = validateSdp(sdp);
       if (err) throw Error("Could not build a valid call offer: " + err);
       this.info.localFp = signedFingerprint(sdp)!;
+      this.s.note("call_candidates", { call: id, gathered: candidateSummary(sdp), ice_servers: cfg.iceServers.length, turn: cfg.turn });
       this.signal({ call: id, type: "invite", sdp });
       this.s.note("call_fingerprints", { call: id, local_dtls_sha256: this.info.localFp, note: "Sent inside the signed, encrypted invite" });
       this.armRing("no_answer");
@@ -314,6 +324,7 @@ export class CallManager {
       if (err) throw Error(err);
       cur.localFp = signedFingerprint(sdp)!;
       cur.words = await sas(cur.localFp, cur.remoteFp, cur.id);
+      this.s.note("call_candidates", { call: cur.id, gathered: candidateSummary(sdp), ice_servers: cfg.iceServers.length, turn: cfg.turn });
       this.signal({ call: cur.id, type: "accept", sdp });
       this.s.note("call_fingerprints", { call: cur.id, local_dtls_sha256: cur.localFp, note: "Sent inside the signed, encrypted answer" });
       this.ui();
