@@ -93,11 +93,16 @@ test("call connects, shows matching words, audio flows, mute works, hang-up is r
   await expect(panel(pb)).toHaveCount(0);
   for (const p of [pa, pb]) await expect(p.getByTestId("call-log").last()).toContainText(/Call · 0:0\d · direct · verified/);
   // Evidence includes both signed call records (metadata only) and verifies offline.
-  const download = pa.waitForEvent("download");
-  await pa.getByRole("button", { name: "Export Evidence" }).click();
-  const file = testInfo.outputPath("calls-evidence.json");
-  await (await download).saveAs(file);
-  const out = execFileSync(root + ".venv/bin/python", [root + "tools/verify_transcript.py", file], { encoding: "utf8" });
+  // Bob's record may still be in flight over a real network, so export until it arrives.
+  let out = "";
+  for (let attempt = 0; attempt < 8 && !/\(callee\) call [0-9a-f]{8}: completed/.test(out); attempt++) {
+    if (attempt) await pa.waitForTimeout(1000);
+    const download = pa.waitForEvent("download");
+    await pa.getByRole("button", { name: "Export Evidence" }).click();
+    const file = testInfo.outputPath(`calls-evidence-${attempt}.json`);
+    await (await download).saveAs(file);
+    out = execFileSync(root + ".venv/bin/python", [root + "tools/verify_transcript.py", file], { encoding: "utf8" });
+  }
   expect(out).toContain("RESULT: VALID");
   expect(out).toContain("Voice calls");
   expect(out).toMatch(/\(caller\) call [0-9a-f]{8}: completed, \d+s, connection direct, fingerprint check yes, words confirmed yes/);
