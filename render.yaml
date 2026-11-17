@@ -5,6 +5,7 @@ services:
     name: team15-securechat
     runtime: python
     plan: free
+    region: singapore
     numInstances: 1
     buildCommand: pip install -r requirements.txt && python tools/check_static_assets.py
     startCommand: python -m web
@@ -26,6 +27,7 @@ services:
     name: team15-attack-lab
     runtime: python
     plan: free
+    region: singapore
     numInstances: 1
     buildCommand: pip install -r requirements.txt && python tools/check_static_assets.py
     startCommand: python -m attack_lab

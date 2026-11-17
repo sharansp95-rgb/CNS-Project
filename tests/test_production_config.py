@@ -149,6 +149,25 @@ def test_untrusted_forwarded_https_cannot_bypass_wss_policy(monkeypatch):
         )
 
 
+def test_ingress_diagnostics_preserve_socket_peer_and_exclude_header_text(monkeypatch, caplog):
+    import logging
+
+    app = main_app(monkeypatch)
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        with TestClient(app, client=("10.2.3.4", 123)) as client:
+            result = client.get(
+                "/",
+                headers={
+                    "x-forwarded-proto": "https",
+                    "x-forwarded-for": "private-header-text,198.51.100.2",
+                },
+            )
+    assert result.status_code == 200
+    assert "Transport ingress peer 10.2.3.4; original scheme http" in caplog.text
+    assert "forwarded IP chain invalid,198.51.100.2" in caplog.text
+    assert "private-header-text" not in caplog.text
+
+
 @pytest.mark.parametrize("scheme", ["postgres", "postgresql", "postgresql+psycopg"])
 def test_neon_url_normalization_and_pool_settings(scheme):
     url = db.normalize_url(f"{scheme}://test:placeholder@db.invalid/test")

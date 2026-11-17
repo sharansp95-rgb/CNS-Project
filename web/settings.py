@@ -111,8 +111,35 @@ class TransportPolicy:
         await self.app(scope, receive, send)
 
 
+class IngressDiagnostics:
+    """Record the socket boundary before forwarding headers change the scope."""
+
+    def __init__(self, app, enabled):
+        self.app, self.enabled = app, enabled
+
+    async def __call__(self, scope, receive, send):
+        if self.enabled and scope["type"] == "http" and scope.get("path") == "/":
+            # Log IP literals only: never arbitrary header text, URLs or credentials.
+            chain = []
+            for key, value in scope.get("headers", []):
+                if key.lower() == b"x-forwarded-for":
+                    for address in value.decode("latin-1").split(",")[:16]:
+                        try:
+                            chain.append(str(ipaddress.ip_address(address.strip())))
+                        except ValueError:
+                            chain.append("invalid")
+            logging.getLogger("uvicorn.error").info(
+                "Transport ingress peer %s; original scheme %s; forwarded IP chain %s",
+                (scope.get("client") or ("unknown",))[0],
+                scope.get("scheme"),
+                ",".join(chain) or "none",
+            )
+        await self.app(scope, receive, send)
+
+
 def install_transport(app, settings):
     app.add_middleware(TransportPolicy, enabled=settings.production)
     # Apply the actual Uvicorn middleware once, including under TestClient.
     # Entrypoints disable Uvicorn's automatic duplicate wrapper.
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=list(settings.proxies))
+    app.add_middleware(IngressDiagnostics, enabled=settings.production)

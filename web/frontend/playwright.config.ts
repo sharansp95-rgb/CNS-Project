@@ -6,7 +6,7 @@ export default defineConfig({
   timeout: external ? 120000 : 45000,
   workers: 1,
   expect: { timeout: external ? 30000 : 10000 },
-  use: { headless: true, trace: "retain-on-failure" },
+  use: { headless: true, trace: external ? "off" : "retain-on-failure" },
   projects: browsers.map((browserName, index) => ({
     name: browserName,
     use: {
