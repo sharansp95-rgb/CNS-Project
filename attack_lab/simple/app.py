@@ -43,11 +43,11 @@ def create_app(relay: SimpleRelay, ui_port: int) -> FastAPI:
     @app.post("/api/arm")
     async def arm(request: Request):
         body = await request.json()
-        action, sender = body.get("action"), body.get("sender")
+        action = body.get("action")
         if action not in ACTIONS:
             raise HTTPException(400, "unknown action")
         try:
-            return relay.arm_simple(action, sender)
+            return relay.arm_simple(action)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from None
 

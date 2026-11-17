@@ -57,7 +57,7 @@ passwords terminate at the gateway and must use HTTPS outside localhost.
 ## Simple Mallory demo (message level)
 
 The easiest live demo: Mallory sits on the *relay* and sees every chat message as ciphertext. He has
-three buttons, and the victims' own clients decide what happens. This is the message-level attack lab
+three buttons at the top, and the victims' own clients decide what happens. This is the message-level attack lab
 (`attack_lab/relay.py`), not the TLS proxy below; the TLS demo stays available.
 
 ```bash
@@ -67,18 +67,16 @@ demo/stop_demo.sh
 ```
 
 **5-line demo script**
-1. Start it. In Alice's and Bob's windows choose *Create an identity* (e.g. `alice` / `bob`) and name the other as Peer.
-2. Alice sends "hello". Bob receives it; Mallory's row shows `alice → bob`, the time and *only* the ciphertext (shortened).
-3. Click **DROP** on that row, then Alice sends "lost" and "next". Bob never gets "lost", and when "next" arrives his
-   window warns **"Message missing: 1 message never arrived (hash-chain gap)"**.
-4. Click **TAMPER**, then Alice sends "pay 500": Bob's window shows **"Message was altered in transit — rejected
-   (authentication tag failed)"** and the message does not appear.
-5. Click **REPLAY**, then Alice sends "once": Bob gets it once and his window shows **"Duplicate or old message —
-   rejected"**. **Reset** clears Mallory's window and any armed attack.
+1. Start it. In Alice's and Bob's windows choose *Create an identity* (e.g. `alice` / `bob`) and name the other as Peer. Alice sends "hello": Bob gets it, Mallory's list shows `alice → bob`, the time and only shortened ciphertext.
+2. Click **TAMPER** at the top of Mallory's window ("Armed: TAMPER — waiting for next message"; click again to disarm). Alice sends "pay 500": Bob's window shows **"Message was altered in transit — rejected"**, the row is labelled TAMPERED and Mallory disarms itself.
+3. Click **DROP**, Alice sends "lost" (row DROPPED, Bob sees nothing), then "next": Bob's window warns **"1 message missing"**.
+4. Click **REPLAY**, Alice sends "once": Bob gets it once, then **"Duplicate or old message — rejected"** (row REPLAYED).
+5. Any armed attack hits the next message from **either** user (try it from Bob). **Reset** clears the list, the feed and any armed attack.
 
-How it works. A click on DROP / TAMPER / REPLAY arms that attack for the **sender of that row**; that sender's
-*next* message gets the treatment (one click per attack; the highlighted button shows what is armed, the feed says
-what happened). DROP and TAMPER are the lab relay's own `drop_next` / `tamper_next`; REPLAY delivers the next
+How it works. One set of three buttons at the top (like the old Tk Attack Lab panel). A click arms that attack for the
+**next chat message, from either user**; the button is highlighted and the banner says "Armed: … — waiting for next
+message". It is one-shot: it disarms itself after firing, and clicking the armed button again disarms it. Rows are a
+read-only list and only the attacked row gets a label. DROP and TAMPER are the lab relay's own `drop_next` / `tamper_next`; REPLAY delivers the next
 message and then the identical envelope (same nonce) a second time. Normal messages pass untouched. **Nothing is
 faked:** Mallory's feed only repeats what Bob's own client reports after its own checks (hash chain,
 AES-GCM tag, nonce freshness), the same `security_alert` the client sends to the relay. Mallory's page lists
@@ -92,7 +90,7 @@ phone section below. The same demo CA (`data/network_attack/ca.crt`) is reused, 
 it needs nothing new. Product change made for this demo: the web client now shows the receiver's rejection reasons
 in plain words in a warning box (`web/frontend/src/securityWarning.ts`) and scrolls to the newest message; the
 checks themselves are unchanged. Tests: `npm --prefix web/frontend run test:mallory` (Playwright, Chromium and
-WebKit: normal row with 3 buttons, DROP, TAMPER, REPLAY and Reset each shown in Bob's window).
+WebKit: arming/disarming, each attack in the receiver's window, either direction, auto-disarm, Reset).
 
 ## Network attacker demo ("fake Wi-Fi")
 

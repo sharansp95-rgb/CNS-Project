@@ -186,8 +186,9 @@ about a minute to become usable. No TURN secret is exposed to the browser or lab
 ## Simple Mallory demo
 
 `demo/start_demo.sh --mallory [--lan]` is the easiest live attack demo: Alice and Bob chat in the web client, and
-Mallory's window shows each message as ciphertext with three buttons, **DROP**, **TAMPER**, **REPLAY**. The next
-message gets the treatment and the receiver's own checks report it (message missing, altered, duplicate). With
+Mallory's window lists each message as ciphertext, with one set of three buttons at the top (**TAMPER**, **DROP**,
+**REPLAY**). A click arms it for the next message from either user (one shot) and the receiver's own checks report it
+(altered, "1 message missing", duplicate). With
 `--lan` Bob is your phone. Script: [attack_lab/README.md](attack_lab/README.md#simple-mallory-demo-message-level).
 
 ## Network attacker demo

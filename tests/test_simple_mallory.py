@@ -64,13 +64,13 @@ def test_drop_is_noticed_by_the_receivers_own_chain_check(scene):
     server, alice, bob, seen = scene
     alice.send_message("first")
     assert wait(lambda: got(seen, "first"))
-    server.arm_simple("drop", "alice")
-    assert server.state()["armed"] == {"alice": "drop"}
+    server.arm_simple("drop")
+    assert server.state()["armed"] == "drop"
     alice.send_message("lost")
     assert wait(lambda: server.state()["rows"][-1]["status"] == "dropped")
     time.sleep(0.3)
     assert not got(seen, "lost") and not reasons(seen)
-    assert server.state()["armed"] == {}  # one click, one message
+    assert server.state()["armed"] is None  # one shot: it disarmed itself
     alice.send_message("next")
     assert wait(lambda: got(seen, "next"))
     assert "chain_gap" in reasons(seen)
@@ -80,7 +80,7 @@ def test_tamper_is_rejected_by_the_aes_gcm_tag(scene):
     server, alice, bob, seen = scene
     alice.send_message("first")
     assert wait(lambda: got(seen, "first"))
-    server.arm_simple("tamper", "alice")
+    server.arm_simple("tamper")
     alice.send_message("pay 500")
     assert wait(lambda: "decryption_failed" in reasons(seen))
     assert not got(seen, "pay 500")
@@ -91,7 +91,7 @@ def test_tamper_is_rejected_by_the_aes_gcm_tag(scene):
 
 def test_replay_delivers_once_and_the_duplicate_is_rejected(scene):
     server, alice, bob, seen = scene
-    server.arm_simple("replay", "alice")
+    server.arm_simple("replay")
     alice.send_message("once")
     assert wait(lambda: "replay_duplicate" in reasons(seen))
     assert sum(1 for k, d in seen if k == "message_received" and d.get("message") == "once") == 1
@@ -102,7 +102,7 @@ def test_feed_never_claims_a_result_the_clients_did_not_report(scene):
     server, alice, bob, seen = scene
     alice.send_message("first")
     assert wait(lambda: got(seen, "first"))
-    server.arm_simple("tamper", "alice")
+    server.arm_simple("tamper")
     texts = [f["text"] for f in server.state()["feed"]]
     assert any("TAMPER armed" in t for t in texts)
     assert not any("own client" in t for t in texts)  # nobody has reported anything yet
@@ -117,32 +117,57 @@ def test_reset_and_arm_validation_and_control_page_guards(scene):
     server, alice, bob, seen = scene
     alice.send_message("a")
     assert wait(lambda: got(seen, "a"))
-    server.arm_simple("drop", "alice")
+    server.arm_simple("drop")
     server.reset_view()
     state = server.state()
-    assert state["rows"] == [] and state["armed"] == {} and state["feed"] == []
+    assert state["rows"] == [] and state["armed"] is None and state["feed"] == []
     with pytest.raises(ValueError):
-        server.arm_simple("explode", "alice")
+        server.arm_simple("explode")
     api = TestClient(create_app(server, 8095), base_url="http://localhost:8095")
     ok = {"origin": "http://localhost:8095"}
     assert api.get("/").status_code == 200
     assert api.get("/api/state", headers={"host": "evil.example"}).status_code == 403
     assert api.post("/api/reset", headers={"origin": "http://evil.example"}).status_code == 403
-    assert (
-        api.post("/api/arm", json={"action": "nope", "sender": "alice"}, headers=ok).status_code
-        == 400
-    )
+    assert api.post("/api/arm", json={"action": "nope"}, headers=ok).status_code == 400
     assert (
         api.post("/api/arm", json={"action": "drop", "sender": "alice"}, headers=ok).status_code
         == 200
     )
 
 
-def test_mallory_page_has_only_three_buttons_per_row_and_a_reset():
+def test_arming_toggles_switches_and_fires_on_either_direction(scene):
+    server, alice, bob, seen = scene
+    server.arm_simple("tamper")
+    assert server.state()["armed"] == "tamper"
+    server.arm_simple("tamper")  # second click disarms
+    assert server.state()["armed"] is None
+    server.arm_simple("drop")
+    server.arm_simple("replay")  # only one attack at a time
+    assert server.state()["armed"] == "replay"
+    server.arm_simple("replay")
+    alice.send_message("ok1")
+    assert wait(lambda: got(seen, "ok1"))  # disarmed: untouched
+    server.arm_simple("tamper")
+    alice_seen = []
+    alice.on_event = lambda kind, data: alice_seen.append((kind, data))
+    bob.send_message("from bob")  # the other direction
+    assert wait(lambda: "decryption_failed" in reasons(alice_seen))
+    assert server.state()["rows"][-1]["status"] == "tampered" and server.state()["armed"] is None
+
+
+def test_mallory_page_has_one_set_of_three_top_buttons_and_read_only_rows():
     page = (ROOT / "attack_lab/simple/static/index.html").read_text()
     assert page.count('id="reset"') == 1
-    for name in ("drop", "tamper", "replay"):
-        assert f'b("{name}")' in page
+    top = page[page.index('class="attacks"') : page.index("</div>", page.index('class="attacks"'))]
+    assert [n for n in ("tamper", "drop", "replay") if f'data-a="{n}"' in top] == [
+        "tamper",
+        "drop",
+        "replay",
+    ]
+    assert (
+        "<button" not in page[page.index("s.rows.length") : page.index("if(html!==last)")]
+    )  # rows have no buttons
+    assert "Armed:" in page and "waiting for next message" in page
     for banned in ("Intercept", "hex", "pcap", "Wireshark", "Delay", "TLS record"):
         assert banned not in page
 

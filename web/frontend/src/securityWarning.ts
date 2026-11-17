@@ -9,13 +9,10 @@ export function describeRejection(
       return "Message was altered in transit — rejected (authentication tag failed).";
     case "replay_duplicate":
       return "Duplicate or old message — rejected (already seen).";
-    case "chain_gap": {
-      const n =
-        missing > 0
-          ? `${missing} message${missing === 1 ? "" : "s"}`
-          : "A message";
-      return `Message missing: ${n} never arrived (hash-chain gap).`;
-    }
+    case "chain_gap":
+      return missing > 0
+        ? `${missing} message${missing === 1 ? "" : "s"} missing — never arrived (hash-chain gap).`
+        : "A message is missing — it never arrived (hash-chain gap).";
     case "chain_broken":
       return "Message out of order — rejected (hash chain does not match).";
     case "signature_failed":

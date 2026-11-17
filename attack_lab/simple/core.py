@@ -34,46 +34,46 @@ def short(text: str, head: int = 26) -> str:
 
 
 class SimpleRelay(RogueRelay):
+    """One armed attack at a time. It fires on the next chat message, from either user."""
+
     def __init__(self, *args, **kwargs):
         self.rows: list[dict] = []
-        self.replay_armed: set[str] = set()
+        self.armed: str | None = None
         self._row_id = 1
         super().__init__(*args, **kwargs)
 
     # ------------------------------------------------------------------ attacks
-    def arm_simple(self, action: str, sender: str):
+    def arm_simple(self, action: str):
+        """Arm `action` for the next message; arming the armed attack again disarms it."""
         if action not in ACTIONS:
             raise ValueError("Unknown attack")
-        if not isinstance(sender, str) or not sender:
-            raise ValueError("Unknown sender")
-        if action == "replay":
-            with self.attack_lock:
-                self.pending.pop(sender, None)
-                self.replay_armed.add(sender)
-            self.log_event("lab_attack_armed", action="replay_next", target=sender)
+        with self.attack_lock:
+            disarm = self.armed == action
+            self.armed = None if disarm else action
+        if disarm:
+            self.log_event("lab_attack_disarmed", action=action)
         else:
-            with self.attack_lock:
-                self.replay_armed.discard(sender)
-            self.arm(_LAB_ACTION[action], sender)  # the lab relay's own tamper_next / drop_next
-        return {"armed": action, "sender": sender}
+            self.log_event("lab_attack_armed", action=action)
+        return {"armed": self.armed}
 
     def intercept(self, envelope, sender):
         if envelope.get("type") != "chat":
             return super().intercept(envelope, sender)
         original = deepcopy(envelope)
         with self.attack_lock:
-            replay = sender in self.replay_armed
-            self.replay_armed.discard(sender)
+            action, self.armed = self.armed, None  # one shot: it disarms itself as it fires
+            if action in _LAB_ACTION:
+                self.pending[sender] = _LAB_ACTION[action]  # the lab relay's own tamper/drop
         result = super().intercept(envelope, sender)
         status = "delivered"
         if not result:
             status = "dropped"
         elif result[0].get("ciphertext") != original.get("ciphertext"):
             status = "tampered"
-        elif replay:
+        elif action == "replay":
             result = [result[0], deepcopy(result[0])]  # same bytes, same nonce, again
             status = "replayed"
-            self.log_event("lab_attack_performed", action="replay_next", target=sender)
+            self.log_event("lab_attack_performed", action="replay", target=sender)
         with self.attack_lock:
             self.rows.append(
                 {
@@ -96,7 +96,7 @@ class SimpleRelay(RogueRelay):
             self.events.clear()
             self.wire.clear()
             self.pending.clear()
-            self.replay_armed.clear()
+            self.armed = None
             self.held.clear()
             self.last.clear()
             self.last_large.clear()
@@ -104,25 +104,21 @@ class SimpleRelay(RogueRelay):
     # ------------------------------------------------------------------ view
     def feed(self):
         out = []
+        names = {"drop_next": "drop", "tamper_next": "tamper", "replay": "replay"}
         for e in list(self.events):
-            kind, who = e.get("event"), e.get("target")
+            kind, who, act = e.get("event"), e.get("target"), e.get("action")
             if kind == "lab_attack_armed":
-                name = {"drop_next": "drop", "tamper_next": "tamper", "replay_next": "replay"}.get(
-                    e.get("action"), e.get("action")
-                )
                 out.append(
                     (
                         e["ts"],
                         "armed",
-                        f"{name.upper()} armed: {who}'s next message will be {_VERB.get(name, name)}.",
+                        f"{act.upper()} armed: the next message will be {_VERB[act]}.",
                     )
                 )
-            elif kind == "lab_attack_performed" and e.get("action") != "replay_next":
-                name = {"drop_next": "drop", "tamper_next": "tamper"}.get(e.get("action"))
-                if name:
-                    out.append((e["ts"], "did", f"Mallory {_VERB[name]} {who}'s message."))
-            elif kind == "lab_attack_performed":
-                out.append((e["ts"], "did", f"Mallory sent {who}'s message twice."))
+            elif kind == "lab_attack_disarmed":
+                out.append((e["ts"], "armed", f"{act.upper()} disarmed."))
+            elif kind == "lab_attack_performed" and names.get(act):
+                out.append((e["ts"], "did", f"Mallory {_VERB[names[act]]} {who}'s message."))
             elif kind == "security_alert":
                 reason = e.get("reason") or e.get("alert")
                 words = CLIENT_WORDS.get(reason, f"reported {reason}")
@@ -131,8 +127,6 @@ class SimpleRelay(RogueRelay):
 
     def state(self):
         with self.attack_lock:
-            armed = {s: "replay" for s in self.replay_armed}
-            for s, a in self.pending.items():
-                armed[s] = {"drop_next": "drop", "tamper_next": "tamper"}.get(a, a)
             rows = list(self.rows)[-60:]
+            armed = self.armed
         return {"rows": rows, "armed": armed, "feed": self.feed(), "online": sorted(self.clients)}

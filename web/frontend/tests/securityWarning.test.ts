@@ -10,10 +10,10 @@ describe("describeRejection", () => {
       /Duplicate or old message — rejected/,
     );
     expect(describeRejection("chain_warning", "chain_gap", 1)).toBe(
-      "Message missing: 1 message never arrived (hash-chain gap).",
+      "1 message missing — never arrived (hash-chain gap).",
     );
     expect(describeRejection("chain_warning", "chain_gap", 3)).toContain(
-      "3 messages",
+      "3 messages missing",
     );
     expect(describeRejection("message_rejected", "chain_broken")).toMatch(
       /out of order/,
