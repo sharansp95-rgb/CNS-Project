@@ -283,6 +283,8 @@ One-to-one **audio** calls in the web client, peer to peer with WebRTC (DTLS-SRT
   chain, evidence exports, the PDF and `tools/verify_transcript.py`; audio is never recorded.
   No evidence format change was needed. Note: signed SDP contains network addresses, so evidence
   files are confidential (the PDF omits SDP).
+- **Keepalive.** Logged-in tabs ping the server so sessions survive idle periods (anonymous sockets still
+  time out; pings stop 30 minutes after the last input).
 - **Desktop client:** shows `[call — web client only]`; chain verification is unchanged.
 - **Attack Lab:** "Substitute DTLS fingerprint in SDP", "Inject forged call offer", "Replay old
   call offer" and a simulated "MITM media path" are all caught by the real client checks.

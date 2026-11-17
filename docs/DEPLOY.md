@@ -375,3 +375,15 @@ free 1,000 GB converts to $0.05/GB overage and its docs do not rule out a paymen
 Browsers need HTTPS and microphone permission; the CSP is unchanged (WebRTC is not governed by
 `connect-src`). Local tests use host candidates only (`CALL_STUN_URLS=`) and Chromium's fake
 microphone; WebKit has no fake-device switch, so its call media tests are skipped.
+
+### Keepalive and TURN propagation notes
+
+- Logged-in browsers send an authenticated WebSocket `ping` about every 30 s (the server announces its
+  idle limit in `session_policy`), so sessions are not dropped after `SECURECHAT_WS_IDLE_SECONDS`
+  (default 120). Unauthenticated sockets still time out and an anonymous `ping` is refused. Pings stop 30
+  minutes after the last user input, so an abandoned tab does not hold the free instance awake.
+- Metered rejects a brand-new credential for up to about a minute. The client fetches and refreshes the
+  ICE configuration in the background; wait about a minute after logging in before the first relayed call.
+- Metered's credential API needed the plan to be subscribed in the **old** dashboard
+  (dashboard.metered.ca, "Old dashboard"): the new dashboard showing the Free plan as active was not enough.
+- Force relay-only (hides IP addresses from the peer) by opening the site as `/?relay=1`.
