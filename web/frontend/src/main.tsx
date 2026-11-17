@@ -14,6 +14,7 @@ import {
 } from "./AttachmentUI";
 import type { Progress, OpenedAttachment } from "./session";
 import { useDialog } from "./useDialog";
+import { describeRejection } from "./securityWarning";
 
 function userMessage(error: unknown): string {
   if (error instanceof DOMException && error.name === "OperationError")
@@ -56,6 +57,13 @@ function App() {
     localStorage.getItem("securechat-theme") || "dark",
   );
   const receiptPanel = useRef<HTMLElement>(null);
+  const messagesPane = useRef<HTMLDivElement>(null);
+  const messageCount = session?.messages.length ?? 0;
+  useEffect(() => {
+    // Keep the newest message in view (matters most on a phone).
+    const pane = messagesPane.current;
+    if (pane) pane.scrollTop = pane.scrollHeight;
+  }, [messageCount]);
   useDialog(receiptPanel, () => setReceipt(undefined), !!receipt);
   const [connectionHint, setConnectionHint] = useState("");
   useEffect(() => {
@@ -496,7 +504,21 @@ function App() {
               </code>
               <small>Compare out of band</small>
             </div>
-            <div className="messages" aria-live="polite">
+            {session.rejected.length > 0 && (
+              <ul
+                className="security-warnings"
+                role="alert"
+                data-testid="security-warnings"
+              >
+                {session.rejected.slice(-2).map((r: Envelope, i: number) => (
+                  <li key={`${r.at}-${i}`} data-reason={r.reason}>
+                    <strong>⚠ {r.sender}:</strong>{" "}
+                    {describeRejection(r.kind, r.reason, r.missing)}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="messages" aria-live="polite" ref={messagesPane}>
               <div className="session-divider">⌁ {session.status}</div>
               {session.messages.length === 0 && (
                 <div className="empty-chat">

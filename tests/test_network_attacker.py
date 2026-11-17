@@ -675,7 +675,7 @@ def test_launcher_lan_flags_are_documented_and_validated():
         capture_output=True,
         text=True,
     )
-    assert bad.returncode == 2 and "browser demo only" in bad.stderr
+    assert bad.returncode == 2 and "browser demos only" in bad.stderr
     for script in ("demo/start_demo.sh", "demo/stop_demo.sh", "demo/_demo_lib.sh"):
         assert subprocess.run(["bash", "-n", script], cwd=root).returncode == 0
     lib = (root / "demo/_demo_lib.sh").read_text()

@@ -183,6 +183,13 @@ fingerprint must match the signed SDP before **Call verified**. `/?relay=1` forc
 TURN; otherwise direct connectivity is preferred. Metered credentials can take
 about a minute to become usable. No TURN secret is exposed to the browser or lab.
 
+## Simple Mallory demo
+
+`demo/start_demo.sh --mallory [--lan]` is the easiest live attack demo: Alice and Bob chat in the web client, and
+Mallory's window shows each message as ciphertext with three buttons, **DROP**, **TAMPER**, **REPLAY**. The next
+message gets the treatment and the receiver's own checks report it (message missing, altered, duplicate). With
+`--lan` Bob is your phone. Script: [attack_lab/README.md](attack_lab/README.md#simple-mallory-demo-message-level).
+
 ## Network attacker demo
 
 `demo/start_demo.sh --network-attack` starts the real web gateway over HTTPS/WSS, a
@@ -230,6 +237,7 @@ npm --prefix web/frontend exec -- playwright install chromium webkit
 npm --prefix web/frontend run test:e2e -- --project=chromium --project=webkit
 npm --prefix web/frontend run test:lab -- --project=chromium --project=webkit
 npm --prefix web/frontend run test:netattack   # browser network-attacker demo (Chromium)
+npm --prefix web/frontend run test:mallory     # simple Mallory demo (Chromium + WebKit)
 .venv/bin/python tools/evaluate_security.py
 .venv/bin/python -m pip_audit -r requirements-dev.txt
 npm --prefix web/frontend audit
@@ -241,9 +249,8 @@ keyboard focus. ESLint’s isolated pinned parser uses TypeScript 6; the applica
 still builds/types with pinned TypeScript 7. The Starlette test adapter uses httpx2
 and no longer emits the deprecated-httpx warning.
 
-Current local results: **488 pytest passed / 2 opt-in Postgres skips** (24 are the
-network-attacker tests), **85 disposable
-Neon tests passed**, **83 Vitest passed**, **43 main browser tests passed / 7 skips**
+Current local results: **496 pytest passed / 2 opt-in Postgres skips** (24 network-attacker and 8 Mallory tests), **85 disposable
+Neon tests passed**, **84 Vitest passed**, **43 main browser tests passed / 7 skips**
 and **26 lab browser tests passed / 4 skips** (Chromium + WebKit). Live results:
 **42 main passed / 8 skips**, **26 lab passed / 4 skips**, including a real
 TURN-relayed call. The evaluator

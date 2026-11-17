@@ -74,14 +74,14 @@ stop_demo_processes() {
     else servers="$(our_pids 'server/server\.py| -m attack_lab( |$)')"; fi
     guis="$(our_pids 'gui/chat_gui\.py|gui/security_dashboard\.py')"
     local all proxies gateways browsers
-    proxies="$(our_pids ' -m attack_lab\.netproxy')"
+    proxies="$(our_pids ' -m attack_lab\.(netproxy|simple)( |$)')"
     gateways="$(our_pids 'uvicorn --factory web\.app:create_app')"
     # Demo Chrome windows are identified by their throwaway profile directory, never by name.
     browsers="$(pgrep -f 'user-data-dir=[^ ]*cns-netattack' 2>/dev/null)"
     all="$(printf '%s\n%s\n%s\n%s\n%s\n' "$servers" "$guis" "$proxies" "$gateways" "$browsers" | grep -E '^[0-9]+$' | sort -un | tr '\n' ' ')"
     # A proxy started with --lan also listens on the Mac's LAN address: remember it to confirm it closed.
     local lanpids lanip=""
-    lanpids="$(our_pids ' -m attack_lab\.netproxy .*--lan-ip')"
+    lanpids="$(our_pids ' -m attack_lab\.(netproxy|simple) .*--lan-ip')"
     [ -n "$lanpids" ] && lanip="$(ps -p "$(echo "$lanpids" | head -1)" -o command= | sed -n 's/.*--lan-ip \([0-9.]*\).*/\1/p')"
     if [ -n "$all" ]; then
         echo "    stopping our process(es): $all"

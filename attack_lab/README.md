@@ -54,6 +54,46 @@ The relay console allowlists routing/ciphertext and public handshake values. It
 never receives chat plaintext or private/session keys. As in the real app, login
 passwords terminate at the gateway and must use HTTPS outside localhost.
 
+## Simple Mallory demo (message level)
+
+The easiest live demo: Mallory sits on the *relay* and sees every chat message as ciphertext. He has
+three buttons, and the victims' own clients decide what happens. This is the message-level attack lab
+(`attack_lab/relay.py`), not the TLS proxy below; the TLS demo stays available.
+
+```bash
+demo/start_demo.sh --mallory            # Alice, Bob and Mallory: three Chrome windows on this Mac
+demo/start_demo.sh --mallory --lan      # Alice + Mallory on the Mac, Bob = your phone (URL + QR printed)
+demo/stop_demo.sh
+```
+
+**5-line demo script**
+1. Start it. In Alice's and Bob's windows choose *Create an identity* (e.g. `alice` / `bob`) and name the other as Peer.
+2. Alice sends "hello". Bob receives it; Mallory's row shows `alice → bob`, the time and *only* the ciphertext (shortened).
+3. Click **DROP** on that row, then Alice sends "lost" and "next". Bob never gets "lost", and when "next" arrives his
+   window warns **"Message missing: 1 message never arrived (hash-chain gap)"**.
+4. Click **TAMPER**, then Alice sends "pay 500": Bob's window shows **"Message was altered in transit — rejected
+   (authentication tag failed)"** and the message does not appear.
+5. Click **REPLAY**, then Alice sends "once": Bob gets it once and his window shows **"Duplicate or old message —
+   rejected"**. **Reset** clears Mallory's window and any armed attack.
+
+How it works. A click on DROP / TAMPER / REPLAY arms that attack for the **sender of that row**; that sender's
+*next* message gets the treatment (one click per attack; the highlighted button shows what is armed, the feed says
+what happened). DROP and TAMPER are the lab relay's own `drop_next` / `tamper_next`; REPLAY delivers the next
+message and then the identical envelope (same nonce) a second time. Normal messages pass untouched. **Nothing is
+faked:** Mallory's feed only repeats what Bob's own client reports after its own checks (hash chain,
+AES-GCM tag, nonce freshness), the same `security_alert` the client sends to the relay. Mallory's page lists
+chat envelopes only, so call signalling and file messages also appear as rows (large ciphertext).
+
+The messages travel through the lab relay (`attack_lab.simple`): the real web client served over HTTPS (or HTTP on
+loopback in the tests), a throw-away SQLite database and attachment folder in a temp directory, never the real
+database. Mallory's window listens on `127.0.0.1:8095` only (host/origin checked); with `--lan` the chat listens on
+`127.0.0.1` and the Mac's private LAN address, and the certificate page on `<LAN IP>:8081`, exactly as in the
+phone section below. The same demo CA (`data/network_attack/ca.crt`) is reused, so a phone that already installed
+it needs nothing new. Product change made for this demo: the web client now shows the receiver's rejection reasons
+in plain words in a warning box (`web/frontend/src/securityWarning.ts`) and scrolls to the newest message; the
+checks themselves are unchanged. Tests: `npm --prefix web/frontend run test:mallory` (Playwright, Chromium and
+WebKit: normal row with 3 buttons, DROP, TAMPER, REPLAY and Reset each shown in Bob's window).
+
 ## Network attacker demo ("fake Wi-Fi")
 
 Mallory controls the network between two real users and the real server, like a rogue

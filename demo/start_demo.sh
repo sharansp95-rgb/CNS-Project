@@ -25,6 +25,10 @@
 #                                    the Mac's LAN IP (auto-detected, also an iPhone hotspot),
 #                                    prints the phone URL + QR code and serves the demo CA at
 #                                    http://<ip>:8081/. --lan-ip IP overrides the detection.
+#   demo/start_demo.sh --mallory [--lan]   SIMPLE message-level attacker on the lab relay: Alice and
+#                                    Bob chat on the web client, Mallory's window shows each
+#                                    message as ciphertext with DROP / TAMPER / REPLAY. With --lan
+#                                    Bob is your phone (phone URL + QR printed, demo CA page).
 #   demo/start_demo.sh --network-attack --desktop   same with the Tkinter clients: server
 #                                    on PORT, proxy on PORT+1. Add --wireshark for a live
 #                                    capture. --proxy-port N changes the browser proxy port.
@@ -45,6 +49,7 @@ LAB=0
 SIMPLE=0
 WIRESHARK=0
 NETATTACK=0
+MALLORY=0
 DESKTOP=0
 LAN=0
 LAN_IP_ARG=""
@@ -61,6 +66,7 @@ while [ $# -gt 0 ]; do
         --no-lab) LAB=0; shift ;;
         --simple) SIMPLE=1; shift ;;
         --network-attack) NETATTACK=1; shift ;;
+        --mallory) MALLORY=1; shift ;;
         --desktop) DESKTOP=1; shift ;;
         --lan) LAN=1; shift ;;
         --lan-ip) LAN=1; LAN_IP_ARG="${2:-}"; shift 2 ;;
@@ -70,13 +76,16 @@ while [ $# -gt 0 ]; do
         --wireshark) WIRESHARK=1; shift ;;
         --presentation) PRESENTATION=1; shift ;;
         --port)   PORT="${2:-}"; shift 2 ;;
-        -h|--help) sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
     esac
 done
 case "$PORT" in ''|*[!0-9]*) echo "--port needs a number, got '$PORT'" >&2; exit 2 ;; esac
-if [ "$LAN" = 1 ] && { [ "$NETATTACK" = 0 ] || [ "$DESKTOP" = 1 ]; }; then
-    echo "--lan works with the browser demo only: use --network-attack --lan (the phone uses the web client)" >&2; exit 2
+if [ "$MALLORY" = 1 ] && { [ "$NETATTACK" = 1 ] || [ "$DESKTOP" = 1 ]; }; then
+    echo "--mallory is its own demo: use it without --network-attack/--desktop" >&2; exit 2
+fi
+if [ "$LAN" = 1 ] && { [ "$NETATTACK" = 0 ] && [ "$MALLORY" = 0 ] || [ "$DESKTOP" = 1 ]; }; then
+    echo "--lan works with the browser demos only: use --mallory --lan or --network-attack --lan (the phone uses the web client)" >&2; exit 2
 fi
 
 if [ -n "$WEB_PORT" ] && [ "$LAB" = 0 ]; then
@@ -235,6 +244,117 @@ start_wireshark() {
     echo "    Wireshark is capturing loopback port $PORT (filter: tls)"
 }
 
+# ---- helpers shared by the browser demos (variables are read when called) ----
+open_chrome() {  # label  url  column  [extra flag]
+    CNS_DEMO_LABEL="$1" nohup "$CHROME" --user-data-dir="$PROFILES/$1" --no-first-run --no-default-browser-check \
+        --disable-features=WebRtcHideLocalIpsWithMdns --disable-search-engine-choice-screen \
+        --window-position=$(( SX + 8 + $3 * (COLW + 8) )),$(( SY + 8 )) --window-size=$COLW,$COLH \
+        $4 --new-window "$2" >/dev/null 2>&1 &
+}
+print_lan_info() {
+    if ! lsof -nP -iTCP@"$LAN_IP":"$PROXY_PORT_WEB" -sTCP:LISTEN >/dev/null 2>&1; then
+        echo "WARNING: nothing is listening on $LAN_IP:$PROXY_PORT_WEB; see logs/demo_netproxy.log" >&2
+    fi
+    CA_FP="$("$PY" -c "import sys;sys.path.insert(0,'.');from attack_lab.netproxy.certpage import ca_info;print(ca_info(open(sys.argv[1],'rb').read())[2])" "$ROOT/data/network_attack/ca.crt")"
+    # Read-only query of the macOS application firewall (no sudo); unknown -> show the advice anyway.
+    FWTXT="$(/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null || true)"
+    case "$FWTXT" in *"disabled"*|*"State = 0"*) FW=0 ;; *) FW=1 ;; esac
+    PYREAL="$("$PY" -c 'import os,sys;print(os.path.realpath(sys.executable))')"
+    echo
+    echo "=== PHONE AS A VICTIM (LAN) ==="
+    echo " Mac LAN address : $LAN_IP (interface $LAN_IFACE)"
+    echo " Phone URL       : https://$LAN_IP:$PROXY_PORT_WEB"
+    "$PY" -m attack_lab.netproxy.qr "https://$LAN_IP:$PROXY_PORT_WEB"
+    echo " Certificate page: http://$LAN_IP:$CERT_PORT/   (install the demo CA on the phone)"
+    "$PY" -m attack_lab.netproxy.qr "http://$LAN_IP:$CERT_PORT/"
+    echo " CA fingerprint  : $CA_FP  (the page on the phone shows the same)"
+    echo " Phone steps     : iPhone  - open the certificate page in Safari, download, Settings > Profile Downloaded > Install,"
+    echo "                             then Settings > General > About > Certificate Trust Settings > enable full trust."
+    echo "                   Android - open it in Chrome, download, Settings > search 'CA certificate' > install."
+    echo "                   Or just open the Phone URL and accept the warning (Safari may still refuse the WebSocket)."
+    echo " Phone cannot connect? Wi-Fi client isolation (guest/hotel/campus Wi-Fi) blocks phone-to-Mac traffic:"
+    echo "                   turn on the iPhone Personal Hotspot, join it with the Mac, and run this command again."
+    case "$FW" in
+        1|2) echo " macOS firewall  : ${FWTXT:-state unknown (assume ON)}. When macOS asks 'Do you want the application \"python\" to accept incoming network"
+             echo "                   connections?' click Allow. If you missed it: System Settings > Network > Firewall > Options >"
+             echo "                   '+' > add $PYREAL > Allow incoming connections;"
+             echo "                   (also make sure 'Block all incoming connections' is OFF)."
+             [ "$MALLORY" = 1 ] || echo "                   Mallory's window also warns after 60 s if no phone has reached the Mac." ;;
+    esac
+    if [ "$MALLORY" = 1 ]; then echo " Mallory's window is on localhost only; only the chat and the certificate page face the LAN."
+    else echo " The gateway stays on 127.0.0.1 behind the proxy; Mallory's window is localhost only."; fi
+}
+
+# ---- SIMPLE Mallory demo: message-level attacker on the lab relay, web chat for both users ----
+if [ "$MALLORY" = 1 ]; then
+    case "$MALLORY_PORT" in ''|*[!0-9]*) echo "--mallory-port needs a number" >&2; exit 2 ;; esac
+    case "$CERT_PORT" in ''|*[!0-9]*) echo "--cert-port needs a number" >&2; exit 2 ;; esac
+    PROXY_PORT_WEB="${PROXY_PORT_WEB:-8443}"   # the chat the victims open
+    CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    [ -f "$ROOT/web/static/index.html" ] || { echo "Build the browser client: cd web/frontend && npm ci && npm run build" >&2; exit 1; }
+    [ -x "$CHROME" ] || { echo "Google Chrome is needed for this demo's local windows" >&2; exit 1; }
+    mkdir -p "$ROOT/logs" "$ROOT/data/network_attack"
+    echo "[3/5] Local HTTPS certificate"
+    LAN_IP=""; LAN_IFACE=""; CERT_IP_FLAGS=""
+    if [ "$LAN" = 1 ]; then
+        LANOUT="$("$PY" -m attack_lab.netproxy.lan ${LAN_IP_ARG:+--ip "$LAN_IP_ARG"})" || { echo "    cannot use --lan: see the message above" >&2; exit 1; }
+        read -r LAN_IP LAN_IFACE <<< "$LANOUT"
+        CERT_IP_FLAGS="--ip $LAN_IP"
+        echo "    Mac LAN address: $LAN_IP (interface $LAN_IFACE)"
+    fi
+    CERTOUT="$("$PY" -m attack_lab.netproxy.webcert --dir "$ROOT/data/network_attack" $CERT_IP_FLAGS)" || { echo "certificate generation failed" >&2; exit 1; }
+    read -r CERT_MODE SPKI <<< "$CERTOUT"
+    [ "$CERT_MODE" = mkcert ] && echo "    mkcert certificate (your browser trusts it)" || echo "    demo CA certificate (the local Chrome windows accept exactly this key; install the CA on a phone via the printed page)"
+    echo "[4/5] Starting the lab relay: web chat on https://localhost:$PROXY_PORT_WEB and Mallory's window on http://localhost:$MALLORY_PORT"
+    nohup "$PY" -u -m attack_lab.simple --port "$PROXY_PORT_WEB" --mallory-port "$MALLORY_PORT" \
+        --cert "$ROOT/data/network_attack/web.crt" --key "$ROOT/data/network_attack/web.key" \
+        ${LAN_IP:+--lan-ip "$LAN_IP" --ca-cert "$ROOT/data/network_attack/ca.crt" --cert-port "$CERT_PORT"} \
+        > "$ROOT/logs/demo_mallory.log" 2>&1 &
+    "$PY" - "$PROXY_PORT_WEB" "$MALLORY_PORT" "$LAN_IP" "$CERT_PORT" <<'PYEOF' || { echo "The demo did not start; see logs/demo_mallory.log" >&2; exit 1; }
+import ssl, sys, time, urllib.request
+chat, ui, lan, cert_port = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4]
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+deadline, ok = time.time() + 40, False
+while time.time() < deadline and not ok:
+    try:
+        urllib.request.urlopen(f"http://localhost:{ui}/", timeout=1).read()
+        urllib.request.urlopen(f"https://127.0.0.1:{chat}/", timeout=2, context=ctx).read()
+        if lan:
+            urllib.request.urlopen(f"http://{lan}:{cert_port}/", timeout=2).read()
+            urllib.request.urlopen(f"https://{lan}:{chat}/", timeout=2, context=ctx).read()
+        ok = True
+    except OSError:
+        time.sleep(0.4)
+sys.exit(0 if ok else 1)
+PYEOF
+    echo "[5/5] Opening the windows"
+    PROFILES="$(mktemp -d "${TMPDIR:-/tmp}/cns-netattack.XXXXXX")"
+    echo "$PROFILES" > "$ROOT/logs/demo_netattack_profiles"
+    read -r SX SY SW SH <<< "$SCREEN"
+    NCOLS=3; [ -n "$LAN_IP" ] && NCOLS=2
+    COLW=$(( (SW - (NCOLS + 1) * 8) / NCOLS )); COLH=$(( SH - 16 ))
+    SPKIFLAG=""; [ "$CERT_MODE" = selfsigned ] && SPKIFLAG="--ignore-certificate-errors-spki-list=$SPKI"
+    open_chrome Alice "https://localhost:$PROXY_PORT_WEB/" 0 "$SPKIFLAG"
+    if [ -n "$LAN_IP" ]; then
+        open_chrome Mallory "http://localhost:$MALLORY_PORT/" 1 ""
+    else
+        open_chrome Bob "https://localhost:$PROXY_PORT_WEB/" 1 "$SPKIFLAG"
+        open_chrome Mallory "http://localhost:$MALLORY_PORT/" 2 ""
+    fi
+    cat <<MSG
+
+=== Simple Mallory demo is running ===
+ Chat           : https://localhost:$PROXY_PORT_WEB   (the real web client, served by the lab relay; logs/demo_mallory.log)
+ Mallory window : http://localhost:$MALLORY_PORT      (DROP / TAMPER / REPLAY on each message, Reset)
+ Alice$( [ -z "$LAN_IP" ] && echo " and Bob" )          : $( [ -z "$LAN_IP" ] && echo "two Chrome windows" || echo "the Chrome window on this Mac (Bob is your phone)" ). Create an identity in each, naming the OTHER as Peer.
+ How to attack  : send one normal message first, click DROP / TAMPER / REPLAY on its row, then send the NEXT message.
+ Script         : attack_lab/README.md, "Simple Mallory demo".
+ When finished  : demo/stop_demo.sh
+MSG
+    [ -n "$LAN_IP" ] && print_lan_info
+    exit 0
+fi
+
 if [ "$NETATTACK" = 1 ]; then
     case "$CERT_PORT" in ''|*[!0-9]*) echo "--cert-port needs a number" >&2; exit 2 ;; esac
     case "$PROXY_PORT_WEB" in ''|*[!0-9]*) echo "--proxy-port needs a number" >&2; exit 2 ;; esac
@@ -295,44 +415,6 @@ PYEOF
     read -r SX SY SW SH <<< "$SCREEN"
     COLW=$(( (SW - 4 * 8) / 3 )); COLH=$(( SH - 16 ))
     SPKIFLAG=""; [ "$CERT_MODE" = selfsigned ] && SPKIFLAG="--ignore-certificate-errors-spki-list=$SPKI"
-    open_chrome() {  # label  url  column  [extra flag]
-        CNS_DEMO_LABEL="$1" nohup "$CHROME" --user-data-dir="$PROFILES/$1" --no-first-run --no-default-browser-check \
-            --disable-features=WebRtcHideLocalIpsWithMdns --disable-search-engine-choice-screen \
-            --window-position=$(( SX + 8 + $3 * (COLW + 8) )),$(( SY + 8 )) --window-size=$COLW,$COLH \
-            $4 --new-window "$2" >/dev/null 2>&1 &
-    }
-    print_lan_info() {
-        if ! lsof -nP -iTCP@"$LAN_IP":"$PROXY_PORT_WEB" -sTCP:LISTEN >/dev/null 2>&1; then
-            echo "WARNING: nothing is listening on $LAN_IP:$PROXY_PORT_WEB; see logs/demo_netproxy.log" >&2
-        fi
-        CA_FP="$("$PY" -c "import sys;sys.path.insert(0,'.');from attack_lab.netproxy.certpage import ca_info;print(ca_info(open(sys.argv[1],'rb').read())[2])" "$ROOT/data/network_attack/ca.crt")"
-        # Read-only query of the macOS application firewall (no sudo); unknown -> show the advice anyway.
-        FWTXT="$(/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null || true)"
-        case "$FWTXT" in *"disabled"*|*"State = 0"*) FW=0 ;; *) FW=1 ;; esac
-        PYREAL="$("$PY" -c 'import os,sys;print(os.path.realpath(sys.executable))')"
-        echo
-        echo "=== PHONE AS A VICTIM (LAN) ==="
-        echo " Mac LAN address : $LAN_IP (interface $LAN_IFACE)"
-        echo " Phone URL       : https://$LAN_IP:$PROXY_PORT_WEB"
-        "$PY" -m attack_lab.netproxy.qr "https://$LAN_IP:$PROXY_PORT_WEB"
-        echo " Certificate page: http://$LAN_IP:$CERT_PORT/   (install the demo CA on the phone)"
-        "$PY" -m attack_lab.netproxy.qr "http://$LAN_IP:$CERT_PORT/"
-        echo " CA fingerprint  : $CA_FP  (the page on the phone shows the same)"
-        echo " Phone steps     : iPhone  - open the certificate page in Safari, download, Settings > Profile Downloaded > Install,"
-        echo "                             then Settings > General > About > Certificate Trust Settings > enable full trust."
-        echo "                   Android - open it in Chrome, download, Settings > search 'CA certificate' > install."
-        echo "                   Or just open the Phone URL and accept the warning (Safari may still refuse the WebSocket)."
-        echo " Phone cannot connect? Wi-Fi client isolation (guest/hotel/campus Wi-Fi) blocks phone-to-Mac traffic:"
-        echo "                   turn on the iPhone Personal Hotspot, join it with the Mac, and run this command again."
-        case "$FW" in
-            1|2) echo " macOS firewall  : ${FWTXT:-state unknown (assume ON)}. When macOS asks 'Do you want the application \"python\" to accept incoming network"
-                 echo "                   connections?' click Allow. If you missed it: System Settings > Network > Firewall > Options >"
-                 echo "                   '+' > add $PYREAL > Allow incoming connections;"
-                 echo "                   (also make sure 'Block all incoming connections' is OFF)."
-                 echo "                   Mallory's window also warns after 60 s if no phone has reached the Mac." ;;
-        esac
-        echo " The gateway stays on 127.0.0.1 behind the proxy; Mallory's window is localhost only."
-    }
     open_chrome Alice "https://localhost:$PROXY_PORT_WEB/" 0 "$SPKIFLAG"
     open_chrome Bob "https://localhost:$PROXY_PORT_WEB/" 1 "$SPKIFLAG"
     open_chrome Mallory "http://localhost:$MALLORY_PORT/" 2 ""
