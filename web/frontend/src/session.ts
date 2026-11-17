@@ -92,6 +92,14 @@ export class Session {
   private retries = 0;
   private retryTimer?: ReturnType<typeof setTimeout>;
   private openTimer?: ReturnType<typeof setTimeout>;
+  /** Kept only in this tab's memory, like the unlocked private key, so a dropped
+   * socket can log back in by itself. Never stored, logged or shown; wiped on
+   * Disconnect, on a failed login and when another login replaces this one. */
+  private password = "";
+  private paused = false;
+  private lastHeard = Date.now();
+  private removeResumeListeners?: () => void;
+  private handledSockets = new WeakSet<WebSocket>();
   constructor(
     public username: string,
     public peer: string,
@@ -148,16 +156,38 @@ export class Session {
       };
     }
     this.lastActive = Date.now();
+    this.lastHeard = Date.now();
     this.pingTimer = setInterval(() => {
-      const active =
-        Date.now() - this.lastActive < 30 * 60 * 1000 || this.calls.busy;
-      if (
-        this.socket.readyState === WebSocket.OPEN &&
-        this.isAuthenticated &&
-        active
-      )
-        this.socket.send(JSON.stringify({ type: "ping" }));
+      const socket = this.socket;
+      if (socket.readyState !== WebSocket.OPEN || !this.isAuthenticated) return;
+      // A sleeping laptop or a network switch can leave a socket that looks
+      // open but is dead. No pong for 2.5 intervals: drop it and reconnect now
+      // instead of waiting for the browser to notice.
+      if (Date.now() - this.lastHeard > every * 2.5 + 5000) {
+        this.dropSocket(socket, "no reply from the server");
+        return;
+      }
+      if (this.userActive()) socket.send(JSON.stringify({ type: "ping" }));
     }, every);
+  }
+  /** Whether the person used this tab recently (or is on a call). A forgotten tab
+   * stops pinging after 30 minutes so it cannot hold a free instance awake. */
+  private userActive() {
+    return (
+      Date.now() - this.lastActive < Session.IDLE_PAUSE_MS || this.calls.busy
+    );
+  }
+  static IDLE_PAUSE_MS = 30 * 60 * 1000;
+  /** True while the session is reconnecting or paused and will log back in by
+   * itself; the chat stays on screen (sending is disabled until the new
+   * signed handshake completes). */
+  get resuming() {
+    return (
+      !this.stopped &&
+      !this.isAuthenticated &&
+      !!this.password &&
+      (this.reconnecting || this.paused)
+    );
   }
   private stopKeepalive() {
     clearInterval(this.pingTimer);
@@ -183,6 +213,9 @@ export class Session {
   disconnect() {
     this.stopped = true;
     this.reconnecting = false;
+    this.paused = false;
+    this.password = "";
+    this.removeResumeListeners?.();
     clearTimeout(this.retryTimer);
     clearTimeout(this.openTimer);
     this.stopKeepalive();
@@ -195,33 +228,39 @@ export class Session {
   private openSocket() {
     const socket = new WebSocket(this.url);
     socket.onmessage = (e) => {
-      if (this.socket === socket && !this.closed)
+      if (this.socket === socket && !this.closed) {
+        this.lastHeard = Date.now();
         this.enqueue(async () => this.receive(JSON.parse(e.data)));
+      }
     };
     socket.onopen = () => {
       if (this.socket !== socket || this.stopped) return;
       clearTimeout(this.openTimer);
       this.closed = false;
+      this.lastHeard = Date.now();
       if (this.reconnecting) {
         this.reconnecting = false;
         this.retries = 0;
-        this.status =
-          "Connection restored — log in again for a fresh signed handshake.";
+        if (this.password) {
+          // Same account, same password; the server issues a new session and
+          // both browsers run a fresh signed X25519 handshake.
+          this.status = "Reconnected — re-establishing the secure session…";
+          try {
+            this.send({
+              type: "login",
+              username: this.username,
+              password: this.password,
+            });
+          } catch {
+            /* closed again; onclose schedules the next attempt */
+          }
+        } else
+          this.status =
+            "Connection restored — log in again for a fresh signed handshake.";
         this.changed();
       }
     };
-    socket.onclose = () => {
-      if (this.socket !== socket) return;
-      clearTimeout(this.openTimer);
-      this.stopKeepalive();
-      const retry =
-        !this.stopped && (this.isAuthenticated || this.reconnecting);
-      this.closed = true;
-      this.clearSession();
-      this.isAuthenticated = false;
-      if (retry) this.retry();
-      this.changed();
-    };
+    socket.onclose = (e) => this.socketClosed(socket, e?.code ?? 1006);
     socket.onerror = () => {
       if (!this.reconnecting)
         this.status = "Connection failed — log in to retry";
@@ -229,21 +268,110 @@ export class Session {
     };
     return socket;
   }
-  private retry() {
-    if (this.retries >= 8) {
+  /** Treat a socket as gone right away (used when it stopped answering). */
+  private dropSocket(socket: WebSocket, why: string) {
+    if (this.socket !== socket) return;
+    this.status = `Connection lost (${why}) — reconnecting…`;
+    try {
+      socket.close();
+    } catch {
+      /* already closing */
+    }
+    this.socketClosed(socket, 1006);
+  }
+  private socketClosed(socket: WebSocket, code: number) {
+    if (this.socket !== socket || this.handledSockets.has(socket)) return;
+    this.handledSockets.add(socket);
+    clearTimeout(this.openTimer);
+    this.stopKeepalive();
+    const wasActive = this.isAuthenticated || this.reconnecting || this.paused;
+    this.closed = true;
+    this.clearSession();
+    this.isAuthenticated = false;
+    if (code === 4001) {
+      // The server let a newer login for this account replace this one. Do not
+      // reconnect, or two tabs would keep kicking each other out.
+      this.reconnecting = this.paused = false;
+      this.password = "";
+      this.status =
+        "You signed in from another tab or device, so this session ended. Log in here to continue.";
+    } else if (!this.stopped && wasActive) {
+      if (this.password && !this.userActive()) this.pause();
+      else this.retry();
+    }
+    this.changed();
+  }
+  /** Idle for 30 minutes: stay signed out of the server (so the free instance can
+   * sleep) and log back in automatically on the next key press, click or touch. */
+  private pause() {
+    this.paused = true;
+    this.reconnecting = false;
+    this.status =
+      "Paused after 30 minutes without activity. Press a key, click or tap to reconnect.";
+    this.watchForReturn(true);
+  }
+  /** Reconnect immediately when the person comes back or the network returns. */
+  private watchForReturn(anyActivity: boolean) {
+    this.removeResumeListeners?.();
+    if (typeof window === "undefined") return;
+    const wake = () => {
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      )
+        return;
+      this.resumeNow();
+    };
+    const events = anyActivity
+      ? ["keydown", "pointerdown", "touchstart", "focus", "online"]
+      : ["online", "focus"];
+    const doc = typeof document !== "undefined" ? document : undefined;
+    for (const ev of events)
+      window.addEventListener(ev, wake, { passive: true });
+    doc?.addEventListener("visibilitychange", wake);
+    this.removeResumeListeners = () => {
+      for (const ev of events) window.removeEventListener(ev, wake);
+      doc?.removeEventListener("visibilitychange", wake);
+      this.removeResumeListeners = undefined;
+    };
+  }
+  private resumeNow() {
+    if (this.stopped || !this.password) return;
+    if (this.paused) {
+      this.paused = false;
+      this.lastActive = Date.now();
+      this.retries = 0;
+      this.retry(0);
+    } else if (this.reconnecting && this.socket.readyState !== WebSocket.OPEN) {
+      this.retries = 0;
+      this.retry(0);
+    }
+  }
+  private retry(delayOverride?: number) {
+    clearTimeout(this.retryTimer);
+    if (this.retries >= 15) {
       this.reconnecting = false;
+      this.removeResumeListeners?.();
       this.status =
         "Could not reconnect. Wait for the service, then log in again.";
       return;
     }
     this.reconnecting = true;
-    this.status =
-      "Reconnecting… Session keys discarded. Login will be required.";
-    const delay = Math.min(1000 * 2 ** this.retries++, 30000);
+    this.status = this.password
+      ? "Connection lost — reconnecting automatically. Old session keys were discarded."
+      : "Reconnecting… Session keys discarded. Login will be required.";
+    this.watchForReturn(false);
+    const delay = delayOverride ?? Math.min(1000 * 2 ** this.retries, 30000);
+    this.retries++;
     this.retryTimer = setTimeout(() => {
       if (this.stopped) return;
+      if (this.socket.readyState === WebSocket.CONNECTING) {
+        this.socket.onclose = null;
+        this.socket.close();
+      }
       this.socket = this.openSocket();
-      this.openTimer = setTimeout(() => this.socket.close(), 20000);
+      // Allow for a Render free-tier cold start (about a minute).
+      this.openTimer = setTimeout(() => this.socket.close(), 45000);
     }, delay);
   }
   enqueue(work: () => Promise<unknown>) {
@@ -275,6 +403,7 @@ export class Session {
         { once: true },
       );
     });
+    this.password = password;
     this.send({
       type: mode,
       username: this.username,
@@ -322,6 +451,9 @@ export class Session {
         this.disconnect();
         throw Error(e.reason);
       }
+      this.removeResumeListeners?.();
+      this.paused = false;
+      this.retries = 0;
       this.apiToken = e.api_token || "";
       const epoch = this.epoch;
       await this.authenticated();

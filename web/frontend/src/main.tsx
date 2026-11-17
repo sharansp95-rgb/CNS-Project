@@ -212,7 +212,9 @@ function App() {
       setError(userMessage(e));
     }
   }
-  const active = !!session?.isAuthenticated;
+  // A session that dropped and is logging back in by itself keeps the chat on
+  // screen; sending stays disabled until the new signed handshake completes.
+  const active = !!session && (session.isAuthenticated || session.resuming);
   return (
     <div
       className={"app " + theme + (active && !evidenceMode ? " chat-page" : "")}
@@ -520,6 +522,11 @@ function App() {
             )}
             <div className="messages" aria-live="polite" ref={messagesPane}>
               <div className="session-divider">⌁ {session.status}</div>
+              {session.resuming && (
+                <div className="reconnect-banner" role="status">
+                  ↻ {session.status}
+                </div>
+              )}
               {session.messages.length === 0 && (
                 <div className="empty-chat">
                   <span>⌁</span>

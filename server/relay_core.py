@@ -13,6 +13,8 @@ from server.security_log import log_event
 from server.user_store import DatabaseUserStore
 
 RELAYED_TYPES = frozenset(("chat", "handshake_init", "handshake_response"))
+# WebSocket close code sent to a connection replaced by a newer verified login.
+SESSION_REPLACED_CLOSE_CODE = 4001
 
 
 class RelayCore:
@@ -135,19 +137,6 @@ class RelayCore:
                 )
                 return None
 
-        with self._lock:
-            already_online = username in self.clients
-        if already_online:
-            self._send(
-                conn,
-                {
-                    "type": result_type,
-                    "success": False,
-                    "reason": f"'{username}' is already logged in elsewhere",
-                },
-            )
-            return None
-
         if etype == "register":
             if not self.register_user(username, password, public_key_pem=public_key_pem):
                 self._send(
@@ -196,6 +185,10 @@ class RelayCore:
                 )
                 return None
             self.lockout.record_success(username)
+            # The password is proven, so a session the server still lists for this
+            # user (a dropped phone/Wi-Fi socket that has not timed out yet, or
+            # another tab) is replaced instead of locking the owner out.
+            self.replace_session(username, conn, addr)
             self._send(
                 conn,
                 {
@@ -217,6 +210,46 @@ class RelayCore:
         self._send(conn, {"type": "roster", "users": roster})
         self.broadcast_system(f"*** {name} joined the chat ***", exclude=conn)
         self.broadcast_event({"type": "user_joined", "username": name}, exclude=conn)
+
+    def replace_session(self, username, conn, addr=("unknown", 0)):
+        """Evict an older connection for `username` after a verified login.
+
+        Called with self._lock held (from authenticate). The old connection is
+        told why it ended, so its client does not reconnect and fight back, and
+        the peer is told the user left so it discards the old session key and
+        performs a fresh signed handshake with the new connection.
+        """
+        with self._lock:
+            old = self.clients.get(username)
+            if old is None or old is conn:
+                return
+            del self.clients[username]
+        self.log_event("session_replaced", username=username, from_addr=addr[0])
+        self._send(
+            old,
+            {
+                "type": "session_replaced",
+                "reason": "signed in again from another tab, device or connection",
+            },
+        )
+        self.broadcast_event({"type": "user_left", "username": username}, exclude=old)
+        shutdown = getattr(old, "shutdown", None)
+        if callable(shutdown):  # raw/TLS sockets: wake the old reader thread
+            try:
+                import socket
+
+                shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        try:
+            old.close(SESSION_REPLACED_CLOSE_CODE)  # WebSocket peers accept a code
+        except TypeError:
+            try:
+                old.close()
+            except OSError:
+                pass
+        except OSError:
+            pass
 
     def remove_client(self, conn):
         with self._lock:

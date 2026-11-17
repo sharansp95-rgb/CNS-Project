@@ -64,3 +64,44 @@ def test_unauthenticated_idle_socket_still_times_out():
         with pytest.raises(WebSocketDisconnect) as closed:
             ws.receive_json()
         assert closed.value.code == 1001
+
+
+def test_verified_login_replaces_a_stale_session_instead_of_locking_the_user_out():
+    """A dropped phone/Wi-Fi socket can stay on the roster until the idle timeout.
+    Logging in again with the right password must replace it, not be refused."""
+    with make(30) as client:
+        with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as bob:
+            login(bob, "bob")
+            old = client.websocket_connect("/ws", headers={"origin": ORIGIN}).__enter__()
+            login(old, "alice")
+            with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as new:
+                new.send_json(dict(type="login", username="alice", password="password"))
+                result = new.receive_json()
+                assert result["type"] == "login_result" and result["success"] is True
+                # The old connection is closed with the dedicated code, so its
+                # tab knows not to reconnect and fight the new one.
+                with pytest.raises(WebSocketDisconnect) as closed:
+                    while True:
+                        old.receive_json()
+                assert closed.value.code == 4001
+                # The peer is told the old session left (drop its key), then
+                # that alice joined again (run a fresh signed handshake).
+                seen = []
+                while seen.count("user_joined") < 2:
+                    seen.append(bob.receive_json()["type"])
+                events = [t for t in seen if t in ("user_joined", "user_left")]
+                assert events == ["user_joined", "user_left", "user_joined"]
+            old.__exit__(None, None, None)
+
+
+def test_wrong_password_never_replaces_the_live_session():
+    with make(30) as client:
+        with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as alice:
+            login(alice, "alice")
+            with client.websocket_connect("/ws", headers={"origin": ORIGIN}) as rogue:
+                rogue.send_json(dict(type="login", username="alice", password="wrong-one"))
+                result = rogue.receive_json()
+                assert result["success"] is False
+                assert result["reason"] == "invalid username or password"
+            alice.send_json({"type": "ping"})
+            assert alice.receive_json() == {"type": "pong"}

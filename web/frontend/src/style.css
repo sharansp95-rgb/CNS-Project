@@ -1511,3 +1511,17 @@ pre {
 .security-warnings strong {
   color: var(--danger);
 }
+/* Shown while a dropped session reconnects and logs back in by itself. */
+.reconnect-banner {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  align-self: center;
+  padding: 6px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--bg, #111);
+  color: var(--accent);
+  font-size: 12px;
+  text-align: center;
+}

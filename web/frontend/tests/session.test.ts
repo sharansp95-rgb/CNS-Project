@@ -253,3 +253,75 @@ it("an anonymous session policy cannot start client keepalive", async () => {
   );
   a.disconnect();
 });
+
+async function connected() {
+  const { a, b } = await pair();
+  // Log in through the real connect() so the in-memory password is set.
+  await a.connect("login", "correct horse");
+  a.isAuthenticated = true;
+  return { a, b };
+}
+it("a dropped socket logs back in by itself and keeps the chat on screen", async () => {
+  vi.useFakeTimers();
+  const { a } = await connected();
+  a.messages.push({ sender: "bob", message: "kept", receipt: {} });
+  const before = a.socket;
+  (before as any).onclose({ code: 1006 });
+  expect(a.key).toBeUndefined();
+  expect(a.isAuthenticated).toBe(false);
+  expect(a.resuming).toBe(true);
+  expect(a.status).toContain("reconnecting automatically");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(a.socket).not.toBe(before);
+  (a.socket as any).onopen();
+  const login = (a.socket as any).sent.at(-1);
+  expect(login).toMatchObject({
+    type: "login",
+    username: "alice",
+    password: "correct horse",
+  });
+  // The Wire Log never shows the password.
+  expect(JSON.stringify(a.wire)).not.toContain("correct horse");
+  await a.receive({ type: "login_result", success: true, api_token: "new" });
+  expect(a.isAuthenticated).toBe(true);
+  expect(a.resuming).toBe(false);
+  expect(a.messages[0].message).toBe("kept");
+  a.disconnect();
+});
+it("being replaced by a newer login does not reconnect or keep the password", async () => {
+  vi.useFakeTimers();
+  const { a } = await connected();
+  const before = a.socket;
+  (before as any).onclose({ code: 4001 });
+  await vi.advanceTimersByTimeAsync(120000);
+  expect(a.socket).toBe(before);
+  expect(a.resuming).toBe(false);
+  expect(a.status).toContain("another tab or device");
+});
+it("after 30 idle minutes it pauses, then resumes on the next key press", async () => {
+  vi.useFakeTimers();
+  const target = new EventTarget();
+  vi.stubGlobal("window", target);
+  const { a } = await connected();
+  await a.receive({ type: "session_policy", idle_seconds: 120 });
+  vi.setSystemTime(Date.now() + Session.IDLE_PAUSE_MS + 1000);
+  const before = a.socket;
+  (before as any).onclose({ code: 1001 });
+  await vi.advanceTimersByTimeAsync(120000);
+  expect(a.socket).toBe(before); // no reconnect while nobody is there
+  expect(a.resuming).toBe(true);
+  expect(a.status).toContain("Paused");
+  target.dispatchEvent(new Event("keydown"));
+  await vi.advanceTimersByTimeAsync(10);
+  expect(a.socket).not.toBe(before);
+  a.disconnect();
+});
+it("a socket that stops answering pings is replaced", async () => {
+  vi.useFakeTimers();
+  const { a } = await connected();
+  await a.receive({ type: "session_policy", idle_seconds: 120 });
+  const before = a.socket;
+  await vi.advanceTimersByTimeAsync(30000 * 3 + 6000);
+  expect(a.socket).not.toBe(before);
+  a.disconnect();
+});
