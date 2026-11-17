@@ -1,0 +1,5 @@
+mcp_oauth_credentials_store = "keyring"
+
+[mcp_servers.Neon]
+type = "http"
+url = "https://mcp.neon.tech/mcp"
