@@ -11,6 +11,10 @@ const actions = [
   ["brute_force", "Login brute-force / lockout"],
   ["tamper_attachment", "Tamper stored attachment"],
   ["swap_attachment", "Swap attachment object"],
+  ["tamper_call_offer", "Substitute DTLS fingerprint in SDP"],
+  ["inject_call_offer", "Inject forged call offer"],
+  ["replay_call_offer", "Replay old call offer"],
+  ["dtls_mitm", "MITM media path (other DTLS certificate)"],
 ];
 const status = document.querySelector<HTMLParagraphElement>("#status")!;
 const button = (id: string) =>
@@ -116,6 +120,9 @@ async function bootstrap() {
     button("follow").disabled = false;
     button("attach").disabled = false;
     button("open").disabled = false;
+    button("call").disabled = false;
+    button("answer").disabled = false;
+    button("hangup").disabled = false;
     status.textContent =
       "Victims connected using the unchanged production bundle. Their checks decide the outcome.";
   } catch (e) {
@@ -171,6 +178,52 @@ button("attach").onclick = async () => {
     show(e);
   }
 };
+// Calls are driven through the victims' real UI. The lab uses STUN/host candidates only.
+const victimButton = (frame: HTMLIFrameElement, label: RegExp) =>
+  Array.from(frame.contentDocument!.querySelectorAll<HTMLButtonElement>("button")).find(
+    (b) => label.test(b.getAttribute("aria-label") || b.textContent || ""),
+  );
+button("call").onclick = () => {
+  try {
+    const b = victimButton(frames[0], /Start voice call/);
+    if (!b || b.disabled) throw Error("Victim A cannot call yet: connect both victims first");
+    b.click();
+    status.textContent = "Alice is calling Bob (signaling is end-to-end encrypted; the relay sees ciphertext).";
+  } catch (e) {
+    show(e);
+  }
+};
+button("answer").onclick = () => {
+  try {
+    const b = victimButton(frames[1], /^Accept$/);
+    if (!b) throw Error("Bob has no incoming call");
+    b.click();
+    status.textContent = "Bob accepted. Each client checks the DTLS certificate against the signed SDP.";
+  } catch (e) {
+    show(e);
+  }
+};
+button("hangup").onclick = () => {
+  for (const frame of frames) victimButton(frame, /Hang up|^Cancel$/)?.click();
+};
+// Simulated media-path attacker: from now on Bob's browser reports a DIFFERENT
+// remote DTLS certificate in getStats (as if an attacker terminated the DTLS
+// handshake). The client's real fingerprint comparison must catch it.
+function armDtlsMitm() {
+  const view = frames[1].contentWindow as any;
+  const proto = view.RTCPeerConnection.prototype;
+  if (proto.__labMitm) return;
+  const original = proto.getStats;
+  proto.__labMitm = true;
+  proto.getStats = async function (...args: unknown[]) {
+    const report = await original.apply(this, args);
+    const copy = new view.Map(report);
+    for (const [id, entry] of copy)
+      if (entry.type === "certificate")
+        copy.set(id, { ...entry, fingerprint: Array.from({ length: 32 }, () => "AA").join(":") });
+    return copy;
+  };
+}
 button("open").onclick = () => {
   try {
     const buttons = Array.from(frames[1].contentDocument!.querySelectorAll<HTMLButtonElement>("button.att-thumb"));
@@ -195,6 +248,9 @@ button("reset").onclick = async () => {
     button("follow").disabled = true;
     button("attach").disabled = true;
     button("open").disabled = true;
+    button("call").disabled = true;
+    button("answer").disabled = true;
+    button("hangup").disabled = true;
     document.querySelector("#detections")!.replaceChildren();
     status.textContent =
       "Lab DB wiped and demo accounts reseeded. Connect victims again.";
@@ -229,6 +285,10 @@ for (const [action, title] of actions) {
         status.textContent = result.locked
           ? "Sandbox account locked by the real login guard. Final attempt rejected before PBKDF2."
           : "No lockout detected";
+      } else if (action === "dtls_mitm") {
+        armDtlsMitm();
+        status.textContent =
+          "Armed (simulated): Bob will see a different DTLS certificate. Place a call and let Bob accept.";
       } else if (action.endsWith("_attachment")) {
         await api("attachment-attack", { action });
         status.textContent =

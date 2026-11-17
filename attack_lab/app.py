@@ -178,6 +178,7 @@ def create_app(*, database_url=None, origins=None, state_dir=None, tcp_port=None
                 relay.pending.clear()
                 relay.held.clear()
                 relay.last.clear()
+                relay.last_large.clear()
             storage.purge()
             with relay.lockout._lock:
                 relay.lockout._by_addr.clear()

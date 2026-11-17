@@ -11,6 +11,7 @@ with tempfile.TemporaryDirectory(prefix='cns-browser-e2e-') as root:
     port=int(os.environ.get('CNS_TEST_PORT','8765'))
     os.environ['SECURECHAT_ALLOWED_ORIGINS']=f'http://127.0.0.1:{port}'
     os.environ['SECURECHAT_CERT_DIR']=root
+    os.environ['CALL_STUN_URLS']=''  # host candidates only: fast, offline-safe call tests
     import uvicorn
     import certs.generate_certs as certs
     certs.KEY_PATH=str(Path(root)/'server.key')

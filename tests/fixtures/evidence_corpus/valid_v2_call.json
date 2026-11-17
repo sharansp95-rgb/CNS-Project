@@ -1,0 +1,93 @@
+{
+  "format": "securechat-evidence/v2",
+  "exported_by": "bob",
+  "exported_at": 1800000000,
+  "session": {
+    "started_at": 1794896201,
+    "ended_at": 1800000000,
+    "initiator": "alice",
+    "responder": "bob",
+    "ecdh_public_keys": {
+      "initiator": "0P8eaEJwUFs3PA3ucYAqF9cL74P2IWKKZurHAvy/ano=",
+      "responder": "zZMUyD99lBK0DRROHBm1G2/MgmLD2r+nGWJNzPc6RGE="
+    },
+    "handshake_signatures": {
+      "initiator": "LfrRMfkCV6RBV63pRSz2/7x4xz8vhDkhs5dObBamFsQCqY+Kvb1FlNSwt+dlp9SzIjofHhuBaznqv/Llg5b8xsYiyXEQVckv9MjzUooR0bMs0+az8dvanHu8eUXnZ0EBfWWeklzYp+aFZsO//NFfI1WY7j3b2g1Tkj3cXtLOuG2sJ0kcaVA8lg7jZSKAqpN63qeyk07J44fFQlYcDwBBSMYXbxT/IuUh8MVLfpAnX3DV9W0J37jvRids/1S5dKVZ5ueGI7ZEQtzJqdLiBh8YlXcATgjK/djascXH8hEeYdAU9qWoJkUBudRL18v8Qg5DGSkVOIXZpFOm/oju7vg19g==",
+      "responder": "ez5cxJd0xHLnRhiN4ksnn8WIpYR2v/zbNWG9oUICNLAVMyWPqPNxT8veZ7wTCHb481rlXtmRaydPf8B+zz6U0kd8XfZeRY8bLAbS5vaEvcBlroq0cW+37AUxtdGoh7d/T173/5v+scUfB1UP2XjXkN8uYpcvquPM2dhO/QLuJMkIYi/ATqekoOogFmEy3o45uIoKZ3pCfaYZY2YwCpBnQYwJ1RHsO1Nmjq3zqoPJNmArhXjjk1mmaXJcEpa/VbOtBlGoTqolHCRYNJ9WgH7gL63RyKjLGj56uvMJ2WDd7TI1evoIdeAfpoxWbFaE66Y1YX40/sEK5rl7tjqKBwbCcw=="
+    }
+  },
+  "participants": {
+    "bob": {
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxyqYKYWmEez1nfebIY+6\n+5TW22UwyVwEzXNZF55PJjhj83d0lqVVOFCzVJHTS54BN/KTr0fUzgh+4oUOteL/\n7zU4ynvqBL81uYJCGTrx1BF+8/e6kymetbsqiAzdpqJP4HHif4EtCvENQv9WrAOK\nzteP41jHJ5VByA1AoY0Qt5QLc98D9p4d7iU+xY+cy3dgfv0s7J3KgoBJIsuKTYZf\nQ85eyQwUGAgje+e3ct8T1nDRxxBa6aWWyg/gUUX1sd0SAuvweUhBmWcrY7mIpiAb\nMWt5OH7yGbK3Cgy/cbnkXjwl3gPn2nz55PlLuJgbg47OkNMWZLk9aeq8HQ4Y01kW\nxQIDAQAB\n-----END PUBLIC KEY-----\n",
+      "fingerprint": "98E3 0E5D 8872 27D7"
+    },
+    "alice": {
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyZZvlU8gYCCO2KDlOR9q\nOerXPnv03n+6DBCyuLI49jilDcDdxgcWLM/XdtXWufVWQzbhGHI6puO0n+OYti0x\nwvSt1bG5+lCyaQk/BrhfjlQ70xrA+aUOi5qRzeq0uQakpTM7GNTQZvbJD2qwyBad\n+pvuSsnWC9KOlLmWLBw5tXHDeIO7X2/2SVrSVB+igasZ4q8ITF5spu4D7d0n0kzc\n2rCTvG29mIed3tgGWjSXz1v39GTyIatGcYDSjm9HwA8Dj95Xp1zgXmxpVFytk909\nqfnlryydghZoj3SXxjSnkt9da94fUQbUrQbNsy037QNzYqgqjywqmJlIaNnKWmXh\ndwIDAQAB\n-----END PUBLIC KEY-----\n",
+      "fingerprint": "D72E 8846 B76A E81D"
+    }
+  },
+  "records": [
+    {
+      "seq": 1,
+      "sender": "alice",
+      "recipient": "bob",
+      "timestamp": 1794896201,
+      "message": "securechat-call/v1:{\"call\":\"cccccccccccccccccccccccccccccccc\",\"sdp\":\"v=0\\r\\no=- 1 2 IN IP4 127.0.0.1\\r\\ns=-\\r\\nt=0 0\\r\\nm=audio 9 UDP/TLS/RTP/SAVPF 111\\r\\nc=IN IP4 0.0.0.0\\r\\na=fingerprint:sha-256 03:0A:11:18:1F:26:2D:34:3B:42:49:50:57:5E:65:6C:73:7A:81:88:8F:96:9D:A4:AB:B2:B9:C0:C7:CE:D5:DC\\r\\na=setup:actpass\\r\\n\",\"type\":\"invite\",\"v\":1}",
+      "prev_hash": "ae723c8bbcd1b92102e167500e8da69e39c21a73b1e31fee8ff2d4ccd32c8f6b",
+      "record_hash": "3bd35be33e6d8068685452657fe2f42015d290b234ad8acda660b57f22194a5f",
+      "signature": "Cd5fLZZYn3JGXnHv1XSaiX+tKWjYDttEoHUkKg395iLwDfN4AWhIuTOwDcUWu0d1LjpK3Iq0VXOWgXJ5kjkkwjHTWN9fSXj95qfe3EO2q5ytvVC/0BGKI2St8G5D765VSzJlABqzfJshv+Vl7GpN5zf9rF322wfFE4HQQQ26ue6/tlX5gOUQCW3wAsYRcZ7Sm8kJWIquUU8l34PJwdkD7TQWmuvpeDWnyqnm73v1ptMkR5bR6FzwtNDlYrwuPDh2yMJE+Tm8q/gWQaxG67PUHlE9j6O+vzercAaUp2HdNBDBgBbqmO0bgaumnWh0j1COhccC0p3A8Vteyq7iOqk5ZA==",
+      "envelope_sha256": "105ecc85402ded119deef5248a15f227d0daa00e032cb3a4b9db7ff27fddeb87"
+    },
+    {
+      "seq": 1,
+      "sender": "bob",
+      "recipient": "alice",
+      "timestamp": 1794896201,
+      "message": "securechat-call/v1:{\"call\":\"cccccccccccccccccccccccccccccccc\",\"sdp\":\"v=0\\r\\no=- 1 2 IN IP4 127.0.0.1\\r\\ns=-\\r\\nt=0 0\\r\\nm=audio 9 UDP/TLS/RTP/SAVPF 111\\r\\nc=IN IP4 0.0.0.0\\r\\na=fingerprint:sha-256 05:10:1B:26:31:3C:47:52:5D:68:73:7E:89:94:9F:AA:B5:C0:CB:D6:E1:EC:F7:02:0D:18:23:2E:39:44:4F:5A\\r\\na=setup:actpass\\r\\n\",\"type\":\"accept\",\"v\":1}",
+      "prev_hash": "7e526e2d3bee51cf63b16aaf777140e24752a75b1098a578357300a5abe6af0e",
+      "record_hash": "caff62446ed9d593c1336fe3301307271217a8d3f4bb224b21bc92e6b3376d38",
+      "signature": "PBgDyHI2O3w+FpGEQHBP94OKUEyJJdzZY5H22U1pPhsdQOXEi7Xk6IFbBfjZOZj8M3rNoOhTS+FfmiEtGSX9Y8ZpQYqvliy+2dyvm+yMD0m+GKeE2F/Wu5TygIR90OLXCWfSCGjXMq2lkMYyEDPFrm6GzKXR/SSylHt8LDR5XgSYufxhl/EBvNoGCUvJ071nzRxmYOncfEt5Eelwa5+C00xOUHsc8KEQcICPgBrajVF1D1mxqxYvptSHO/4kcaCY0cxvnjxIE4V/NpCJ6guckly8PmfnUf5EJMlOqx5ewHDk+lPP4IcqGtk3CBK22hZa+TbMib9v3w1TQpk1Q8KmdQ==",
+      "envelope_sha256": "50e15b06f77fff1d4b193c1dc914a1dfbd23b852773e1edd74bc2b96c334fc30"
+    },
+    {
+      "seq": 2,
+      "sender": "alice",
+      "recipient": "bob",
+      "timestamp": 1794896201,
+      "message": "securechat-call/v1:{\"call\":\"cccccccccccccccccccccccccccccccc\",\"reason\":\"user\",\"type\":\"hangup\",\"v\":1}",
+      "prev_hash": "3bd35be33e6d8068685452657fe2f42015d290b234ad8acda660b57f22194a5f",
+      "record_hash": "1fd7a932a7a3e59dc78e514e32591637850213e79a7624ceb6126595b48e0844",
+      "signature": "k99U5RIZCbcl3CGxScoRb/nk+qDYP0PqgW6aUir5mPavYW6eQYsnVmLJEvm5ZnjsFyiwoYC/z0hJ2i4Af9HN8pahHcfNp3XCO8OLIgAUQGYnGta+Nw0zI0rX0cPgAsq3BQaaXafxx1Y4dZFpcQxqNQ/uLq8OaSZycAlQBufvG4jH+pnedhhnq/+wpZ3pk5OiKzIF5iquPuIxsqL8cN5G+gg2TE0j+Ql155g3NVlO8TzTSCNsyLQTOhOUkd0jLCRmX/gHo7hN389fhdYRXF+7VYv1MCOszYlgQ+nglpQZkdaLcQ/IybHwV5cqWMzF/2JXw3IMD3qbPbDjMd+GXUp1bQ==",
+      "envelope_sha256": "70efad8c75a9c1aa016d13f4cd46a8d227bf3ed4d6185f77da8fb4ce2fbd1772"
+    },
+    {
+      "seq": 3,
+      "sender": "alice",
+      "recipient": "bob",
+      "timestamp": 1794896201,
+      "message": "securechat-call/v1:{\"call\":\"cccccccccccccccccccccccccccccccc\",\"conn\":\"direct\",\"duration\":60,\"ended\":1800000065,\"fp_match\":\"yes\",\"outcome\":\"completed\",\"role\":\"caller\",\"sas_confirmed\":true,\"started\":1800000005,\"type\":\"record\",\"v\":1}",
+      "prev_hash": "1fd7a932a7a3e59dc78e514e32591637850213e79a7624ceb6126595b48e0844",
+      "record_hash": "327b1fbc740d0a498ceb9cd2ae8f54a8bd357c5fc65f3b2cd09703c04575990f",
+      "signature": "jS8wMhrHPxU3iw2plKh0OMvHz/Mfi9Yo5M0v0ArR9pXImUQUWLjhM++7syvbFm1+aQQAzsqX3/tgR2pm8oq5Nte/uY/laSNQurdSJAX/2+uvxDunng3n5QWre1nz4tOe2+SBQsqCN2abzsh10rBLiN1Y0nOTL6p2mwYt/tV72mo4OLSm4SBZlL8VXZJSJH1YiwQaXa1ARJ60Rl00hBKpwhczDK1qVghlD7AT0r+vqeqXa4B67vxr90z3Zf6gvKjWjXljI94fXLKzMEmN6KojbURrgobewFQJ6XPWvM1QGAB8T9KV4QVRxLt4ajWBGgPvuHUKpG0k2GWf7HeQaPPTDQ==",
+      "envelope_sha256": "79abdbf85c8aa2e00f741c209b41ffd59c752d715a53db21ad3cdb1f46092494"
+    },
+    {
+      "seq": 2,
+      "sender": "bob",
+      "recipient": "alice",
+      "timestamp": 1794896201,
+      "message": "securechat-call/v1:{\"call\":\"cccccccccccccccccccccccccccccccc\",\"conn\":\"direct\",\"duration\":60,\"ended\":1800000065,\"fp_match\":\"yes\",\"outcome\":\"completed\",\"role\":\"callee\",\"sas_confirmed\":true,\"started\":1800000005,\"type\":\"record\",\"v\":1}",
+      "prev_hash": "caff62446ed9d593c1336fe3301307271217a8d3f4bb224b21bc92e6b3376d38",
+      "record_hash": "71f60530f554ffa0d27b63d50d0ebef56734a559177b59a47aa1e3164a300fb5",
+      "signature": "iCXS0TfG9J0DzXiQi8JibcANxLfA51zAynU5II3Sh7YNBQUs0MLTmrT+EWSxSjl8kJSVylrgaCLOnhd0JeZ6pIZWDLMW0bsAPvDw3rH+Q2TLAZgYWWuSr8KLLRDihdh3JhnFe/03U3XBCPcz0e/ckQQM9d3tVK1KERPSOlmFiKrsQ8lnNh28828Sr7lTImoc6TcFcEiGxYF8ZpyKmrqig/ozmfOtPoLGjinGVr9UKXmYy8WC2kqsi5A4vwLyhO5G+9lGu3y0Brq/i0jtGsnIYFWCFesrRx3vZt8144UG8vpLiMPM7bBmr1eUJZAd4RwZmJKbdsyuijB5Ja9Mhp9gfg==",
+      "envelope_sha256": "de076e4daa02e8f013064234ef34f841b0d4373f7abc5753f06fd28a6ee084ef"
+    }
+  ],
+  "chain_heads": {
+    "bob": "71f60530f554ffa0d27b63d50d0ebef56734a559177b59a47aa1e3164a300fb5",
+    "alice": "327b1fbc740d0a498ceb9cd2ae8f54a8bd357c5fc65f3b2cd09703c04575990f"
+  },
+  "rejected_events": [],
+  "format_version": 2,
+  "exporter_signature": "tFaPXrmv2abVWsYgdx7LTcx/yILJ9nP1TL17uRhDsTadnqGOA8aytACgG3vTuB2x8+CSWuW4KWxb0g502MJE29dSaByEWEpWloMlR0HMUZFanxhQtbG3IBh9NAqYN3ELZb48An2M9TXkQOH7fZJd+gsm08syzTWgjwuF23Wi+GABcU2aSk6Nm83H2CutitUC5i8zah8nV7foFRGSk1uWMA/tZiYkv/3+VYbhrAOWPZPloejIOq97+iSZJ853l5QAyEqzx5eDzpD1uc20OMhKrWBBM+lrBFsrrXUZkRjtvg2iALdIg6S3M5ZHEAb30yDyIxEUTgTniD3iYUs1ZheoHQ=="
+}

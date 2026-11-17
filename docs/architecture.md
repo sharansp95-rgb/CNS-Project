@@ -155,6 +155,22 @@ upload sweeps up to 25 expired/orphaned objects. CSP adds `img-src blob:`,
 is plaintext *inside* the E2E message, so evidence v2 and the hash chain cover it
 unchanged; no evidence format change was needed (v1/v2 files still verify).
 
+## Voice calls
+
+`web/frontend/src/calls/` holds the call stack. `signal.ts` defines the call messages (the
+text of normal chat messages, so the existing signature, AES-GCM, chain and replay checks
+apply; `Session.receiveChat` routes only *verified* signals to `CallManager`). `sdp.ts`
+validates audio-only SDP and extracts the single SHA-256 DTLS fingerprint; `manager.ts` runs
+the state machine (idle/calling/ringing/connecting/active, 30 s ring timeout, one call at a
+time, busy replies) and polls `getStats` for the connection type, quality and the real remote
+certificate fingerprint; `sas.ts` derives the four spoken words from both fingerprints and the
+call id. `web/calls_api.py` serves `/api/calls/ice` (STUN list plus short-lived TURN
+credentials created with the Metered REST API; secret key server-side only, TTL capped at 600 s,
+10 requests/minute/user, graceful STUN-only fallback). `Permissions-Policy` allows `microphone`
+for this origin only. Call records are signed chat events, so evidence v1/v2 verify unchanged.
+The relay can delay, drop or replay call messages but cannot read or alter them; it cannot see
+media, which is peer to peer (or encrypted SRTP via TURN).
+
 ## What the server CAN see
 
 These values now also feed the SQL persistence described under
@@ -171,6 +187,9 @@ These values now also feed the SQL persistence described under
 - Attachment metadata: uploader, recipient, image/video kind, ciphertext size, ciphertext
   SHA-256, upload/expiry times, plus the bucket's access logs. Never file names, types,
   keys, thumbnails or content.
+- Call metadata: that two users exchanged encrypted call signaling (timing and size), and a
+  TURN provider (if used) sees IP addresses and encrypted SRTP volume. Never call audio, SDP or
+  fingerprints.
 - Opaque ECDH public keys during the handshake, and opaque AES-GCM ciphertext/tag for
   every chat message — bytes it can relay but not read, since it never holds the
   session key.

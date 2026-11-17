@@ -47,6 +47,7 @@ from crypto_engine.signatures import deserialize_public_key, fingerprint, verify
 
 from crypto_engine.evidence_tools import V1, V2, valid_hash, verify_receipt, sha256
 from crypto_engine.attachment_tools import is_attachment_message, parse_descriptor
+from crypto_engine.call_tools import is_call_message, parse_signal
 
 FORMAT = V1
 OK_MARK, BAD_MARK = "✔", "✘"
@@ -254,6 +255,26 @@ def verify_evidence(data, expect_fingerprints=()):
         for index, d in r.attachments:
             r.ok(f"#{index} {d['name']} ({d['mime']}, {d['size']} bytes) "
                  f"plaintext sha256 {d['pt_sha256']}, ciphertext sha256 {d['ct_sha256']}")
+
+    # --- voice calls (metadata only; signalling messages are signed/chained above) --
+    r.calls = []
+    for index, rec in enumerate(data.get("records", []), 1):
+        message = rec.get("message") if isinstance(rec, dict) else None
+        if not is_call_message(message):
+            continue
+        sig = parse_signal(message)
+        if sig is None:
+            r.bad(f"#{index}: malformed call message", index=index, check="call")
+            continue
+        r.calls.append((index, rec.get("sender"), sig))
+    records = [(i, who, s) for i, who, s in r.calls if s["type"] == "record"]
+    if r.calls:
+        r.heading("Voice calls (audio is never recorded; these are signed signalling/metadata messages)")
+        r.ok(f"{len(r.calls)} call message(s) in {len({s['call'] for _, _, s in r.calls})} call(s)")
+        for index, who, s in records:
+            r.ok(f"#{index} {who} ({s['role']}) call {s['call'][:8]}: {s['outcome']}, {s['duration']}s, "
+                 f"connection {s['conn']}, fingerprint check {s['fp_match']}, "
+                 f"words confirmed {'yes' if s['sas_confirmed'] else 'no'}")
 
     # --- exporter signature -------------------------------------------------
     r.heading("Export signature")

@@ -51,5 +51,15 @@
     "file": "edited_attachment_descriptor.json",
     "valid": false,
     "index": 2
+  },
+  "valid_v2_call": {
+    "file": "valid_v2_call.json",
+    "valid": true,
+    "index": null
+  },
+  "edited_call_record": {
+    "file": "edited_call_record.json",
+    "valid": false,
+    "index": 4
   }
 }

@@ -5,6 +5,7 @@ import { Session, type Envelope, type Message } from "./session";
 import { wrap, unwrap, loadBackup, saveBackup, type Backup } from "./keystore";
 import "./style.css";
 import { PublicVerify, EvidencePanel } from "./ProofUI";
+import { CallButton, CallOverlay, callLogEntry } from "./CallUI";
 import { AttachmentCard, Lightbox, asDescriptor, stageText } from "./AttachmentUI";
 import type { Progress, OpenedAttachment } from "./session";
 
@@ -358,6 +359,7 @@ function App() {
                 </h2>
               </div>
               <div className="chat-actions">
+                <CallButton session={session} onError={setError} />
                 <button onClick={() => setWire(!wire)} aria-pressed={wire}>
                   ⌘ Wire Log
                 </button>
@@ -396,6 +398,8 @@ function App() {
                 </div>
               )}
               {session.messages.map((item: Message, i: number) => {
+                const logged = callLogEntry(session, item, i);
+                if (logged !== undefined) return logged;
                 const descriptor = asDescriptor(item.message);
                 if (descriptor)
                   return (
@@ -531,6 +535,7 @@ function App() {
           )}
         </main>
       )}
+      {session?.isAuthenticated && <CallOverlay session={session} />}
       {zoom && <Lightbox item={zoom} close={() => setZoom(undefined)} />}
       {receipt && (
         <div className="modal-backdrop" onClick={() => setReceipt(undefined)}>

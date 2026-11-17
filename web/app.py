@@ -80,6 +80,7 @@ def create_app(
     idle_timeout=None,
     include_vault=True,
     attachment_storage=None,
+    call_client_factory=None,
 ):
     settings = Settings.load(
         origins,
@@ -136,6 +137,9 @@ def create_app(
     storage = attachment_storage or storage_from_env(production=settings.production and include_vault)
     app.state.storage = storage
     AttachmentAPI(app, core.database, storage, tokens)
+    from web.calls_api import CallsAPI
+
+    CallsAPI(app, tokens, client_factory=call_client_factory)
     connect_src = "'self'" + (f" {storage.origin}" if storage.kind == "s3" else "")
     csp = (
         "default-src 'none'; script-src 'self'; style-src 'self'; "
@@ -169,7 +173,7 @@ def create_app(
                 "X-Content-Type-Options": "nosniff",
                 "Referrer-Policy": "no-referrer",
                 "X-Frame-Options": "DENY",
-                "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+                "Permissions-Policy": "camera=(), microphone=(self), geolocation=()",
                 "Cache-Control": "no-store",
             }
         )

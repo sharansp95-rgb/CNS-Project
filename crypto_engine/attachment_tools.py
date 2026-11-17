@@ -44,8 +44,12 @@ def is_attachment_message(message):
 
 
 def display_text(message):
-    """What a client that cannot open attachments should show for this message."""
-    return PLACEHOLDER if is_attachment_message(message) else message
+    """What a client that cannot open attachments or calls should show for this message."""
+    from crypto_engine import call_tools
+
+    if is_attachment_message(message):
+        return PLACEHOLDER
+    return call_tools.PLACEHOLDER if call_tools.is_call_message(message) else message
 
 
 def chunk_count(size, chunk=CHUNK):

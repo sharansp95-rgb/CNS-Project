@@ -354,3 +354,24 @@ local directory and receives no S3 settings.
 
 Free-tier caveat: Neon's free egress (5 GB) is shared by Postgres and the bucket; the
 50 MB video limit and 7-day retention keep demo usage small.
+
+## 10. Voice calls and TURN (Phase 7)
+
+Calls are peer to peer. STUN needs no account (`CALL_STUN_URLS`, default Cloudflare and Google
+STUN). TURN (needed when a NAT blocks direct paths, typically mobile data) uses the **Metered
+free plan** (no card; 500 MB/month, unlimited STUN). Cloudflare Realtime TURN was rejected: its
+free 1,000 GB converts to $0.05/GB overage and its docs do not rule out a payment method.
+
+1. Sign up at dashboard.metered.ca, note the app name (`<name>.metered.live`) and the secret key.
+2. Keychain (account `team15`): `cns-turn-app` (app name) and `cns-turn-secret-key`.
+3. **Main service only**: `METERED_APP` and `METERED_SECRET_KEY` (optional `CALL_STUN_URLS`,
+   `CALL_TURN_TTL_SECONDS` (max 600), `CALL_ICE_PER_MINUTE` (10)). Never on the lab.
+4. Redeploy. Verify `/api/calls/ice` (logged in) reports `"turn": "available"`; the response
+   contains per-call credentials only. The secret key never appears in logs: httpx request
+   logging is silenced and exceptions are logged by type only.
+5. If the Metered quota runs out, the endpoint reports `"turn": "unavailable"` and calls fall
+   back to direct-only, with a note in the call screen.
+
+Browsers need HTTPS and microphone permission; the CSP is unchanged (WebRTC is not governed by
+`connect-src`). Local tests use host candidates only (`CALL_STUN_URLS=`) and Chromium's fake
+microphone; WebKit has no fake-device switch, so its call media tests are skipped.

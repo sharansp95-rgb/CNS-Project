@@ -7,6 +7,7 @@ import devanagariUrl from "@fontsource/noto-sans/files/noto-sans-devanagari-400-
 import { sha, hex } from "./crypto";
 import type { Verification } from "./evidenceVerify";
 import { parseDescriptor } from "./attachments/descriptor";
+import { parseSignal, isCallMessage } from "./calls/signal";
 export async function createReport(
   bytes: Uint8Array,
   report: Verification,
@@ -158,6 +159,18 @@ export async function createReport(
         `Stored (encrypted) object SHA-256: ${att.ct_sha256} (${att.ct_size} bytes)`,
         8,
       );
+    } else if (isCallMessage(String(row.message))) {
+      // Metadata only: the SDP (which contains network addresses) is not printed.
+      const sig = parseSignal(String(row.message));
+      paragraph(
+        sig
+          ? sig.type === "record"
+            ? `Voice call record (${sig.role}): ${sig.outcome}, ${sig.duration} s, connection ${sig.conn}, DTLS fingerprint check ${sig.fp_match}, spoken words confirmed: ${sig.sas_confirmed ? "yes" : "no"}`
+            : `Voice call signaling: ${sig.type}${sig.reason ? " (" + sig.reason + ")" : ""}`
+          : "Voice call message (could not be parsed)",
+        11,
+      );
+      if (sig) paragraph("Call id: " + sig.call, 8);
     } else paragraph(row.message, 11);
     if (row.envelope_sha256)
       paragraph("Relayed envelope SHA-256: " + row.envelope_sha256, 8);
@@ -177,6 +190,22 @@ export async function createReport(
       paragraph("Plaintext SHA-256: " + d.pt_sha256, 8);
       paragraph("Ciphertext SHA-256: " + d.ct_sha256, 8);
     }
+  }
+  const calls = records
+    .map((row: any, i: number) => ({ i, who: row.sender, sig: parseSignal(String(row.message)) }))
+    .filter((x: any) => x.sig?.type === "record");
+  paragraph("Voice calls", 14);
+  if (!calls.length) paragraph("No voice call records in this conversation.");
+  else {
+    paragraph(
+      "Calls are peer-to-peer encrypted (DTLS-SRTP); audio is never recorded or stored. Each party signs its own record.",
+      9,
+    );
+    for (const { i, who, sig } of calls)
+      paragraph(
+        `Message #${i + 1} by ${who}: ${sig.outcome}, ${new Date(sig.started * 1000).toISOString()} for ${sig.duration} s, connection ${sig.conn}, fingerprint ${sig.fp_match}, words confirmed ${sig.sas_confirmed ? "yes" : "no"}`,
+        9,
+      );
   }
   paragraph("Timestamp receipt", 14);
   if (receipt) {

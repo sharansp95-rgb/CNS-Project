@@ -260,6 +260,36 @@ Neon verification uses a separate disposable `TEST_DATABASE_URL`, with per-test
 schemas and a guard against the main database; see the exact command in DEPLOY.md.
 Those external tests are prepared and have not been run without your Neon account.
 
+## Voice calls (Phase 7)
+
+One-to-one **audio** calls in the web client, peer to peer with WebRTC (DTLS-SRTP).
+
+- **Signaling is end-to-end encrypted.** Invite, accept, decline, busy, cancel, hang-up and
+  call records are ordinary chat messages (`securechat-call/v1:{...}`): signed with the
+  sender's RSA identity, AES-GCM encrypted, hash-chained, freshness/replay checked. The relay
+  sees ciphertext only. Non-trickle ICE keeps each call to a handful of messages.
+- **No certificate swapping.** The SDP, including `a=fingerprint`, is inside the signed message.
+  After connecting, the client reads the *real* remote DTLS certificate fingerprint with
+  `getStats()` and compares it with the signed one; a mismatch ends the call with a security
+  alert. Both screens also show four words derived from both fingerprints and the call id
+  (read them aloud: "Call verified" after both confirm).
+- **NAT traversal.** STUN, plus TURN from Metered's free plan when configured. The server hands
+  each logged-in user short-lived (<= 10 minute) TURN credentials through a rate-limited
+  endpoint; the long-term key never reaches a browser, a log or an error message. The UI says
+  "direct" or "via relay (TURN)" (a relay only forwards encrypted SRTP). If TURN is unavailable
+  (e.g. quota used up) calls still work when a direct path exists, with a note.
+- **Evidence.** Each side signs a call record (outcome, start/end, duration, connection type,
+  fingerprint check, whether the words were confirmed). Records and signaling are in the hash
+  chain, evidence exports, the PDF and `tools/verify_transcript.py`; audio is never recorded.
+  No evidence format change was needed. Note: signed SDP contains network addresses, so evidence
+  files are confidential (the PDF omits SDP).
+- **Desktop client:** shows `[call — web client only]`; chain verification is unchanged.
+- **Attack Lab:** "Substitute DTLS fingerprint in SDP", "Inject forged call offer", "Replay old
+  call offer" and a simulated "MITM media path" are all caught by the real client checks.
+
+Details: [docs/voice_phase_report.md](docs/voice_phase_report.md) and
+[DEPLOY.md](docs/DEPLOY.md#10-voice-calls-and-turn-phase-7).
+
 ## Encrypted images and video (Phase 6)
 
 The web client sends JPEG, PNG, WebP, GIF, MP4 and WebM files **end to end

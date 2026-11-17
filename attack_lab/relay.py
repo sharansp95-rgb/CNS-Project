@@ -22,8 +22,15 @@ ACTIONS = frozenset(
         "reorder_next",
         "inject_next",
         "mitm_next_handshake",
+        "tamper_call_offer",
+        "inject_call_offer",
+        "replay_call_offer",
     )
 )
+# The relay cannot read a call offer (it is inside an end-to-end encrypted message),
+# so the call attacks identify "probably an offer" by size: an SDP offer/answer is
+# well over a kilobyte, ordinary chat text is not.
+LARGE_CIPHERTEXT = 1500
 
 
 def _identity(url):
@@ -96,6 +103,7 @@ class RogueRelay(ChatServer):
         self.wire = []
         self.pending = {}
         self.last = {}
+        self.last_large = {}
         self.held = {}
         self.attack_lock = threading.RLock()
 
@@ -141,8 +149,26 @@ class RogueRelay(ChatServer):
         if not isinstance(target, str) or not target:
             raise ValueError("Choose a sandbox sender")
         replay = None
+        forged = None
         with self.attack_lock:
-            if action == "replay_last":
+            if action == "inject_call_offer":
+                peers = [name for name in self.clients if name != target]
+                if not peers:
+                    raise ValueError("Connect the second victim first")
+                forged = dict(
+                    type="chat", **{"from": target}, to=peers[0],
+                    nonce=base64.b64encode(os.urandom(12)).decode(),
+                    ciphertext=base64.b64encode(os.urandom(2600)).decode(),
+                    tag=base64.b64encode(os.urandom(16)).decode(),
+                )
+                self.log_event("lab_attack_performed", action=action, target=target)
+            elif action == "replay_call_offer":
+                last = self.last_large.get(target)
+                if last is None:
+                    raise ValueError("No call offer captured yet: place a call first")
+                replay = deepcopy(last)
+                self.log_event("lab_attack_performed", action=action, target=target)
+            elif action == "replay_last":
                 last = self.last.get(target)
                 if last is None:
                     raise ValueError("No captured message from this sender yet")
@@ -155,6 +181,8 @@ class RogueRelay(ChatServer):
         # takes them in the opposite order to close peers and clear the sandbox.
         if replay is not None:
             self.deliver(replay, target)
+        if forged is not None:
+            self.deliver(forged, target)
         return dict(armed=True, action=action, target=target)
 
     def intercept(self, envelope, sender):
@@ -182,7 +210,13 @@ class RogueRelay(ChatServer):
             self.wire[:] = self.wire[-100:]
             if etype == "chat":
                 self.last[sender] = deepcopy(original)
+                if len(original.get("ciphertext", "")) > LARGE_CIPHERTEXT:
+                    self.last_large[sender] = deepcopy(original)
             action = self.pending.get(sender)
+            if action == "tamper_call_offer":
+                if etype != "chat" or len(original.get("ciphertext", "")) <= LARGE_CIPHERTEXT:
+                    return [original]  # keep waiting for the (large) call offer
+
             if sender in self.held and etype == "chat":
                 saved = self.held.pop(sender)
                 return [original, saved]
@@ -197,7 +231,7 @@ class RogueRelay(ChatServer):
                 return [original]
             self.pending.pop(sender)
             self.log_event("lab_attack_performed", action=action, target=sender)
-            if action == "tamper_next":
+            if action in ("tamper_next", "tamper_call_offer"):
                 data = bytearray(base64.b64decode(original["ciphertext"]))
                 data[0] ^= 0xFF
                 original["ciphertext"] = base64.b64encode(data).decode()

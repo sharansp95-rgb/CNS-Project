@@ -4,6 +4,8 @@ import { encryptFile, decryptFile, AttachmentError, type FileSecrets } from "./a
 import { encodeDescriptor, type Descriptor } from "./attachments/descriptor";
 import { makeThumbnail } from "./attachments/thumbnail";
 import { api, putObject, getObject, type Presigned } from "./attachments/transfer";
+import { CallManager, type CallHost } from "./calls/manager";
+import { parseSignal } from "./calls/signal";
 export type Envelope = Record<string, any>;
 export interface Message {
   sender: string;
@@ -57,6 +59,7 @@ export class Session {
   chain: Promise<unknown> = Promise.resolve();
   closed = false;
   opened = new Map<string, OpenedAttachment>();
+  calls: CallManager;
   limits?: AttachmentLimits;
   private epoch = 0;
   private stopped = false;
@@ -73,10 +76,29 @@ export class Session {
     private changed: () => void,
     private authenticated: () => Promise<void> = async () => {},
   ) {
+    this.calls = new CallManager(this.callHost());
     this.secureTransport = url.startsWith("wss:");
     this.socket = this.openSocket();
   }
+  private callHost(): CallHost {
+    const s = this;
+    return {
+      get username() { return s.username; },
+      get peer() { return s.peer; },
+      get apiToken() { return s.apiToken; },
+      get key() { return s.key; },
+      get peerOnline() { return s.peerOnline; },
+      send: (text) => s.sendMessage(text),
+      changed: () => s.changed(),
+      note: (type, fields) => s.wireNote("out", type, fields),
+      securityAlert: (kind, reason) => {
+        s.status = "Security warning: " + reason;
+        s.send({ type: "security_alert", alert: kind, reason, peer: s.peer });
+      },
+    };
+  }
   private clearSession() {
+    this.calls?.teardown("The secure session ended, so the call ended.");
     this.epoch++;
     this.apiToken = "";
     this.key = undefined;
@@ -479,6 +501,8 @@ export class Session {
       signature: inner.signature,
       envelope_sha256: await c.hash(e),
     });
+    const signal = parseSignal(inner.message);
+    if (signal) void this.calls.onSignal(signal);
     this.messages.push({
       sender: this.peer,
       message: inner.message,

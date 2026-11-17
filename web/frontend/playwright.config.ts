@@ -11,6 +11,19 @@ export default defineConfig({
     name: browserName,
     use: {
       browserName,
+      // Fake microphone for call tests (Chromium only; WebKit has no fake-device switch).
+      ...(browserName === "chromium"
+        ? {
+            launchOptions: {
+              args: [
+                "--use-fake-device-for-media-stream",
+                "--use-fake-ui-for-media-stream",
+                "--disable-features=WebRtcHideLocalIpsWithMdns",
+              ],
+            },
+            permissions: ["microphone"],
+          }
+        : {}),
       baseURL: external || `http://127.0.0.1:${8765 + index * 2}`,
     },
   })),

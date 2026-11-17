@@ -35,6 +35,10 @@ services:
         sync: false
       - key: S3_SECRET_ACCESS_KEY
         sync: false
+      - key: METERED_APP
+        sync: false
+      - key: METERED_SECRET_KEY
+        sync: false
   - type: web
     name: team15-attack-lab
     runtime: python
