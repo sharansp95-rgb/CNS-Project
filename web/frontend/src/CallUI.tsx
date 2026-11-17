@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { Session } from "./session";
 import { parseSignal, isCallMessage, type Signal } from "./calls/signal";
 
@@ -73,6 +73,11 @@ export function CallOverlay({ session }: { session: Session }) {
     const t = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, [call?.state]);
+  const panel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (call?.state === "ringing")
+      panel.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [call?.id, call?.state]);
   const ended = session.calls.lastEnded;
   if (!call) {
     if (ended?.alert && dismissed !== ended.id)
@@ -104,6 +109,7 @@ export function CallOverlay({ session }: { session: Session }) {
   const verified = call.fpStatus === "match" && call.sasConfirmed;
   return (
     <section
+      ref={panel}
       className="call-panel"
       role="dialog"
       aria-label="Voice call"

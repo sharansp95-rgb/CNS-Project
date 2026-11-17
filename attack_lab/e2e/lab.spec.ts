@@ -1,3 +1,4 @@
+import AxeBuilder from "../../web/frontend/node_modules/@axe-core/playwright/dist/index.js";
 import {
   test,
   expect,
@@ -40,6 +41,27 @@ for (const [action, reason] of attacks)
     await expect(page.locator("header")).toContainText(
       "ATTACK LAB — sandbox, not the real service",
     );
+    if (action === "Tamper ciphertext") {
+      await expect(
+        page.getByRole("button", { name: "Toggle lab theme", exact: true }),
+      ).toBeEnabled();
+      for (const theme of ["dark", "light"]) {
+        if (theme === "light")
+          await page
+            .getByRole("button", { name: "Toggle lab theme", exact: true })
+            .click();
+        expect(
+          (
+            await new AxeBuilder({ page })
+              .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+              .analyze()
+          ).violations,
+        ).toEqual([]);
+      }
+      await page
+        .getByRole("button", { name: "Toggle lab theme", exact: true })
+        .click();
+    }
     await page
       .getByRole("button", { name: "Start lab session", exact: true })
       .click();

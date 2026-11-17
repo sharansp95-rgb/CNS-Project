@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
+import { useDialog } from "./useDialog";
 import type { Session, Progress, OpenedAttachment } from "./session";
 import { parseDescriptor, type Descriptor } from "./attachments/descriptor";
 
@@ -14,14 +15,12 @@ export function Lightbox({
   item: OpenedAttachment;
   close: () => void;
 }) {
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => e.key === "Escape" && close();
-    addEventListener("keydown", key);
-    return () => removeEventListener("keydown", key);
-  }, [close]);
+  const panel = useRef<HTMLElement>(null);
+  useDialog(panel, close);
   return (
     <div className="modal-backdrop lightbox" onClick={close}>
       <section
+        ref={panel}
         role="dialog"
         aria-modal="true"
         aria-label="Image viewer"
@@ -30,7 +29,6 @@ export function Lightbox({
         <button
           className="close"
           onClick={close}
-          autoFocus
           aria-label="Close image viewer"
         >
           ×
@@ -54,7 +52,7 @@ export function AttachmentCard({
   session: Session;
   descriptor: Descriptor;
   mine: boolean;
-  onReceipt: () => void;
+  onReceipt: (trigger: HTMLButtonElement) => void;
   onZoom: (a: OpenedAttachment) => void;
 }) {
   const [progress, setProgress] = useState<Progress>();
@@ -101,16 +99,23 @@ export function AttachmentCard({
           onError={() => setVideoError(true)}
         />
       ) : opened ? (
-        <img
-          className="att-full"
-          src={opened.url}
-          alt={d.name}
-          onClick={() => onZoom(opened)}
-        />
+        <button
+          className="att-thumb att-image-open"
+          onClick={(event) => {
+            event.currentTarget.focus({ preventScroll: true });
+            onZoom(opened);
+          }}
+          aria-label={"Open image " + d.name}
+        >
+          <img className="att-full" src={opened.url} alt={d.name} />
+        </button>
       ) : thumb ? (
         <button
           className="att-thumb"
-          onClick={() => void open()}
+          onClick={(event) => {
+            event.currentTarget.focus({ preventScroll: true });
+            void open();
+          }}
           aria-label={`Open ${d.kind} ${d.name}`}
         >
           <img src={thumb} alt="" />
@@ -121,7 +126,10 @@ export function AttachmentCard({
       ) : (
         <button
           className="att-thumb att-nothumb"
-          onClick={() => void open()}
+          onClick={(event) => {
+            event.currentTarget.focus({ preventScroll: true });
+            void open();
+          }}
           aria-label={`Open ${d.kind} ${d.name}`}
         >
           {d.kind === "video" ? "▶" : "🖼"}
@@ -143,6 +151,7 @@ export function AttachmentCard({
         <div className="att-progress">
           <div
             role="progressbar"
+            aria-label="Opening encrypted attachment"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(progress.fraction * 100)}
@@ -161,7 +170,7 @@ export function AttachmentCard({
       <div className="att-actions">
         {opened && <button onClick={() => save(opened)}>Save</button>}
         <button
-          onClick={onReceipt}
+          onClick={(event) => onReceipt(event.currentTarget)}
           aria-label={"Security receipt: attachment " + d.name}
         >
           Receipt ✓✓

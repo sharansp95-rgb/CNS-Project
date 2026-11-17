@@ -16,6 +16,23 @@ const actions = [
   ["replay_call_offer", "Replay old call offer"],
   ["dtls_mitm", "MITM media path (other DTLS certificate)"],
 ];
+const themeButton = document.querySelector<HTMLButtonElement>("#theme")!;
+function applyTheme(value: string) {
+  const theme = value === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = theme;
+  themeButton.textContent = theme === "dark" ? "Light theme" : "Dark theme";
+  themeButton.setAttribute("aria-pressed", String(theme === "light"));
+}
+applyTheme(localStorage.getItem("securechat-theme") || "dark");
+themeButton.onclick = () => {
+  const next =
+    document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  applyTheme(next);
+  localStorage.setItem("securechat-theme", next);
+};
+window.addEventListener("storage", (event) => {
+  if (event.key === "securechat-theme") applyTheme(event.newValue || "dark");
+});
 const status = document.querySelector<HTMLParagraphElement>("#status")!;
 const button = (id: string) =>
   document.querySelector<HTMLButtonElement>("#" + id)!;
@@ -353,6 +370,13 @@ async function poll() {
             : `${e.username}: ${e.event} — real lockout guard`;
         feed.append(row);
       }
+      if (!feed.childElementCount) {
+        const empty = document.createElement("p");
+        empty.className = "empty-feed";
+        empty.textContent =
+          "No client rejection has been reported yet. Arm an attack and inspect the receiving victim’s result.";
+        feed.append(empty);
+      }
     } catch (e) {
       show(e);
     }
@@ -360,5 +384,6 @@ async function poll() {
 }
 // The static HTML may appear before this module loads on a cold connection.
 // Enable the first control only after its handlers have been installed.
+themeButton.disabled = false;
 button("start").disabled = false;
 void poll();

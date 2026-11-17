@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { identity, privateKey } from "./crypto";
 import { Session, type Envelope, type Message } from "./session";
@@ -13,6 +13,16 @@ import {
   stageText,
 } from "./AttachmentUI";
 import type { Progress, OpenedAttachment } from "./session";
+import { useDialog } from "./useDialog";
+
+function userMessage(error: unknown): string {
+  if (error instanceof DOMException && error.name === "OperationError")
+    return "Could not unlock this identity. Check your password and use its matching key backup.";
+  const text = error instanceof Error ? error.message : String(error);
+  if (text === "Cannot connect")
+    return "The server could not be reached. It may be waking up; wait a moment and try again.";
+  return text || "That did not work. Please try again.";
+}
 
 function download(name: string, body: unknown) {
   const url = URL.createObjectURL(
@@ -45,6 +55,40 @@ function App() {
   const [theme, setTheme] = useState(
     localStorage.getItem("securechat-theme") || "dark",
   );
+  const receiptPanel = useRef<HTMLElement>(null);
+  useDialog(receiptPanel, () => setReceipt(undefined), !!receipt);
+  const [connectionHint, setConnectionHint] = useState("");
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    const syncTheme = (event: StorageEvent) => {
+      if (
+        event.key === "securechat-theme" &&
+        ["dark", "light"].includes(event.newValue || "")
+      )
+        setTheme(event.newValue!);
+    };
+    window.addEventListener("storage", syncTheme);
+    return () => window.removeEventListener("storage", syncTheme);
+  }, [theme]);
+  useEffect(() => {
+    setConnectionHint("");
+    if (!busy || !session) return;
+    const timer = setTimeout(() => {
+      if (session.socket.readyState === WebSocket.CONNECTING)
+        setConnectionHint(
+          "Waking up the server… Keep this tab open. Your identity stays on this device.",
+        );
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [busy, session]);
+  useEffect(() => {
+    const back = () => {
+      setEvidenceMode(location.pathname === "/evidence" ? "list" : null);
+      refresh((n) => n + 1);
+    };
+    window.addEventListener("popstate", back);
+    return () => window.removeEventListener("popstate", back);
+  }, []);
   const notify = () => refresh((n) => n + 1);
   const [sending, setSending] = useState<{
       name: string;
@@ -70,7 +114,7 @@ function App() {
         onProgress: (progress) => setSending({ name: file.name, progress }),
       });
     } catch (e) {
-      if ((e as Error).name !== "AbortError") setError((e as Error).message);
+      if ((e as Error).name !== "AbortError") setError(userMessage(e));
     } finally {
       setSending(undefined);
     }
@@ -136,7 +180,7 @@ function App() {
       await conn.connect(mode, password);
       setPassword("");
     } catch (e) {
-      setError((e as Error).message);
+      setError(userMessage(e));
       setBusy(false);
     }
   }
@@ -150,26 +194,25 @@ function App() {
       setBackup(b);
       setError("Identity imported. You can now log in.");
     } catch (e) {
-      setError("Import failed: " + (e as Error).message);
+      setError("Import failed: " + userMessage(e));
     }
   }
   async function exportEvidence() {
     try {
       download(`evidence_${session!.username}.json`, await session!.evidence());
     } catch (e) {
-      setError((e as Error).message);
+      setError(userMessage(e));
     }
   }
   const active = !!session?.isAuthenticated;
-  if (location.pathname === "/verify")
-    return (
-      <div className={"app " + theme}>
-        <PublicVerify />
-      </div>
-    );
   return (
-    <div className={"app " + theme}>
-      <nav>
+    <div
+      className={"app " + theme + (active && !evidenceMode ? " chat-page" : "")}
+    >
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
+      <nav aria-label="Main navigation">
         <a className="brand" href="/" aria-label="Secure Chat home">
           <span className="brand-mark">
             S<span>↗</span>
@@ -205,6 +248,12 @@ function App() {
           <button
             className="icon"
             aria-label="Toggle theme"
+            aria-pressed={theme === "light"}
+            title={
+              theme === "dark"
+                ? "Switch to light theme"
+                : "Switch to dark theme"
+            }
             onClick={() => {
               const next = theme === "dark" ? "light" : "dark";
               setTheme(next);
@@ -215,8 +264,10 @@ function App() {
           </button>
         </div>
       </nav>
-      {!active ? (
-        <main className="welcome">
+      {location.pathname === "/verify" ? (
+        <PublicVerify />
+      ) : !active ? (
+        <main className="welcome" id="main-content" tabIndex={-1}>
           <section className="intro">
             <div className="eyebrow">PRIVATE BY DESIGN. VERIFIABLE BY YOU.</div>
             <h1>
@@ -247,7 +298,38 @@ function App() {
             <p className="muted">
               Create an identity, or unlock one on this device.
             </p>
+            <ol className="onboarding" aria-label="Getting started">
+              <li>
+                <span>1</span>
+                <div>
+                  <strong>Your identity</strong>
+                  <small>
+                    Create a username and password, or log in below.
+                  </small>
+                </div>
+              </li>
+              <li>
+                <span>2</span>
+                <div>
+                  <strong>Your conversation</strong>
+                  <small>
+                    Enter the exact username of the person joining you.
+                  </small>
+                </div>
+              </li>
+              <li>
+                <span>3</span>
+                <div>
+                  <strong>Your secure session</strong>
+                  <small>
+                    Wait for both peers, then compare your fingerprints.
+                  </small>
+                </div>
+              </li>
+            </ol>
             <form
+              aria-label="Identity and connection"
+              aria-busy={busy}
               onSubmit={(e) => {
                 e.preventDefault();
                 void authenticate("login");
@@ -261,6 +343,7 @@ function App() {
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="Your username"
                   disabled={busy}
+                  spellCheck={false}
                 />
               </label>
               <label>
@@ -272,6 +355,7 @@ function App() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Unlock your identity"
                   disabled={busy}
+                  spellCheck={false}
                 />
               </label>
               <label>
@@ -296,7 +380,7 @@ function App() {
               </button>
             </form>
             <p role="status" className="feedback">
-              {error || session?.status}
+              {error || connectionHint || session?.status}
             </p>
             <div className="key-import">
               <label className="file-label">
@@ -329,8 +413,12 @@ function App() {
           }}
         />
       ) : (
-        <main className={"workspace " + (wire ? "with-wire" : "")}>
-          <aside className="sidebar">
+        <main
+          className={"workspace " + (wire ? "with-wire" : "")}
+          id="main-content"
+          tabIndex={-1}
+        >
+          <aside className="sidebar" aria-label="Conversation sidebar">
             <div className="eyebrow">CONVERSATIONS / 01</div>
             <div className="contact">
               <span className="avatar">
@@ -365,10 +453,22 @@ function App() {
             <header className="chat-header">
               <div>
                 <div className="eyebrow">PRIVATE CONVERSATION</div>
-                <h2>
+                <h1>
                   {session.peer}
-                  <span className="secure-dot">●</span>
-                </h2>
+                  <span
+                    className={
+                      "secure-dot " + (session.key ? "ready" : "pending")
+                    }
+                    aria-hidden="true"
+                  >
+                    ●
+                  </span>
+                </h1>
+                <span className="session-badge" data-ready={!!session.key}>
+                  {session.key
+                    ? "Encrypted session ready"
+                    : "Waiting for your peer"}
+                </span>
               </div>
               <div className="chat-actions">
                 <CallButton session={session} onError={setError} />
@@ -401,11 +501,15 @@ function App() {
               {session.messages.length === 0 && (
                 <div className="empty-chat">
                   <span>⌁</span>
-                  <h3>A little more private.</h3>
+                  <h2>
+                    {session.key
+                      ? "Your secure conversation starts here."
+                      : "Waiting for your contact."}
+                  </h2>
                   <p>
-                    Once your peer connects, your devices verify each other
-                    <br />
-                    and derive a fresh key. The relay never receives it.
+                    {session.key
+                      ? "Send a message, share an encrypted file, or start a verified voice call. Select any message to inspect its security receipt."
+                      : `Ask ${session.peer} to log in and enter ${session.username} as their peer. Your devices will verify the signed handshake before you can send.`}
                   </p>
                 </div>
               )}
@@ -420,7 +524,10 @@ function App() {
                       session={session}
                       descriptor={descriptor}
                       mine={item.sender === session.username}
-                      onReceipt={() => setReceipt(item.receipt)}
+                      onReceipt={(trigger) => {
+                        trigger.focus({ preventScroll: true });
+                        setReceipt(item.receipt);
+                      }}
                       onZoom={setZoom}
                     />
                   );
@@ -431,7 +538,12 @@ function App() {
                       "bubble " +
                       (item.sender === session.username ? "sent" : "received")
                     }
-                    onClick={() => setReceipt(item.receipt)}
+                    onClick={(event) => {
+                      // Safari does not mouse-focus buttons by default; retain
+                      // an explicit return target for the modal's keyboard flow.
+                      event.currentTarget.focus({ preventScroll: true });
+                      setReceipt(item.receipt);
+                    }}
                     aria-label={"Security receipt: " + item.message}
                   >
                     <span>{item.message}</span>
@@ -457,6 +569,7 @@ function App() {
               <div className="att-sending" role="status">
                 <div
                   role="progressbar"
+                  aria-label="Sending encrypted attachment"
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={Math.round(sending.progress.fraction * 100)}
@@ -548,7 +661,7 @@ function App() {
             </footer>
           </section>
           {wire && (
-            <aside className="wire">
+            <aside className="wire" aria-label="Wire Log" tabIndex={0}>
               <div className="eyebrow">THE NETWORK, UNFILTERED</div>
               <h3>Wire Log</h3>
               <p className="muted small">
@@ -574,6 +687,7 @@ function App() {
       {receipt && (
         <div className="modal-backdrop" onClick={() => setReceipt(undefined)}>
           <section
+            ref={receiptPanel}
             role="dialog"
             aria-modal="true"
             aria-label="Security receipt"
@@ -585,7 +699,6 @@ function App() {
             <button
               className="close"
               onClick={() => setReceipt(undefined)}
-              autoFocus
               aria-label="Close receipt"
             >
               ×

@@ -166,7 +166,7 @@ export function PublicVerify() {
     }
   }
   return (
-    <main className="proof-page">
+    <main className="proof-page" id="main-content" tabIndex={-1}>
       <div className="eyebrow">OFFLINE VERIFICATION / NO LOGIN</div>
       <h1>Verify evidence</h1>
       <p>
@@ -364,7 +364,7 @@ export function EvidencePanel({
     }
   }
   return (
-    <main className="proof-page">
+    <main className="proof-page" id="main-content" tabIndex={-1}>
       <button onClick={close}>← Back to chat</button>
       <div className="eyebrow">PRIVATE EVIDENCE VAULT</div>
       <h1>Evidence</h1>
@@ -408,7 +408,16 @@ export function EvidencePanel({
         <button onClick={() => void refresh()}>Refresh evidence list</button>
       </section>
       <div className="vault-list">
-        {rows.length === 0 && <p>No saved evidence yet.</p>}
+        {rows.length === 0 && (
+          <div className="proof-card empty-state">
+            <h2>Keep proof of a conversation</h2>
+            <p>No saved evidence yet.</p>
+            <p className="muted small">
+              In a secure chat, choose Save evidence. The signed file is
+              encrypted on your device before it reaches your private vault.
+            </p>
+          </div>
+        )}
         {rows.map((row) => (
           <article className="proof-card" key={row.id}>
             <h2>{row.title}</h2>

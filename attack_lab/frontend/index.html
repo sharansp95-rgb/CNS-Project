@@ -7,11 +7,15 @@
     <title>Attack Lab — Team 15 sandbox</title>
   </head>
   <body>
+    <a class="skip-link" href="#main-content">Skip to lab controls</a>
     <header>
       <strong>ATTACK LAB — sandbox, not the real service</strong
       ><span>Hostile relay / genuine client defenses</span>
+      <button id="theme" aria-label="Toggle lab theme" disabled>
+        Light theme
+      </button>
     </header>
-    <main>
+    <main id="main-content" tabindex="-1">
       <section class="controls">
         <p class="eyebrow">TEAM 15 / ISOLATED SECURITY LAB</p>
         <h1>Try the attack. Watch the defense.</h1>
@@ -19,6 +23,24 @@
           Two production clients, one rogue relay. Victim keys stay in this
           browser. The relay console sees ciphertext and routing metadata only.
         </p>
+        <ol class="lab-steps" aria-label="Lab workflow">
+          <li>
+            <strong>1 · Prepare</strong
+            ><span>Start a session and connect the two real clients.</span>
+          </li>
+          <li>
+            <strong>2 · Interfere</strong
+            ><span>Choose an attack, then send a message or file.</span>
+          </li>
+          <li>
+            <strong>3 · Inspect</strong
+            ><span
+              >Read the victim’s rejection and the ciphertext-only relay
+              log.</span
+            >
+          </li>
+        </ol>
+        <h2>Prepare the sandbox</h2>
         <div class="toolbar">
           <button id="start" disabled>Start lab session</button
           ><button id="connect" disabled>Connect victims</button
@@ -34,13 +56,24 @@
         <p id="status" role="status">
           Start a lab session, then connect the victims.
         </p>
-        <div id="actions" class="actions"></div>
+        <h2>Choose an attack</h2>
+        <div
+          id="actions"
+          class="actions"
+          role="group"
+          aria-label="Attacks for the next envelope"
+        ></div>
         <p>
           Drop/reorder need two messages. Replay needs an earlier message. Arm
           MITM before connecting victims. Injection creates an invalid GCM
           envelope because the rogue relay has no session key. Attachment
           attacks need a sent test image (two for “swap”); they alter only
           encrypted bytes at rest in the sandbox store.
+        </p>
+        <p class="lab-caveat">
+          The media-path demo simulates a different DTLS certificate through the
+          browser API. The victim’s production fingerprint check decides whether
+          to reject it.
         </p>
       </section>
       <section class="victims">
@@ -57,9 +90,19 @@
         <article>
           <h2>Attacker console</h2>
           <p>Attempted actions are not successful detections.</p>
-          <pre id="attempts"></pre>
+          <pre
+            role="region"
+            id="attempts"
+            tabindex="0"
+            aria-label="Attempted attacks"
+          ></pre>
           <h3>What the relay sees</h3>
-          <pre id="wire"></pre>
+          <pre
+            id="wire"
+            role="region"
+            tabindex="0"
+            aria-label="Ciphertext and public relay metadata"
+          ></pre>
         </article>
         <article>
           <h2>Live detection feed</h2>
