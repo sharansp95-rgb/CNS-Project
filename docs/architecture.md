@@ -36,46 +36,41 @@ and as a zoomable vector at [`architecture_diagram.svg`](architecture_diagram.sv
 
 ```mermaid
 flowchart LR
-    subgraph Desktop["Desktop / terminal client"]
-        P["SecureChatClient<br/>RSA-PSS + X25519 + AES-GCM<br/>hash chains + evidence"]
-        PK["Local RSA private PEM<br/>ephemeral session keys"]
-        P --- PK
-    end
-    subgraph Browser["Browser client"]
-        UI["React UI + Wire Log<br/>receipts + evidence"]
-        C["WebCrypto / noble X25519<br/>same signed envelope bytes"]
-        BK["IndexedDB<br/>password-wrapped RSA identity<br/>session keys in memory"]
-        UI --- C
-        C --- BK
-    end
-    subgraph Relay["Single relay process"]
-        TCP["TLS / TCP adapter<br/>server/server.py"]
-        WS["HTTP / WebSocket adapter<br/>web/app.py<br/>Origin + frame/rate/idle policies"]
-        CORE["RelayCore<br/>one roster + auth + routing<br/>lockout checked before PBKDF2"]
-        DB["SQLAlchemy: SQLite / PostgreSQL<br/>users + durable lockouts<br/>events + bounded ciphertext history<br/>encrypted evidence + file hashes"]
-        LOG["JSONL security mirror<br/>read-only Tk dashboard"]
-        TCP --> CORE
-        WS --> CORE
-        CORE --> DB
-        CORE --> LOG
-    end
-    P <-->|"TLS with pinned certificate"| TCP
-    C <-->|"WSS behind HTTPS proxy<br/>WS on localhost only"| WS
-    P -. "end-to-end signed handshake and encrypted chat" .-> C
-    C <-->|"Bearer HTTP API: encrypted evidence only"| WS
-    subgraph Lab["Separate Attack Lab site / origin / process"]
-        V["Two unchanged production client bundles"]
-        A["Sandbox console + authenticated controls"]
-        R["Rogue relay + neutral interceptor"]
-        LDB["LAB_DATABASE_URL<br/>own users, lockouts, logs, roster"]
-        V <-->|"sandbox WebSocket only"| R
-        A --> R
-        R --> LDB
-    end
-    classDef local fill:#182c35,color:#f2f5f0,stroke:#668eaa;
-    classDef relay fill:#203521,color:#f2f5f0,stroke:#8fba7a;
-    class P,PK,UI,C,BK local;
-    class TCP,WS,CORE,DB,LOG relay;
+  subgraph devices["CLIENT DEVICES"]
+    A["Browser clients<br/>RSA + signed X25519<br/>AES-GCM chat / files<br/>local evidence verification"]
+    T["Tkinter / CLI<br/>local TLS demonstration"]
+  end
+  subgraph service["MAIN · RENDER FREE · SINGAPORE"]
+    W["FastAPI HTTPS / WSS<br/>shared RelayCore<br/>authentication + routing<br/>vault / files / TURN APIs<br/>separate Ed25519 signer"]
+  end
+  subgraph neon["NEON FREE · AWS SINGAPORE"]
+    DB[("Postgres · schema v3<br/>users / locks / audit<br/>ciphertext / encrypted vault<br/>attachment metadata")]
+    OBJ[("Private object storage<br/>encrypted file chunks")]
+  end
+  TURN["Metered TURN · Free trial<br/>encrypted SRTP relay<br/>short-lived credentials"]
+  LOCAL["Local TLS / TCP adapter<br/>SQLite + JSONL dashboard"]
+  subgraph sandbox["SEPARATE ATTACK LAB · RENDER FREE"]
+    CON["Access-code gate + console<br/>hostile relay interceptor"]
+    V["Victim panes<br/>same production bundle<br/>real client checks"]
+    L[("Own ephemeral SQLite<br/>separate roster + objects")]
+    CON <-->|"sandbox WSS"| V
+    CON --> L
+  end
+  A <-->|"HTTPS / WSS<br/>opaque envelopes"| W
+  W --> DB
+  A <-->|"presigned URLs<br/>ciphertext only"| OBJ
+  A <-->|"encrypted audio relay<br/>when direct path fails"| TURN
+  W -->|"credential API"| TURN
+  T <-->|"pinned TLS"| LOCAL
+  A -.->|"bundle reuse only<br/>no shared data"| V
+  classDef client fill:#e5efd9,stroke:#577b40,color:#203025
+  classDef relay fill:#e8eee6,stroke:#627560,color:#203025
+  classDef data fill:#edf1e9,stroke:#7a8d72,color:#203025
+  classDef sandbox fill:#fff0cf,stroke:#8b6728,color:#3b2b11
+  class A,T,V client
+  class W,LOCAL relay
+  class DB,OBJ,TURN data
+  class CON,L sandbox
 ```
 
 </details>
@@ -136,7 +131,7 @@ plaintext. Receipts attest server observations and clock, not legal identity or 
 The browser PDF is a local unsigned companion; the signed JSON remains authoritative.
 See [evidence.md](evidence.md) for cryptographic formats, limitations and India Section
 63 certificate requirements. The database now also stores `evidence_bundles` and
-schema v2 preserves old data transactionally.
+the current schema v3 preserves old data through explicit additive upgrades.
 
 ## Attachments (schema v3)
 
@@ -162,7 +157,7 @@ text of normal chat messages, so the existing signature, AES-GCM, chain and repl
 apply; `Session.receiveChat` routes only *verified* signals to `CallManager`). `sdp.ts`
 validates audio-only SDP and extracts the single SHA-256 DTLS fingerprint; `manager.ts` runs
 the state machine (idle/calling/ringing/connecting/active, 30 s ring timeout, one call at a
-time, busy replies) and polls `getStats` for the connection type, quality and the real remote
+time, deterministic simultaneous-call resolution) and polls `getStats` for the connection type, quality and the real remote
 certificate fingerprint; `sas.ts` derives the four spoken words from both fingerprints and the
 call id. `web/calls_api.py` serves `/api/calls/ice` (STUN list plus short-lived TURN
 credentials created with the Metered REST API; secret key server-side only, TTL capped at 600 s,
@@ -181,9 +176,9 @@ These values now also feed the SQL persistence described under
   or vault decryption keys reach it.
 - Usernames and the routing metadata of every envelope (who is talking to whom, and
   when — it decides delivery by the `to` field).
-- Each user's PBKDF2 password *hash* (never the plaintext password — see
-  `auth/password_hash.py`) and RSA *public* key (`server/user_store.py`), both
-  submitted once at registration.
+- The registration/login password transiently inside TLS-terminated authentication
+  envelopes. Only its PBKDF2 hash is persisted; the relay also stores the RSA public
+  key submitted at registration (`auth/password_hash.py`, `server/user_store.py`).
 - Attachment metadata: uploader, recipient, image/video kind, ciphertext size, ciphertext
   SHA-256, upload/expiry times, plus the bucket's access logs. Never file names, types,
   keys, thumbnails or content.
@@ -202,7 +197,7 @@ These values now also feed the SQL persistence described under
 
 ## What the server stores
 
-`server/db.py` creates or upgrades to schema v2 on startup, selected by `DATABASE_URL` (default:
+`server/db.py` creates or upgrades to schema v3 on startup, selected by `DATABASE_URL` (default:
 `data/securechat.db`; PostgreSQL uses `postgresql+psycopg://...`). The shared SQLAlchemy
 Core schema and transaction adapter can be reused by later transports without changing
 client cryptography. See [Database](../README.md#database) for the full column schema,
@@ -235,7 +230,7 @@ These stored fields are part of **what the server CAN see**: a database reader c
 learn account and traffic metadata and retain ciphertext, but has no chat decryption
 keys. `tests/test_database.py` sends a unique message through two real TLS clients,
 confirms the recipient receives it, and scans every table/column for its plaintext.
-The database does not provide message delivery, encrypted media or another transport.
+The database records metadata and encrypted artifacts; delivery remains the relay’s job.
 
 ## What the server CANNOT see (by design, verified in `tests/`)
 
@@ -249,8 +244,9 @@ The database does not provide message delivery, encrypted media or another trans
   fallback when native 222-byte salt signing is unavailable); only the public
   key is submitted at registration
   (`auth/keystore.py`, `crypto_engine/signatures.py`).
-- A user's plaintext password — only its PBKDF2 hash is ever persisted
-  (`auth/password_hash.py`; `tests/test_password_hash.py::test_hash_does_not_contain_plaintext_password`).
+Authentication passwords are visible transiently to the TLS endpoint, unlike chat
+content. They are never persisted as plaintext; only PBKDF2 hashes are stored
+(`auth/password_hash.py`).
 
 ## Threat model this maps to
 
@@ -277,11 +273,25 @@ HttpOnly sandbox sessions are stored in memory. Both have DB-backed health check
 On a dropped browser connection, tokens/session keys/pending ECDH state are discarded.
 Bounded reconnect retries restore transport only; a password login and new signed
 handshake are required. A generation check prevents late asynchronous crypto work
-from restoring an old key. Explicit disconnect stops retries. There are no heartbeat
-or keep-alive requests to keep free services awake. A live lab console's existing
+from restoring an old key. Explicit disconnect stops retries. Authenticated sockets use the existing bounded ping/pong keepalive (about 30 seconds),
+which stops after 30 minutes without input unless a call is active. Anonymous sockets
+still time out. No external uptime pinger is deployed. A live lab console's existing
 state polling operates only while visitors use that page.
 
 The single roster cannot span workers/instances. Free-service restart/spin-down
 loses live sessions and lab data; main account/vault/audit data remains in Neon.
-The desktop TLS adapter is a local demo, not a Render TCP endpoint. Actual ingress
-addresses, live HTTPS/WSS and Neon integration await Phase 5B after owner deployment.
+The desktop TLS adapter is a local demo, not a Render TCP endpoint. Ingress trust, HTTPS/WSS, Neon, storage and TURN have live verification coverage;
+see [the final report](reports/final_report.md).
+
+
+## UI and compatibility maintenance (Phase 8)
+
+The main site and lab console share design tokens; victims continue to receive the
+exact production HTML/JS rather than an attack-specific client. Focus trapping,
+restoration, skip links, both themes and reduced motion are presentation changes.
+QuickTime uses the existing attachment descriptor/file format with an added
+video/quicktime MIME value; ciphertext chunk sizes, AAD and limits are unchanged.
+When both peers call, the lexicographically smaller username's outgoing call wins.
+The other caller cancels its abandoned call and receives the winning invite using
+the existing signed messages. Late microphone/setup work is scoped to its call and
+cannot overwrite the winner. Fingerprint/SAS checks remain mandatory and unchanged.

@@ -3,7 +3,7 @@
 This folder holds the evidence artifacts for the security properties this project
 claims, and the scripts used to reproduce them live. For the full click-by-click live
 demo script (what to click, what should appear, what to say), see
-[`full_walkthrough.md`](full_walkthrough.md).
+[`full_walkthrough.md`](../docs/history/full_walkthrough.md).
 
 ## Current live lab
 
@@ -81,8 +81,8 @@ each run; it is a scratch file, not committed (the committed evidence is
 `capture_normal_session.pcapng`). `--open-wireshark` opens it with the port already decoded as TLS and the filter set to `tls`.
 To open it by hand, decode the printed port as TLS (Analyze, Decode As, or
 `wireshark -d tcp.port==PORT,tls -r demo/wireshark_capture.pcapng`) and filter `tls`. Screenshots of such a capture:
-[`12`](../docs/screenshots/12_wireshark_tls13_packets.png) and
-[`13`](../docs/screenshots/13_wireshark_hex_ciphertext.png).
+[`12`](../docs/screenshots/history/12_wireshark_tls13_packets.png) and
+[`13`](../docs/screenshots/history/13_wireshark_hex_ciphertext.png).
 
 ## Reproducing everything from scratch
 

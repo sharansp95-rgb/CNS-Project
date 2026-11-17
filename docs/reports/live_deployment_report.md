@@ -1,3 +1,5 @@
+> Historical phase report, moved during Phase 8. Results and path inventories describe that phase; links point to their current locations. See [final_report.md](final_report.md) for the final state.
+
 # Live deployment report — 17 November 2026
 
 Completed provisioning and available-browser live verification. Everything remains

@@ -1,6 +1,6 @@
 # CNS-Project deployment guardrails
 
-Read docs/DEPLOY.md, docs/deployment_phase_report.md, render.yaml and README.md
+Read docs/DEPLOY.md, docs/reports/deployment_phase_report.md, render.yaml and README.md
 before deployment work. Preserve the existing application, SQLAlchemy driver,
 custom authentication, E2E crypto and separate Attack Lab architecture.
 

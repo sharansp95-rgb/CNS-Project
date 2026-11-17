@@ -1,0 +1,36 @@
+flowchart LR
+  subgraph devices["CLIENT DEVICES"]
+    A["Browser clients<br/>RSA + signed X25519<br/>AES-GCM chat / files<br/>local evidence verification"]
+    T["Tkinter / CLI<br/>local TLS demonstration"]
+  end
+  subgraph service["MAIN · RENDER FREE · SINGAPORE"]
+    W["FastAPI HTTPS / WSS<br/>shared RelayCore<br/>authentication + routing<br/>vault / files / TURN APIs<br/>separate Ed25519 signer"]
+  end
+  subgraph neon["NEON FREE · AWS SINGAPORE"]
+    DB[("Postgres · schema v3<br/>users / locks / audit<br/>ciphertext / encrypted vault<br/>attachment metadata")]
+    OBJ[("Private object storage<br/>encrypted file chunks")]
+  end
+  TURN["Metered TURN · Free trial<br/>encrypted SRTP relay<br/>short-lived credentials"]
+  LOCAL["Local TLS / TCP adapter<br/>SQLite + JSONL dashboard"]
+  subgraph sandbox["SEPARATE ATTACK LAB · RENDER FREE"]
+    CON["Access-code gate + console<br/>hostile relay interceptor"]
+    V["Victim panes<br/>same production bundle<br/>real client checks"]
+    L[("Own ephemeral SQLite<br/>separate roster + objects")]
+    CON <-->|"sandbox WSS"| V
+    CON --> L
+  end
+  A <-->|"HTTPS / WSS<br/>opaque envelopes"| W
+  W --> DB
+  A <-->|"presigned URLs<br/>ciphertext only"| OBJ
+  A <-->|"encrypted audio relay<br/>when direct path fails"| TURN
+  W -->|"credential API"| TURN
+  T <-->|"pinned TLS"| LOCAL
+  A -.->|"bundle reuse only<br/>no shared data"| V
+  classDef client fill:#e5efd9,stroke:#577b40,color:#203025
+  classDef relay fill:#e8eee6,stroke:#627560,color:#203025
+  classDef data fill:#edf1e9,stroke:#7a8d72,color:#203025
+  classDef sandbox fill:#fff0cf,stroke:#8b6728,color:#3b2b11
+  class A,T,V client
+  class W,LOCAL relay
+  class DB,OBJ,TURN data
+  class CON,L sandbox

@@ -186,7 +186,9 @@ and nullable indexed `relayed_envelopes.envelope_sha256`. The explicit additive 
 upgrade runs inside the existing serialized transaction, preserving users, locks,
 logs and relay rows. Historical hashes stay NULL: v1 never stored the nonce/tag/full
 envelope needed to recompute them. Unsupported future versions still stop startup.
-Back up an existing DB before deploying a new schema; use a maintenance window.
+The current database is schema v3, which subsequently adds attachment metadata;
+evidence exports remain v1/v2. There is no evidence/v3 wire format. Back up an
+existing DB before deploying a new schema; use a maintenance window.
 
 ## Browser workflow, offline verification and PDF
 

@@ -112,6 +112,6 @@ by Python tests. The evaluator still performs 20 trials of each original categor
 (120 total) and checks false rejection on 200 normal messages.
 
 Older GUI screenshots 01/03/04/05/09, evaluation screenshot 10,
-`demo/full_walkthrough.md`, `docs/UI_REDESIGN_PROGRESS.md`, documentation PDFs and
+`docs/history/full_walkthrough.md`, `docs/history/UI_REDESIGN_PROGRESS.md`, documentation PDFs and
 local PowerPoint review files predate this separation. PDFs/PowerPoints were not
 edited. Current usage is documented here and in the root README.

@@ -1,3 +1,5 @@
+> Historical phase report, moved during Phase 8. Results and path inventories describe that phase; links point to their current locations. See [final_report.md](final_report.md) for the final state.
+
 # Phase 5A: deployment preparation report
 
 Historical preparation report. Live provisioning and verification are now recorded
@@ -6,7 +8,7 @@ in [live_deployment_report.md](live_deployment_report.md).
 Prepared locally on **17 November 2026 (IST)**. Target: separate Render Free Python
 web services plus Neon for main. No GitHub repository was created, no push was run,
 no cloud account was changed and neither service was deployed. The next steps are
-in [DEPLOY.md](DEPLOY.md); live verification remains Phase 5B.
+in [DEPLOY.md](../DEPLOY.md); live verification remains Phase 5B.
 
 ## Time
 
@@ -107,7 +109,7 @@ commits, 16 including the local reflog, and 270 historical blobs. No sensitive f
 
 After the three implementation commits, the pre-documentation snapshot covers
 **18 reachable commits, 19 including reflogs, 312 unique historical blobs**, plus the
-working tree. See [secret_scan_report.json](secret_scan_report.json). A final scan
+working tree. See [secret_scan_report.json](../secret_scan_report.json). A final scan
 also runs after the documentation commit. No history was rewritten.
 
 The only historical PEM is **tests/fixtures/evidence_corpus/tsa_public.pem**, a public

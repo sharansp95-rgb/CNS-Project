@@ -1,3 +1,5 @@
+> Historical phase report, moved during Phase 8. Results and path inventories describe that phase; links point to their current locations. See [final_report.md](final_report.md) for the final state.
+
 # Attack Lab separation phase report
 
 Completed locally on 16 November 2026. No push or deployment performed.

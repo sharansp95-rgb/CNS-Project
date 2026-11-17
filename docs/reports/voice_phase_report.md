@@ -1,3 +1,5 @@
+> Historical phase report, moved during Phase 8. Results and path inventories describe that phase; links point to their current locations. See [final_report.md](final_report.md) for the final state.
+
 # Phase 7 report — secure 1:1 voice calling (17 November 2026)
 
 ## Time

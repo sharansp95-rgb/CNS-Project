@@ -2,7 +2,7 @@
 
 The live deployment is provisioned: two Render Free Python services in Singapore,
 a private GitHub repository and Neon Free Postgres in AWS Singapore. Results and
-URLs are in [live_deployment_report.md](live_deployment_report.md). The services
+URLs are in [live_deployment_report.md](reports/live_deployment_report.md). The services
 were created through the Render API using the validated render.yaml settings;
 they are not attached to a managed Blueprint. The steps below also document how to
 reproduce the deployment. Replace every `<placeholder>` when reproducing it.
@@ -38,13 +38,14 @@ not publish a raw TCP chat listener. Both deployed sites use HTTPS/WSS.
 
 ## 2. Prepare your private GitHub repository
 
-1. Check [the phase report](deployment_phase_report.md), especially browser limits
+1. Check [the phase report](reports/deployment_phase_report.md), especially browser limits
    and the history scan. Do not upload local `data/`, `.env`, keys, logs or evidence.
 2. From the project root, install and rebuild:
 
    ```sh
-   .venv/bin/python -m pip install -r requirements.txt
+   .venv/bin/python -m pip install -r requirements-dev.txt
    npm --prefix web/frontend ci
+   npm --prefix web/frontend run setup:lint
    npm --prefix web/frontend run build
    npm --prefix web/frontend run build:lab
    .venv/bin/python tools/check_static_assets.py
@@ -111,7 +112,7 @@ not publish a raw TCP chat listener. Both deployed sites use HTTPS/WSS.
    export DATABASE_URL TEST_DATABASE_URL
    .venv/bin/python -m pytest tests/test_database.py tests/test_lockout.py \
      tests/test_security_events.py tests/test_web_gateway.py \
-     tests/test_evidence_vault.py tests/postgres/ -q
+     tests/test_evidence_vault.py tests/test_attachments.py tests/postgres/ -q
    unset TEST_DATABASE_URL DATABASE_URL
    ```
 
@@ -122,10 +123,10 @@ not publish a raw TCP chat listener. Both deployed sites use HTTPS/WSS.
    schema creation and reject main/test equality, role-only differences and pooled
    aliases of the same main database. The test URL must not have custom `options`.
    A missing test URL skips the explicit Postgres upgrade test; it does not claim
-   successful Neon verification. The current disposable Neon run passed all **68**
+   successful Neon verification. The current disposable Neon run passed all **85**
    tests on 17 November 2026; see the live report.
 
-A first main-service start creates schema v2. Existing schema v1 upgrades additively
+A first main-service start creates schema v3. Existing schemas v1/v2 upgrade additively
 inside a transaction/advisory lock. No manual SQL is needed for the app schema.
 Main application data is never sent to the disposable branch by the test harness.
 
@@ -260,7 +261,7 @@ Cloudflare forwarding hops. Thus public HTTPS returned 200 under bootstrap trust
 rather than the anticipated 403; trusting only loopback still resolved the client
 to an intermediary. Diagnostic root requests log the original socket peer and
 IP-only forwarding chain before normalization, without arbitrary header content.
-See [live_deployment_report.md](live_deployment_report.md) for verification status.
+See [live_deployment_report.md](reports/live_deployment_report.md) for verification status.
 
 ## 7. Your initial verification and Phase 5B handoff
 
@@ -297,7 +298,7 @@ start. Wait at least 60 seconds between lab runs on the same live service to res
 its 10 access-session starts/minute per-IP limit. Local suites use one isolated
 throwaway service per browser, so their limits/state do not interfere. Live test
 expectations allow longer cold starts, but open both URLs first to avoid Render's
-loading page. Automated live runs have **not** been performed in Phase 5A.
+loading page. Phase 5A predates live testing; current verification is recorded in [the final report](reports/final_report.md).
 
 ## 8. Redeploy, secrets and demo operation
 
@@ -387,3 +388,24 @@ microphone; WebKit has no fake-device switch, so its call media tests are skippe
 - Metered's credential API needed the plan to be subscribed in the **old** dashboard
   (dashboard.metered.ca, "Old dashboard"): the new dashboard showing the Free plan as active was not enough.
 - Force relay-only (hides IP addresses from the peer) by opening the site as `/?relay=1`.
+
+
+## 11. Final release maintenance (Phase 8)
+
+Install `requirements-dev.txt` for pytest, Ruff and auditing. The runtime deployment
+still installs only `requirements.txt`. ESLint has its own pinned TypeScript parser
+under `web/frontend/lint/`: run `npm --prefix web/frontend run setup:lint` once after
+`npm ci`. This avoids replacing the application’s pinned TypeScript 7 compiler to
+satisfy the lint parser’s TypeScript 6 peer dependency. Run `lint`, `format:check`,
+`typecheck`, `test`, `build` and `build:lab` from that frontend package.
+
+QuickTime MOV is accepted by magic bytes, using the existing encryption and limits.
+Codec support varies: an unsupported video still offers the verified original as a
+download. Simultaneous calls converge on the smaller username’s outgoing call; the
+other party must still accept it. Logged-in keepalive remains bounded by activity;
+no uptime pinger has been added.
+
+Generate current documentation screenshots with `node tools/capture_screenshots.mjs`.
+It starts disposable local services and uses synthetic accounts; it does not read
+Keychain or contact production. The companion PDF is written only under `/tmp`.
+Existing `docs/pdf/` and PowerPoints are historical submission artifacts.

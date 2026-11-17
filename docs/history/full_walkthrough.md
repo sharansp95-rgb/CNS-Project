@@ -1,5 +1,7 @@
+> Historical document. This describes an older UI/demo; use the current README and docs/screenshots/current instead.
+
 > **Historical walkthrough:** this document describes the removed in-app Attack Lab.
-> Use [the separate sandbox guide](../attack_lab/README.md) for current attack demos.
+> Use [the separate sandbox guide](../../attack_lab/README.md) for current attack demos.
 > Normal chat, evidence and dashboard features remain available.
 
 # Full live demo walkthrough (click-by-click)
@@ -59,13 +61,13 @@ python server/server.py --lab
 
 `--lab` turns on the opt-in **Attack Lab**: it has no effect at all unless a
 `lab_control` request also comes from an already-logged-in, localhost connection (see
-["How this differs from WhatsApp/Signal"](../README.md#how-this-differs-from-whatsappsignal)
+["How this differs from WhatsApp/Signal"](../../README.md#how-this-differs-from-whatsappsignal)
 in the main README), so this is safe to leave on for the whole demo.
 
 **Confirm it printed a line like this** before moving on (the port will read `5000`
 unless you passed `--port`, and the fingerprint will be whatever `reset_environment.py`
 just printed — **these two must match**; if they don't, see
-["Troubleshooting: certificate mismatch"](../README.md#troubleshooting-certificate-mismatch)
+["Troubleshooting: certificate mismatch"](../../README.md#troubleshooting-certificate-mismatch)
 in the main README):
 
 ```
@@ -340,7 +342,7 @@ searching the raw capture for the usernames, password, message text and JSON fie
 With `--open-wireshark` the port is already decoded as TLS and the filter is `tls`; if you open
 the file by hand, use the port it prints: **Decode As… → TCP port → TLS**, then filter `tls`. Output file:
 `demo/wireshark_capture.pcapng` (scratch, overwritten each run). Details in
-[`README.md`](README.md#scripted-wireshark-capture-run_wireshark_demopy). The steps below use
+[`README.md`](../../demo/README.md#scripted-wireshark-capture-run_wireshark_demopy). The steps below use
 the committed capture, which works identically.
 
 **7.1** Open Wireshark. **File → Open...**, navigate to and select

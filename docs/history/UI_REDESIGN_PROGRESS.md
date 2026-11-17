@@ -1,3 +1,5 @@
+> Historical document. This describes an older UI/demo; use the current README and docs/screenshots/current instead.
+
 # Front-end redesign: progress and handoff
 
 Written so a fresh session can continue **without the original chat**. Last updated at the
