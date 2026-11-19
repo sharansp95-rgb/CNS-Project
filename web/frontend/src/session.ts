@@ -197,7 +197,8 @@ export class Session {
   private clearSession() {
     this.calls?.teardown("The secure session ended, so the call ended.");
     this.epoch++;
-    this.apiToken = "";
+    // The HTTP API token belongs to OUR login, not to the peer session: keep it
+    // when only the peer leaves (an upload in flight still needs it).
     this.key = undefined;
     this.pending = undefined;
     this.pendingSig = "";
@@ -220,6 +221,7 @@ export class Session {
     clearTimeout(this.openTimer);
     this.stopKeepalive();
     this.clearSession();
+    this.apiToken = "";
     this.isAuthenticated = false;
     for (const o of this.opened.values()) URL.revokeObjectURL(o.url);
     this.opened.clear();
@@ -287,6 +289,7 @@ export class Session {
     const wasActive = this.isAuthenticated || this.reconnecting || this.paused;
     this.closed = true;
     this.clearSession();
+    this.apiToken = "";
     this.isAuthenticated = false;
     if (code === 4001) {
       // The server let a newer login for this account replace this one. Do not
