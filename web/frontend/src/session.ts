@@ -468,9 +468,7 @@ export class Session {
     } else if (e.type === "pubkey_result" && e.username === this.username) {
       if (!e.success || e.public_key !== this.ownPem) {
         this.disconnect();
-        throw Error(
-          "Local identity does not match this account. Import the correct key backup.",
-        );
+        throw Error("Local identity does not match this account.");
       }
     } else if (e.type === "user_left" && e.username === this.peer) {
       this.clearSession();

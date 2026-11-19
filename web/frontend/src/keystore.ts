@@ -137,7 +137,7 @@ export async function loadBackup(username: string): Promise<Backup> {
           ? resolve(req.result)
           : reject(
               Error(
-                "No local identity. Import your password-wrapped key backup first.",
+                "No local identity in this browser. Log in from the browser where you created it.",
               ),
             );
       req.onerror = () => reject(req.error);

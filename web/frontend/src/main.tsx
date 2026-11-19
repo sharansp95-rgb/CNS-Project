@@ -18,7 +18,7 @@ import { describeRejection } from "./securityWarning";
 
 function userMessage(error: unknown): string {
   if (error instanceof DOMException && error.name === "OperationError")
-    return "Could not unlock this identity. Check your password and use its matching key backup.";
+    return "Could not unlock this identity. Check your password and use the browser where this identity was created.";
   const text = error instanceof Error ? error.message : String(error);
   if (text === "Cannot connect")
     return "The server could not be reached. It may be waking up; wait a moment and try again.";
@@ -190,19 +190,6 @@ function App() {
     } catch (e) {
       setError(userMessage(e));
       setBusy(false);
-    }
-  }
-  async function importBackup(file?: File) {
-    if (!file) return;
-    try {
-      if (file.size > 32768) throw Error("Key backup is too large");
-      const b = JSON.parse(await file.text()) as Backup;
-      await unwrap(b, username.trim(), password);
-      await saveBackup(b);
-      setBackup(b);
-      setError("Identity imported. You can now log in.");
-    } catch (e) {
-      setError("Import failed: " + userMessage(e));
     }
   }
   async function exportEvidence() {
@@ -392,21 +379,6 @@ function App() {
             <p role="status" className="feedback">
               {error || connectionHint || session?.status}
             </p>
-            <div className="key-import">
-              <label className="file-label">
-                Import key backup
-                <input
-                  aria-label="Import key backup"
-                  type="file"
-                  accept="application/json,.json"
-                  onChange={(e) => void importBackup(e.target.files?.[0])}
-                />
-              </label>
-              <p className="muted small">
-                On a new device? Enter your username and password, then import
-                your wrapped backup before logging in.
-              </p>
-            </div>
             <p className="small privacy-note">
               ⌁ Your private key stays on this device, encrypted with your
               password.
