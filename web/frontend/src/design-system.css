@@ -2,13 +2,13 @@
 :root,
 .app {
   color-scheme: dark;
-  --bg: #101713;
-  --panel: #18221c;
-  --raised: #25332a;
-  --ink: #f0f4e9;
-  --muted: #b5c2b2;
-  --line: #3a4c40;
-  --control-line: #718776;
+  --bg: #000000;
+  --panel: #0f0f0f;
+  --raised: #1f1f1f;
+  --ink: #f5f5f5;
+  --muted: #b8b8b8;
+  --line: #333333;
+  --control-line: #7a7a7a;
   --accent: #c7e4a3;
   --contrast: #17250f;
   --danger: #ffb4a8;
@@ -29,19 +29,19 @@
 :root[data-theme="light"],
 .app.light {
   color-scheme: light;
-  --bg: #f2f4ec;
-  --panel: #fffef9;
-  --raised: #e4ebdc;
-  --ink: #203025;
-  --muted: #52634f;
-  --line: #c8d2c1;
-  --control-line: #7c8d75;
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --raised: #f2f2f2;
+  --ink: #111111;
+  --muted: #555555;
+  --line: #dddddd;
+  --control-line: #808080;
   --accent: #355824;
-  --contrast: #fffef8;
+  --contrast: #ffffff;
   --danger: #a12d27;
   --warning: #76510d;
   --focus: #305820;
-  --shadow: 0 18px 56px #23351b0d;
+  --shadow: 0 18px 56px #0000000d;
 }
 :focus-visible {
   outline: 3px solid var(--focus);
