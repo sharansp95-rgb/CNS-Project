@@ -42,8 +42,7 @@ function App() {
   const [username, setUsername] = useState(""),
     [peer, setPeer] = useState(""),
     [password, setPassword] = useState("");
-  const [session, setSession] = useState<Session>(),
-    [backup, setBackup] = useState<Backup>();
+  const [session, setSession] = useState<Session>();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [message, setMessage] = useState(""),
@@ -157,7 +156,6 @@ function App() {
         stored = await loadBackup(name);
         key = await unwrap(stored, name, password);
       }
-      setBackup(stored);
       const url =
         (location.protocol === "https:" ? "wss://" : "ws://") +
         location.host +
@@ -620,14 +618,6 @@ function App() {
             </label>
             <footer>
               <span>⌁ Encrypted on your device</span>
-              <button
-                onClick={() =>
-                  backup &&
-                  download(`key_backup_${session.username}.json`, backup)
-                }
-              >
-                Download key backup
-              </button>
             </footer>
           </section>
           {wire && (

@@ -25,7 +25,7 @@ See [deployment instructions](docs/DEPLOY.md) and [final report](docs/reports/fi
 
 - Two-party chat in React/TypeScript or Python/Tkinter; byte-compatible cryptography
   across WebSocket and local TLS/TCP transports.
-- Password-wrapped browser identities, portable encrypted key backups, peer RSA
+- Password-wrapped browser identities (kept in the browser that created them), peer RSA
   fingerprints, per-message security receipts and a redacted ciphertext Wire Log.
 - Signed evidence v1/v2 exported as JSON, local PDF reports and an upload-free
   public verification page.
@@ -94,9 +94,10 @@ npm --prefix web/frontend run build:lab
 
 Open the printed localhost URL in two separate browser profiles. Create an identity
 in each, enter the other username as peer, and wait for **Secure session established**.
-Compare fingerprints independently. Download wrapped key backups before clearing
-browser storage. Existing identities use **Log in**; registering the same username
-again is rejected. A lost identity/password has no recovery service.
+Compare fingerprints independently. An identity lives only in the browser that
+created it: clearing that browser's storage loses it. Existing identities use
+**Log in**; registering the same username again is rejected. A lost
+identity/password has no recovery service.
 
 For a combined desktop/browser roster or the macOS demo launcher:
 
