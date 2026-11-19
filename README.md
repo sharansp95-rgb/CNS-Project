@@ -27,8 +27,8 @@ See [deployment instructions](docs/DEPLOY.md) and [final report](docs/reports/fi
   across WebSocket and local TLS/TCP transports.
 - Password-wrapped browser identities, portable encrypted key backups, peer RSA
   fingerprints, per-message security receipts and a redacted ciphertext Wire Log.
-- Signed evidence v1/v2, Ed25519 server receipts, password-encrypted evidence vault,
-  local PDF reports and an upload-free public verification page.
+- Signed evidence v1/v2 exported as JSON, local PDF reports and an upload-free
+  public verification page.
 - Encrypted images and video, including QuickTime MOV, authenticated chunked files,
   image EXIF removal, verified downloads and codec-dependent inline playback.
 - One-to-one WebRTC voice: encrypted/signed signaling, DTLS certificate checks,
@@ -64,8 +64,7 @@ neutral extension point; production has no attack controls or lab routes.
 | Replay resistance | Signed timestamps, freshness window and per-sender nonce tracking |
 | Transport | TLS for desktop; HTTPS/WSS, exact Origins, CSP/HSTS and explicit proxy trust in production |
 | Password defense | Existing PBKDF2-SHA256 (200,000 iterations), random salt, DB-backed sliding-window locks checked before PBKDF2; separate source-rate limits |
-| Evidence integrity | Independent Python/browser verification; exporter signature; optional server digest/time/corroboration receipt |
-| Vault confidentiality | PBKDF2-SHA256 (600,000 iterations), purpose-separated salt, AES-256-GCM before upload; owner-filtered API |
+| Evidence integrity | Independent Python/browser verification; exporter signature |
 | Media confidentiality | Fresh per-file key, 1 MiB AES-GCM chunks; hashes checked before opening; descriptor inside signed encrypted chat |
 | Call authentication | Signed encrypted SDP, real remote DTLS fingerprint comparison and four-word confirmation; DTLS-SRTP audio |
 | Attack Lab containment | Separate site/process/origin/DB/roster, access-code session gate and rate limits; unchanged production victims |
@@ -126,7 +125,7 @@ fail startup. Schema version **3** is separate from evidence format versions.
 | `login_lockouts` | `username` PK, `failure_count`, `locked_until`, `last_failure_at`, `lock_level`, `failure_timestamps` JSON |
 | `security_events` | `id` PK, `ts`, `event_type`, `username`, `peer_addr`, `details` JSON, unique `import_key` |
 | `relayed_envelopes` | `id` PK, `ts`, `sender`, `recipient`, `envelope_type`, `size_bytes`, `ciphertext_b64`, indexed `envelope_sha256` |
-| `evidence_bundles` | `id` PK, indexed `owner`, `created_at`, `title`, `size_bytes`, `file_sha256`, `ciphertext_b64`, `timestamp_receipt` JSON |
+| `evidence_bundles` | `id` PK, indexed `owner`, `created_at`, `title`, `size_bytes`, `file_sha256`, `ciphertext_b64`, `timestamp_receipt` JSON (unused since the vault was removed) |
 | `attachments` | `id` PK, `uploader`, `recipient`, unique `object_key`, `kind`, `ciphertext_size`, `ciphertext_sha256`, `created_at`, `finalized_at`, `expires_at`, `deleted_at` |
 | `schema_version` | `version` PK, currently `3` |
 
@@ -145,10 +144,8 @@ command and URL guard in [DEPLOY.md section 3](docs/DEPLOY.md#3-create-neon-main
 
 ## Evidence
 
-Export the signed JSON from chat, or choose **Save evidence**, enter the password
-again, and encrypt it into the private vault. Unlock a saved entry to verify or
-download the exact JSON, receipt and public TSA key. The PDF is an unsigned reading
-companion; **the original signed JSON is authoritative**. `/verify` checks files
+Choose **Export Evidence** in the chat to download the signed JSON, then check it on
+`/verify` or with the CLI below. The PDF is an unsigned reading companion; **the original signed JSON is authoritative**. `/verify` checks files
 entirely in the browser without uploading them.
 
 ```sh
@@ -267,7 +264,7 @@ use local throwaway users, including valid/tampered evidence and verified calls.
 - This course implementation has not received an independent professional security
   audit. Endpoint compromise, malicious browser JavaScript/extensions and XSS can
   expose unlocked content. TLS-hosted JavaScript is part of the trust boundary.
-- Server login passwords are visible transiently; browser vault/identity encryption
+- Server login passwords are visible transiently; browser identity encryption
   permits offline guessing if a wrapped copy is stolen. Use strong passwords.
 - Desktop private-key PEM files are local and unencrypted. Browser identities are
   password-wrapped at rest. Back up privately; no account/key recovery exists.

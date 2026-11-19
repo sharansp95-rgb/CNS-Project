@@ -1,13 +1,7 @@
-import React, { useCallback, useEffect, useState, useRef } from "react";
-import { Session, type Envelope } from "./session";
+import React, { useState, useRef } from "react";
+import { type Envelope } from "./session";
 import * as c from "./crypto";
-import {
-  encryptEvidence,
-  decryptEvidence,
-  vaultRequest,
-} from "./evidenceVault";
 import { verifyEvidence, type Verification } from "./evidenceVerify";
-import { loadBackup, unwrap } from "./keystore";
 import { parseDescriptor, type Descriptor } from "./attachments/descriptor";
 
 export function downloadBytes(
@@ -123,9 +117,6 @@ export function PublicVerify() {
     setReport(undefined);
   };
   const [bytes, setBytes] = useState<Uint8Array>(),
-    [receipt, setReceipt] = useState<Envelope>(),
-    [key, setKey] = useState(""),
-    [pin, setPin] = useState(""),
     [report, setReport] = useState<Verification>(),
     [error, setError] = useState(""),
     [name, setName] = useState("");
@@ -152,12 +143,7 @@ export function PublicVerify() {
     try {
       if (!bytes) throw Error("Choose an evidence JSON file");
       const request = revision.current;
-      const result = await verifyEvidence(
-        bytes,
-        receipt,
-        key,
-        pin ? [pin] : [],
-      );
+      const result = await verifyEvidence(bytes);
       if (request !== revision.current) return;
       setReport(result);
       setError("");
@@ -169,11 +155,7 @@ export function PublicVerify() {
     <main className="proof-page" id="main-content" tabIndex={-1}>
       <div className="eyebrow">OFFLINE VERIFICATION / NO LOGIN</div>
       <h1>Verify evidence</h1>
-      <p>
-        Files stay on your device. Verification makes no network requests. Trust
-        a participant fingerprint and the timestamp public key through an
-        independent source.
-      </p>
+      <p>Files stay on your device. Verification makes no network requests.</p>
       <section
         className="proof-card"
         onDragOver={(e) => e.preventDefault()}
@@ -192,58 +174,8 @@ export function PublicVerify() {
           />
         </label>
         {name && <p>{name}</p>}
-        <label>
-          Optional receipt JSON
-          <input
-            type="file"
-            aria-label="Receipt JSON file"
-            accept=".json"
-            onChange={async (e) => {
-              try {
-                reset();
-                const request = revision.current;
-                setReceipt(undefined);
-                const parsed = JSON.parse(await e.target.files![0].text());
-                if (request === revision.current) setReceipt(parsed);
-              } catch {
-                setError("Invalid receipt JSON");
-              }
-            }}
-          />
-        </label>
-        <label>
-          Trusted TSA public key (PEM)
-          <textarea
-            value={key}
-            onChange={(e) => {
-              setKey(e.target.value);
-              reset();
-            }}
-            placeholder="-----BEGIN PUBLIC KEY-----"
-          />
-        </label>
-        <label>
-          Optional trusted participant fingerprint
-          <input
-            value={pin}
-            onChange={(e) => {
-              setPin(e.target.value);
-              reset();
-            }}
-            placeholder="AAAA BBBB CCCC DDDD"
-          />
-        </label>
         <button className="primary" onClick={() => void verify()}>
           Verify locally
-        </button>
-        <button
-          onClick={() => {
-            setReceipt(undefined);
-            setKey("");
-            reset();
-          }}
-        >
-          Clear optional receipt
         </button>
         <p role="alert">{error}</p>
         <Verdict report={report} />
@@ -254,7 +186,7 @@ export function PublicVerify() {
               const { createReport } = await import("./pdfReport");
               downloadBytes(
                 "evidence-report.pdf",
-                await createReport(bytes, report, receipt),
+                await createReport(bytes, report),
                 "application/pdf",
               );
             }}
@@ -264,250 +196,6 @@ export function PublicVerify() {
         )}
       </section>
       <a href="/">Back to Secure Chat</a>
-    </main>
-  );
-}
-export function EvidencePanel({
-  session,
-  mode,
-  close,
-}: {
-  session: Session;
-  mode: "save" | "list";
-  close: () => void;
-}) {
-  const [rows, setRows] = useState<Envelope[]>([]),
-    [password, setPassword] = useState(""),
-    [title, setTitle] = useState("Conversation evidence"),
-    [error, setError] = useState(""),
-    [busy, setBusy] = useState(false),
-    [report, setReport] = useState<Verification>(),
-    [selected, setSelected] = useState<{
-      bytes: Uint8Array;
-      receipt: Envelope;
-    }>();
-  const refresh = useCallback(async () => {
-    try {
-      setRows(await vaultRequest(session.apiToken));
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, [session.apiToken]);
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-  async function save() {
-    setBusy(true);
-    setError("");
-    try {
-      await unwrap(
-        await loadBackup(session.username),
-        session.username,
-        password,
-      );
-      const data = await session.evidence(2),
-        bytes = jsonBytes(data),
-        encrypted = await encryptEvidence(bytes, password);
-      const row = await vaultRequest(session.apiToken, "", {
-        method: "POST",
-        body: JSON.stringify({
-          title,
-          file_sha256: encrypted.file_sha256,
-          ciphertext_b64: c.b64(c.utf8(JSON.stringify(encrypted))),
-          format_version: 2,
-          total: data.records.length,
-          envelope_hashes: data.records.map((r: Envelope) => r.envelope_sha256),
-        }),
-      });
-      setSelected({ bytes, receipt: row.timestamp_receipt });
-      const info = await fetch("/api/timestamp-key").then((r) => r.json());
-      setReport(
-        await verifyEvidence(bytes, row.timestamp_receipt, info.public_key_pem),
-      );
-      setError(
-        "Saved encrypted evidence. Download the exact JSON and its receipt below.",
-      );
-      await refresh();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setPassword("");
-      setBusy(false);
-    }
-  }
-  async function open(row: Envelope, download = false) {
-    setBusy(true);
-    try {
-      const bundle = await vaultRequest(session.apiToken, "/" + row.id),
-        packageJson = JSON.parse(
-          new TextDecoder().decode(c.un64(bundle.ciphertext_b64)),
-        ),
-        bytes = await decryptEvidence(packageJson, password);
-      const key = await fetch("/api/timestamp-key").then((r) => r.json());
-      const result = await verifyEvidence(
-        bytes,
-        bundle.timestamp_receipt,
-        key.public_key_pem,
-      );
-      setSelected({ bytes, receipt: bundle.timestamp_receipt });
-      setReport(result);
-      setError(
-        result.receipt === "valid"
-          ? "Receipt signature matches this server’s current key; see the full verdict below. Pin the key independently for third-party use."
-          : "Receipt is INVALID or could not be verified with the current server key. See the full verdict below.",
-      );
-      if (download) downloadBytes("evidence_" + row.id + ".json", bytes);
-    } catch (e) {
-      setError("Cannot unlock/verify: " + (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <main className="proof-page" id="main-content" tabIndex={-1}>
-      <button onClick={close}>← Back to chat</button>
-      <div className="eyebrow">PRIVATE EVIDENCE VAULT</div>
-      <h1>Evidence</h1>
-      <p>
-        Evidence is encrypted on this device before upload. The relay sees
-        titles, hashes, sizes and matching traffic metadata, but cannot read the
-        saved conversation.
-      </p>
-      <section className="proof-card">
-        <label>
-          Vault password
-          <input
-            type="password"
-            aria-label="Vault password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
-        </label>
-        {mode === "save" && (
-          <>
-            <label>
-              Evidence title
-              <input
-                aria-label="Evidence title"
-                maxLength={120}
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-            </label>
-            <button
-              className="primary"
-              disabled={busy || !password}
-              onClick={() => void save()}
-            >
-              Encrypt and save
-            </button>
-          </>
-        )}
-        <p role="status">{error}</p>
-        <button onClick={() => void refresh()}>Refresh evidence list</button>
-      </section>
-      <div className="vault-list">
-        {rows.length === 0 && (
-          <div className="proof-card empty-state">
-            <h2>Keep proof of a conversation</h2>
-            <p>No saved evidence yet.</p>
-            <p className="muted small">
-              In a secure chat, choose Save evidence. The signed file is
-              encrypted on your device before it reaches your private vault.
-            </p>
-          </div>
-        )}
-        {rows.map((row) => (
-          <article className="proof-card" key={row.id}>
-            <h2>{row.title}</h2>
-            <p>
-              {new Date(row.created_at * 1000).toISOString()} · {row.size_bytes}{" "}
-              encrypted bytes
-            </p>
-            <code className="file-hash">{row.file_sha256}</code>
-            <p>
-              Receipt: unverified until unlocked. Corroboration claim:{" "}
-              {row.timestamp_receipt.corroborated} /{" "}
-              {row.timestamp_receipt.total}
-            </p>
-            <button
-              disabled={busy || !password}
-              onClick={() => void open(row, true)}
-            >
-              Download JSON
-            </button>
-            <button disabled={busy || !password} onClick={() => void open(row)}>
-              Verify saved evidence
-            </button>
-            <button
-              onClick={async () => {
-                try {
-                  await vaultRequest(session.apiToken, "/" + row.id, {
-                    method: "DELETE",
-                  });
-                  setSelected(undefined);
-                  setReport(undefined);
-                  await refresh();
-                } catch (e) {
-                  setError((e as Error).message);
-                }
-              }}
-            >
-              Delete evidence
-            </button>
-          </article>
-        ))}
-      </div>
-      <Verdict report={report} />
-      {selected && (
-        <section className="proof-card">
-          <h2>Selected evidence</h2>
-          <button
-            onClick={() => downloadBytes("evidence.json", selected.bytes)}
-          >
-            Download exact signed JSON
-          </button>
-          <button
-            onClick={() =>
-              downloadBytes("receipt.json", jsonBytes(selected.receipt))
-            }
-          >
-            Download timestamp receipt
-          </button>
-          <button
-            onClick={async () => {
-              const info = await fetch("/api/timestamp-key").then((r) =>
-                r.json(),
-              );
-              downloadBytes(
-                "tsa-public.pem",
-                c.utf8(info.public_key_pem),
-                "text/plain",
-              );
-            }}
-          >
-            Download TSA public key
-          </button>
-          <button
-            onClick={async () => {
-              const result = report || (await verifyEvidence(selected.bytes));
-              const { createReport } = await import("./pdfReport");
-              downloadBytes(
-                "evidence-report.pdf",
-                await createReport(selected.bytes, result, selected.receipt),
-                "application/pdf",
-              );
-            }}
-          >
-            Download companion PDF
-          </button>
-        </section>
-      )}
-      <p>
-        Keep the signed JSON, receipt, and independently trusted public key
-        together. This is technical integrity evidence, not legal certification.
-      </p>
     </main>
   );
 }

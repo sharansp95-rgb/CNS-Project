@@ -4,7 +4,7 @@ import { identity, privateKey } from "./crypto";
 import { Session, type Envelope, type Message } from "./session";
 import { wrap, unwrap, loadBackup, saveBackup, type Backup } from "./keystore";
 import "./style.css";
-import { PublicVerify, EvidencePanel } from "./ProofUI";
+import { PublicVerify } from "./ProofUI";
 import { CallButton, CallOverlay, callLogEntry } from "./CallUI";
 import {
   AttachmentCard,
@@ -38,9 +38,6 @@ function download(name: string, body: unknown) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function App() {
-  const [evidenceMode, setEvidenceMode] = useState<"save" | "list" | null>(
-    location.pathname === "/evidence" ? "list" : null,
-  );
   const sessionRef = useRef<Session | undefined>(undefined);
   const [username, setUsername] = useState(""),
     [peer, setPeer] = useState(""),
@@ -91,7 +88,6 @@ function App() {
   }, [busy, session]);
   useEffect(() => {
     const back = () => {
-      setEvidenceMode(location.pathname === "/evidence" ? "list" : null);
       refresh((n) => n + 1);
     };
     window.addEventListener("popstate", back);
@@ -203,9 +199,7 @@ function App() {
   // screen; sending stays disabled until the new signed handshake completes.
   const active = !!session && (session.isAuthenticated || session.resuming);
   return (
-    <div
-      className={"app " + theme + (active && !evidenceMode ? " chat-page" : "")}
-    >
+    <div className={"app " + theme + (active ? " chat-page" : "")}>
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
@@ -220,16 +214,6 @@ function App() {
         </a>
         <div className="nav-right">
           <a href="/verify">Verify a file</a>
-          {active && (
-            <button
-              onClick={() => {
-                setEvidenceMode("list");
-                history.pushState(null, "", "/evidence");
-              }}
-            >
-              Evidence
-            </button>
-          )}
           <span className="pill">● END-TO-END ENCRYPTED</span>
           {active && (
             <button
@@ -385,15 +369,6 @@ function App() {
             </p>
           </section>
         </main>
-      ) : evidenceMode ? (
-        <EvidencePanel
-          session={session!}
-          mode={evidenceMode}
-          close={() => {
-            setEvidenceMode(null);
-            history.pushState(null, "", "/");
-          }}
-        />
       ) : (
         <main
           className={"workspace " + (wire ? "with-wire" : "")}
@@ -462,12 +437,6 @@ function App() {
                   disabled={!session.key}
                 >
                   Export Evidence ↗
-                </button>
-                <button
-                  disabled={!session.key}
-                  onClick={() => setEvidenceMode("save")}
-                >
-                  Save evidence
                 </button>
               </div>
             </header>

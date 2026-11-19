@@ -51,9 +51,7 @@ test("keyboard skip link focuses the main content", async ({
   await expect(page.locator("#main-content")).toBeFocused();
 });
 
-test("chat receipts trap and restore keyboard focus, and vault navigation keeps the session", async ({
-  browser,
-}) => {
+test("chat receipts trap and restore keyboard focus", async ({ browser }) => {
   const contexts = await Promise.all([
     browser.newContext(),
     browser.newContext(),
@@ -111,21 +109,6 @@ test("chat receipts trap and restore keyboard focus, and vault navigation keeps 
         ).violations,
       ).toEqual([]);
     }
-    await b.getByRole("button", { name: "Evidence", exact: true }).click();
-    await expect(
-      b.getByRole("heading", { name: "Evidence", exact: true }),
-    ).toBeVisible();
-    await expect(
-      b.getByText("No saved evidence yet.", { exact: true }),
-    ).toBeVisible();
-    expect(
-      (
-        await new AxeBuilder({ page: b })
-          .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-          .analyze()
-      ).violations,
-    ).toEqual([]);
-    await b.goBack();
     await expect(b.getByLabel("Message", { exact: true })).toBeEnabled();
   } finally {
     await Promise.all(contexts.map((context) => context.close()));

@@ -226,12 +226,9 @@ export async function createReport(
   } else paragraph("No timestamp receipt supplied.");
   paragraph("How to verify", 14);
   paragraph(
-    "Keep the exact JSON bytes, optional receipt JSON, and a trusted TSA public PEM. Visit /verify for local browser verification, or run:",
+    "Keep the exact JSON bytes. Visit /verify for local browser verification, or run:",
   );
-  paragraph(
-    "python tools/verify_transcript.py evidence.json --receipt receipt.json --tsa-pubkey tsa-public.pem",
-    9,
-  );
+  paragraph("python tools/verify_transcript.py evidence.json", 9);
   paragraph(
     "Pin participant fingerprints independently (--expect-fingerprint). A valid file shows cryptographic consistency with its keys, not a legal identity or proof that statements are true. A receipt relies on the server key and clock and on the submitted hash manifest; retained ciphertext matches do not prove plaintext by themselves.",
   );

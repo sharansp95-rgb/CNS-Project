@@ -124,27 +124,11 @@ try {
     .click();
   await screenshot(b, "03-security-receipt");
   await b.getByRole("button", { name: "Close receipt", exact: true }).click();
-  await a.getByRole("button", { name: "Save evidence", exact: true }).click();
-  await a.getByLabel("Vault password", { exact: true }).fill(password);
+  const pending = a.waitForEvent("download");
   await a
-    .getByLabel("Evidence title", { exact: true })
-    .fill("Team 15 synthetic demonstration");
-  await a
-    .getByRole("button", { name: "Encrypt and save", exact: true })
+    .getByRole("button", { name: "Export Evidence", exact: false })
     .click();
-  await expect(
-    a.getByRole("heading", { name: "VALID", exact: true }),
-  ).toBeVisible();
-  await screenshot(a, "04-encrypted-evidence-vault");
-  for (const [label, filename] of [
-    ["Download exact signed JSON", "evidence.json"],
-    ["Download timestamp receipt", "receipt.json"],
-    ["Download companion PDF", "companion.pdf"],
-  ]) {
-    const pending = a.waitForEvent("download");
-    await a.getByRole("button", { name: label, exact: true }).click();
-    await (await pending).saveAs(path.join(scratch, filename));
-  }
+  await (await pending).saveAs(path.join(scratch, "evidence.json"));
   const verify = await browser.newPage({
     viewport: { width: 1280, height: 1100 },
   });
@@ -152,15 +136,6 @@ try {
   await verify
     .getByLabel("Evidence JSON file", { exact: true })
     .setInputFiles(path.join(scratch, "evidence.json"));
-  await verify
-    .getByLabel("Receipt JSON file", { exact: true })
-    .setInputFiles(path.join(scratch, "receipt.json"));
-  const key = await (
-    await fetch("http://127.0.0.1:8790/api/timestamp-key")
-  ).json();
-  await verify
-    .getByLabel("Trusted TSA public key (PEM)", { exact: true })
-    .fill(key.public_key_pem);
   await verify
     .getByRole("button", { name: "Verify locally", exact: true })
     .click();

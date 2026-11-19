@@ -270,7 +270,6 @@ def create_app(
                 )
 
     @app.get("/verify")
-    @app.get("/evidence")
     @app.get("/")
     async def index():
         if not (STATIC / "index.html").exists():
